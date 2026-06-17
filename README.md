@@ -149,3 +149,27 @@ pytest -q
 ```
 
 CI 见 `.github/workflows/ci.yml`(ruff + pytest)。
+
+## 日志与可观测（跟踪进度 / debug）
+
+统一日志通道：所有模块用 `get_logger(__name__)` 取 logger，挂在 `fourestds` 根下；
+`setup_logging()` 同时输出到**控制台 + 滚动文件**（`~/.4estDS/logs/4estds_<run_id>.log`，20MB×5）。
+每条日志携带 `run_id`，一次运行的全部日志可按它串起来查。装了 `loguru` 则自动走 loguru sink（InterceptHandler 转发），未装则纯标准库。
+
+```bash
+# 调成 DEBUG 看到最详细的过程（含尺寸分布 / 离散尺度集 / 四叉树层级 / 逐阶段计数）
+4estds infer --arch mock --width 4096 --height 4096 --demo-trees 60 --log-level DEBUG
+# 日志文件位置
+cat ~/.4estDS/logs/4estds_*.log
+```
+
+阶段四（切片数学核心）会打印：
+
+```
+INFO | fourestds.preprocess.slicing | 冠幅像素尺寸 分布: n=8 min=8.0px p10=8.7px median=41.0px mean=50.5px p90=123.0px max=130.0px std=45.5px
+INFO | fourestds.preprocess.slicing | 离散尺度集(k=3): [9.0px, 42.3px, 124.9px]
+INFO | fourestds.preprocess.slicing | 四叉树切片: 共 40 块 (root=1024 min=256 图4096x4096) 层级分布[L0:8, L1:32]
+INFO | fourestds.engine.runner      | 推理完成: tiles=40 处理=40 跳空=0 原始框=93 融合后=60 去重率=35.5% 耗时=0.12s
+```
+
+> 分布工具 `summarize_distribution(values)` / `log_distribution(log, label, values)` 可复用于任何数值序列（树高、置信度、面积…）。
