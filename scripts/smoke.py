@@ -145,3 +145,36 @@ check("engine overlap dedup 2->1", _yesov.raw_count == 2 and _yesov.fused_count 
 check("engine fused support==2", _yesov.detections.items[0].extra.get("support") == 2)
 check("engine fusion meta", _yesov.detections.meta.get("fusion") == "wbf")
 print(f"[stage5] checks so far: {ok}")
+
+print("[logging]")
+import io as _io
+import logging as _logging
+from fourestds.logging_setup import (
+    setup_logging as _setup_logging,
+    get_logger as _get_logger,
+    summarize_distribution as _summ,
+    _RunIdFilter as _RIF,
+    ROOT_LOGGER_NAME as _ROOT,
+)
+
+_s = _summ([10, 20, 30, 40, 50])
+check("dist summarize n/median/p10/p90", _s["n"] == 5 and _s["median"] == 30 and _s["p10"] == 14 and _s["p90"] == 46)
+check("dist empty -> n=0", _summ([])["n"] == 0)
+check("get_logger namespacing", _get_logger("x.y.z").name == "fourestds.z" and _get_logger().name == _ROOT)
+
+_lg, _rid = _setup_logging(level="DEBUG", to_file=False)
+_buf = _io.StringIO()
+_h = _logging.StreamHandler(_buf)
+_h.setFormatter(_logging.Formatter("run=%(run_id)s|%(name)s|%(message)s"))
+_h.addFilter(_RIF())
+_logging.getLogger(_ROOT).addHandler(_h)
+try:
+    _get_logger("fourestds.preprocess.slicing").info("probe")
+    _run_dt = run_inference(_src, get_detector("mock", trees=[(300, 300, 40)]), root_size=1024, min_size=256)
+finally:
+    _logging.getLogger(_ROOT).removeHandler(_h)
+_out = _buf.getvalue()
+check("run_id propagates to child logger", ("run=" + _rid) in _out and len(_rid) == 12)
+check("stage4 size-dist logged", "冠幅像素尺寸 分布" in _out or "切片边长 分布" in _out)
+check("stage3 pipeline logged", "推理开始" in _out and "推理完成" in _out)
+print(f"[logging] checks so far: {ok}")
