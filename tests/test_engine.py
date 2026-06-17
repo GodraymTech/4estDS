@@ -92,3 +92,35 @@ def test_raster_image_source_pillow_fallback(tmp_path):
     win = src.read_window(10, 5, 20, 16)
     assert win.shape == (16, 20, 3)
     src.close()
+
+
+def test_run_inference_preserves_species_labels():
+    # 不同物种的检出应保留各自标签(不被融合成统一 "tree")
+    trees = [(300, 300, 40, "avicennia"), (1700, 1700, 30, "sonneratia")]
+    det = get_detector("mock", trees=trees)
+    src = SyntheticImageSource(width=2048, height=2048)
+    res = run_inference(src, det, root_size=1024, min_size=256)
+    assert res.fused_count == 2
+    assert {d.label for d in res.detections.items} == {"avicennia", "sonneratia"}
+
+
+def test_overlap_dedups_boundary_tree():
+    # 跨 tile 边界附近的树:无外扩 -> 只被一个读窗看到;外扩 -> 两个读窗都看到,
+    # 但 WBF 去重后仍为 1 棵
+    det = get_detector("mock", trees=[(1100, 300, 40)])
+    src = SyntheticImageSource(width=2048, height=2048)
+    no_ov = run_inference(src, det, root_size=1024, min_size=256, overlap_px=0)
+    ov = run_inference(src, det, root_size=1024, min_size=256, overlap_px=128)
+    assert (no_ov.raw_count, no_ov.fused_count) == (1, 1)
+    assert ov.raw_count == 2 and ov.fused_count == 1
+    assert ov.detections.items[0].extra.get("support") == 2
+
+
+def test_truncated_boundary_box_still_counted():
+    # 无外扩时,跨 tile 边界的树被标记截断并降权;不应因降权而丢失
+    det = get_detector("mock", trees=[(1024, 300, 40)])
+    src = SyntheticImageSource(width=2048, height=2048)
+    res = run_inference(src, det, root_size=1024, min_size=256, overlap_px=0)
+    assert res.raw_count == 1 and res.fused_count == 1
+    cx, cy = res.detections.items[0].center
+    assert abs(cx - 1024) < 5.0 and abs(cy - 300) < 2.0

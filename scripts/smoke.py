@@ -117,3 +117,31 @@ except ImportError:
     print("  skip raster pillow read (no numpy/PIL)")
 
 print(f"[engine] checks so far: {ok}")
+
+
+# 阶段五:尺度感知 WBF(标签/权重/conf_type/中心合并) + 边界去重
+print("[postprocess.stage5]")
+_lab = wbf.fuse([(0, 0, 10, 10), (1, 1, 11, 11)], [0.9, 0.8], labels=["avicennia", "sonneratia"], iou_thr=0.5)
+check("fuse label-aware split", len(_lab) == 2 and all(f.support == 1 for f in _lab))
+_same = wbf.fuse([(0, 0, 10, 10), (1, 1, 11, 11)], [0.9, 0.8], labels=["tree", "tree"], iou_thr=0.5)
+check("fuse same-label merge support", len(_same) == 1 and _same[0].support == 2)
+_mx = wbf.fuse([(0, 0, 10, 10), (1, 1, 11, 11)], [0.9, 0.5], iou_thr=0.5, conf_type="max")
+_av = wbf.fuse([(0, 0, 10, 10), (1, 1, 11, 11)], [0.9, 0.5], iou_thr=0.5, conf_type="avg")
+check("fuse conf_type max/avg", abs(_mx[0].score - 0.9) < 1e-9 and abs(_av[0].score - 0.7) < 1e-9)
+_wt = wbf.fuse([(0, 0, 10, 10), (2, 2, 12, 12)], [0.9, 0.9], weights=[1.0, 0.01], iou_thr=0.3)
+check("fuse weight pulls coords", len(_wt) == 1 and _wt[0].box[0] < 0.5)
+_cm = wbf.fuse([(0, 0, 10, 10), (8, 0, 18, 10)], [0.8, 0.8], iou_thr=0.5, center_merge_frac=0.7)
+check("fuse center-merge", len(_cm) == 1 and _cm[0].support == 2)
+
+print("[engine.stage5]")
+_sp = get_detector("mock", trees=[(300, 300, 40, "avicennia"), (1700, 1700, 30, "sonneratia")])
+_rsp = run_inference(_src, _sp, root_size=1024, min_size=256)
+check("engine labels preserved", {d.label for d in _rsp.detections.items} == {"avicennia", "sonneratia"})
+_bt = get_detector("mock", trees=[(1100, 300, 40)])
+_noov = run_inference(_src, _bt, root_size=1024, min_size=256, overlap_px=0)
+_yesov = run_inference(_src, _bt, root_size=1024, min_size=256, overlap_px=128)
+check("engine no-overlap 1/1", (_noov.raw_count, _noov.fused_count) == (1, 1))
+check("engine overlap dedup 2->1", _yesov.raw_count == 2 and _yesov.fused_count == 1)
+check("engine fused support==2", _yesov.detections.items[0].extra.get("support") == 2)
+check("engine fusion meta", _yesov.detections.meta.get("fusion") == "wbf")
+print(f"[stage5] checks so far: {ok}")
