@@ -7,5 +7,11 @@ from .runner import (
     SyntheticImageSource,
     run_inference,
 )
+from .sources import RasterImageSource
 
-__all__ = ["InferenceResult", "SyntheticImageSource", "run_inference"]
+__all__ = [
+    "InferenceResult",
+    "RasterImageSource",
+    "SyntheticImageSource",
+    "run_inference",
+]

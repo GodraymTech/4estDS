@@ -48,6 +48,7 @@ def run_inference(
     min_size: int = 256,
     conf_thr: float = 0.25,
     iou_thr: float = 0.55,
+    batch_size: int = 8,
 ) -> InferenceResult:
     """对一幅影像跑完整的切片->推理->去重流程。
 
@@ -65,21 +66,34 @@ def run_inference(
     tiles = build_quadtree(width, height, target_size_fn, root_size, min_size)
 
     detector.ensure_loaded()
-    global_items: list[Detection] = []
-    processed = 0
+    # 先收集有效读窗坐标(裁到边界、跳过空窗)
+    coords: list[tuple[int, int, int, int]] = []
     skipped = 0
-    read = getattr(image_source, "read_window", None)
-
     for tile in tiles:
         x, y, w, h = clamp_window(tile.x, tile.y, tile.size, width, height)
         if w <= 0 or h <= 0:
             skipped += 1
             continue
-        pixels = read(x, y, w, h) if callable(read) else None
-        window = Window(x=x, y=y, w=w, h=h, pixels=pixels)
-        dets = detector.predict(window).filter_score(conf_thr)
-        global_items.extend(dets.offset(x, y).items)
-        processed += 1
+        coords.append((x, y, w, h))
+
+    read = getattr(image_source, "read_window", None)
+    global_items: list[Detection] = []
+    processed = 0
+    bs = max(1, batch_size)
+    # 分批推理:每批只读取该批读窗像素,内存占用以 batch_size 为界
+    for i in range(0, len(coords), bs):
+        chunk = coords[i : i + bs]
+        windows = [
+            Window(
+                x=x, y=y, w=w, h=h,
+                pixels=read(x, y, w, h) if callable(read) else None,
+            )
+            for (x, y, w, h) in chunk
+        ]
+        for win, dets in zip(windows, detector.predict_batch(windows)):
+            kept = dets.filter_score(conf_thr)
+            global_items.extend(kept.offset(win.x, win.y).items)
+            processed += 1
 
     raw_count = len(global_items)
     boxes = [d.as_box() for d in global_items]
