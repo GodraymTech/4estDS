@@ -23,6 +23,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from ..logging_setup import get_logger, log_distribution
+
+log = get_logger(__name__)
+
 # --------------------------------------------------------------------------- #
 # 1) GSD 归一
 # --------------------------------------------------------------------------- #
@@ -128,13 +132,25 @@ def optimize_tile_params(
                     best = cand
 
     if best is not None:
+        log.info(
+            "最优切片(严格解 scale=%.1fpx): tile=%d overlap=%d exp_trunc=%.3f cost=%.3f t_max=%.1f",
+            scale_px, best.tile, best.overlap, best.exp_trunc, best.cost, t_max,
+        )
         return best
     if relaxed_best is not None:
+        log.warning(
+            "最优切片(放宽解 scale=%.1fpx, 截断约束未满足): tile=%d overlap=%d exp_trunc=%.3f cost=%.3f",
+            scale_px, relaxed_best.tile, relaxed_best.overlap, relaxed_best.exp_trunc, relaxed_best.cost,
+        )
         return relaxed_best
     # 连可检测性都无法满足(目标太大):选最小切片作为兜底
     tile = min(tile_grid)
     overlap = int(round(tile * overlap_ratios[len(overlap_ratios) // 2]))
     trunc = truncation_probability(w_large_px, tile, overlap)
+    log.warning(
+        "最优切片(兑底解 scale=%.1fpx 目标过大 t_max=%.1f): tile=%d overlap=%d exp_trunc=%.3f",
+        scale_px, t_max, tile, overlap, trunc,
+    )
     return TileParams(tile, overlap, scale_px, trunc, float("inf"))
 
 
@@ -170,7 +186,16 @@ def cluster_scales(sizes: list[float], k: int = 3, iters: int = 50) -> list[floa
             centers = new_centers
             break
         centers = new_centers
-    return sorted(math.exp(c) for c in centers)
+    result = sorted(math.exp(c) for c in centers)
+    # 可观测：输入尺寸分布 + 得到的离散尺度集
+    sizes_valid = [s for s in sizes if s > 0]
+    log_distribution(log, "冠幅像素尺寸", sizes_valid, unit="px")
+    log.info(
+        "离散尺度集(k=%d): [%s]",
+        len(result),
+        ", ".join(f"{c:.1f}px" for c in result),
+    )
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -264,6 +289,18 @@ def build_quadtree(
             recurse(x, y, step, 0)
             x += step
         y += step
+    if tiles:
+        levels: dict[int, int] = {}
+        for t in tiles:
+            levels[t.level] = levels.get(t.level, 0) + 1
+        hist = ", ".join(f"L{lv}:{levels[lv]}" for lv in sorted(levels))
+        log.info(
+            "四叉树切片: 共 %d 块 (root=%d min=%d 图%dx%d) 层级分布[%s]",
+            len(tiles), root_size, min_size, width, height, hist,
+        )
+        log_distribution(log, "切片边长", [t.size for t in tiles], unit="px")
+    else:
+        log.warning("四叉树切片: 未生成任何 tile (图%dx%d)", width, height)
     return tiles
 
 
