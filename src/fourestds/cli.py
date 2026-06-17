@@ -53,6 +53,7 @@ def _cmd_infer(args: argparse.Namespace) -> int:
         params={"arch": arch, "image": args.image},
     )
     t0 = time.time()
+    source = None
     try:
         if arch == "mock":
             width = int(args.width or 4096)
@@ -65,9 +66,17 @@ def _cmd_infer(args: argparse.Namespace) -> int:
                 logger.error("[infer] 真实推理需要 --image")
                 writer.finish_run_log(run_id, "failed", error="missing --image")
                 return 2
-            detector = get_detector(arch)
-            # TODO(阶段三): 用 rasterio/PIL 打开真实影像构造 image_source
-            raise NotImplementedError(f"{arch} 真实影像读取与推理待接入(TODO)")
+            from .engine import RasterImageSource
+
+            detector = get_detector(
+                arch,
+                weights=settings.get("detect.weights", None),
+                conf=float(settings.get("detect.conf_thr", 0.25)),
+                iou=float(settings.get("postprocess.iou_thr", 0.55)),
+                imgsz=int(settings.get("detect.model_input", 1024)),
+                device=settings.get("detect.device", None),
+            )
+            source = RasterImageSource(args.image)
 
         result = run_inference(
             source, detector,
@@ -107,6 +116,9 @@ def _cmd_infer(args: argparse.Namespace) -> int:
         )
         logger.exception(f"[infer] 失败: {e}")
         return 1
+    finally:
+        if source is not None and hasattr(source, "close"):
+            source.close()
 
 
 def _cmd_preprocess(args: argparse.Namespace) -> int:
