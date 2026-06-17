@@ -1,13 +1,26 @@
-"""RT-DETR 后端(阶段三)。重依赖 ultralytics 延迟导入。"""
+"""RT-DETR 后端(阶段三)。
+
+基于 ultralytics 的 RT-DETR 检测器(Transformer 检测头,无 NMS 依赖)。
+重依赖延迟导入;接口与 YOLO 后端一致(单窗 + 批量)。
+"""
 from __future__ import annotations
 
 from ..base import BaseDetector, Detections, Window
 from ..registry import register
+from .ultralytics_common import build_detections_from_result, ensure_bgr
 
 
 @register("rtdetr")
 class RTDetrDetector(BaseDetector):
-    """基于 ultralytics 的 RT-DETR 检测器。"""
+    """RT-DETR 检测器(ultralytics)。
+
+    可选 kwargs:
+      weights: 权重路径或模型名(默认 rtdetr-l.pt)
+      conf:    置信度阈值(默认 0.25)
+      imgsz:   推理输入边长(默认 1024,RT-DETR 常用 640/1024)
+      device:  'cpu'/'0'/...;None 时由 ultralytics 自动选择
+      half:    半精度(GPU 加速)
+    """
 
     def load(self) -> None:
         try:
@@ -19,9 +32,29 @@ class RTDetrDetector(BaseDetector):
         weights = self.weights or "rtdetr-l.pt"
         self._model = RTDETR(weights)
 
+    def _predict_arrays(self, arrays):  # pragma: no cover - 需重依赖
+        # RT-DETR 末端无 NMS,不传 iou
+        return self._model.predict(
+            arrays,
+            conf=float(self.kwargs.get("conf", 0.25)),
+            imgsz=int(self.kwargs.get("imgsz", 1024)),
+            device=self.kwargs.get("device"),
+            half=bool(self.kwargs.get("half", False)),
+            verbose=False,
+        )
+
     def predict(self, window: Window) -> Detections:  # pragma: no cover - 需重依赖
         self.ensure_loaded()
         if window.pixels is None:
             raise ValueError("rtdetr 后端需要 window.pixels(读窗像素)")
-        # TODO(阶段三): 调用 self._model.predict,解析 boxes/conf/cls -> Detections
-        raise NotImplementedError("rtdetr 真实推理待接入(TODO)")
+        results = self._predict_arrays([ensure_bgr(window.pixels)])
+        return build_detections_from_result(results[0], backend="rtdetr")
+
+    def predict_batch(self, windows: list[Window]) -> list[Detections]:  # pragma: no cover
+        self.ensure_loaded()
+        if any(w.pixels is None for w in windows):
+            raise ValueError("rtdetr 后端批量推理需要每个 window.pixels")
+        if not windows:
+            return []
+        results = self._predict_arrays([ensure_bgr(w.pixels) for w in windows])
+        return [build_detections_from_result(r, backend="rtdetr") for r in results]

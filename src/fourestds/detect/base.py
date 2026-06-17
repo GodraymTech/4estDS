@@ -102,6 +102,14 @@ class BaseDetector(ABC):
     def predict(self, window: Window) -> Detections:
         """在读窗内部坐标系返回检测结果。"""
 
+    def predict_batch(self, windows: list[Window]) -> list[Detections]:
+        """批量推理。默认逐窗调用 predict;真实后端可重写为单次前向以提升吞吐。
+
+        这是解决“切一下推一下”时间瓶颈的入口:编排器按尺度档/按批收集读窗,
+        交由后端一次性推理。
+        """
+        return [self.predict(w) for w in windows]
+
     def ensure_loaded(self) -> None:
         if not self._loaded:
             self.load()
