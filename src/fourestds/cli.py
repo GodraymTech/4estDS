@@ -21,13 +21,92 @@ def _bootstrap():
     return settings, logger, run_id
 
 
+def _demo_trees(width: int, height: int, n: int) -> list[tuple]:
+    """生成确定性网格状的合成真值树(供 mock 端到端演示)。"""
+    import math
+
+    cols = max(1, int(math.sqrt(n)))
+    rows = max(1, (n + cols - 1) // cols)
+    trees: list[tuple] = []
+    for r in range(rows):
+        for c in range(cols):
+            if len(trees) >= n:
+                break
+            cx = int((c + 0.5) / cols * width)
+            cy = int((r + 0.5) / rows * height)
+            trees.append((cx, cy, 40))
+    return trees
+
+
 def _cmd_infer(args: argparse.Namespace) -> int:
+    import time
+
     settings, logger, run_id = _bootstrap()
     arch = args.arch or settings.get("detect.arch", "yolo12")
+    from .db import writer
+    from .detect import get_detector
+    from .engine import SyntheticImageSource, run_inference
+
     logger.info(f"[infer] run_id={run_id} arch={arch} image={args.image}")
-    # TODO(阶段三): 接入 BaseDetector 注册表与真实推理,产出三件套
-    logger.info("[infer] TODO: 推理引擎尚未实现(阶段三)")
-    return 0
+    writer.start_run_log(
+        run_id, "infer", model_arch=arch, input_path=args.image,
+        params={"arch": arch, "image": args.image},
+    )
+    t0 = time.time()
+    try:
+        if arch == "mock":
+            width = int(args.width or 4096)
+            height = int(args.height or 4096)
+            trees = _demo_trees(width, height, int(args.demo_trees or 50))
+            detector = get_detector("mock", trees=trees)
+            source = SyntheticImageSource(width=width, height=height)
+        else:
+            if not args.image:
+                logger.error("[infer] 真实推理需要 --image")
+                writer.finish_run_log(run_id, "failed", error="missing --image")
+                return 2
+            detector = get_detector(arch)
+            # TODO(阶段三): 用 rasterio/PIL 打开真实影像构造 image_source
+            raise NotImplementedError(f"{arch} 真实影像读取与推理待接入(TODO)")
+
+        result = run_inference(
+            source, detector,
+            root_size=int(settings.get("slicing.root_size", 1024)),
+            min_size=int(settings.get("slicing.min_size", 256)),
+            conf_thr=float(settings.get("detect.conf_thr", 0.25)),
+            iou_thr=float(settings.get("postprocess.iou_thr", 0.55)),
+        )
+        tract_id = writer.ensure_tract(
+            args.acquisition_time or "000000",
+            args.location or "demo",
+            pixel_w=result.meta.get("width"),
+            pixel_h=result.meta.get("height"),
+        )
+        written = writer.write_observations(tract_id, run_id, result.detections)
+        dur = time.time() - t0
+        metrics = {
+            "tiles_total": result.tiles_total,
+            "tiles_processed": result.tiles_processed,
+            "tiles_skipped_empty": result.tiles_skipped_empty,
+            "raw_count": result.raw_count,
+            "fused_count": result.fused_count,
+            "observations_written": written,
+        }
+        writer.finish_run_log(run_id, "succeeded", metrics=metrics, duration_s=dur)
+        logger.info(f"[infer] 完成: {metrics}")
+        return 0
+    except NotImplementedError as e:
+        writer.finish_run_log(
+            run_id, "failed", error=str(e), duration_s=time.time() - t0
+        )
+        logger.warning(f"[infer] {e}")
+        return 0
+    except Exception as e:  # 兑底:记录失败但不崩溃
+        writer.finish_run_log(
+            run_id, "failed", error=str(e), duration_s=time.time() - t0
+        )
+        logger.exception(f"[infer] 失败: {e}")
+        return 1
 
 
 def _cmd_preprocess(args: argparse.Namespace) -> int:
@@ -83,7 +162,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_infer = sub.add_parser("infer", help="普通图像推理")
     p_infer.add_argument("--image", required=False, help="输入图像路径")
-    p_infer.add_argument("--arch", choices=["yolo12", "rtdetr"], help="模型架构")
+    p_infer.add_argument("--arch", choices=["yolo12", "rtdetr", "mock"], help="模型架构")
+    p_infer.add_argument("--width", type=int, help="[mock] 合成影像宽")
+    p_infer.add_argument("--height", type=int, help="[mock] 合成影像高")
+    p_infer.add_argument("--demo-trees", type=int, dest="demo_trees", help="[mock] 合成真值树数")
+    p_infer.add_argument("--acquisition-time", dest="acquisition_time", help="地块时相 YYYYMM")
+    p_infer.add_argument("--location", help="地块位置标识")
     p_infer.set_defaults(func=_cmd_infer)
 
     p_pre = sub.add_parser("preprocess", help="超大 GeoTIFF 自适应切片(创新点 A)")

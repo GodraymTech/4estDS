@@ -63,3 +63,22 @@ check("clamp overflow", S.clamp_window(1800, 1800, 512, 2048, 2048) == (1800, 18
 check("clamp outside", S.clamp_window(5000, 5000, 512, 2048, 2048)[2:] == (0, 0))
 check("clamp invalid", S.clamp_window(0, 0, 0, 2048, 2048) == (0, 0, 0, 0))
 print(f"[clamp] checks so far: {ok}")
+
+
+# 阶段三:推理引擎端到端(mock)
+print("[engine.infer]")
+from fourestds.detect import available_backends, get_detector  # noqa: E402
+from fourestds.engine import SyntheticImageSource, run_inference  # noqa: E402
+
+check("backends list", {"yolo12", "rtdetr", "mock"} <= set(available_backends()))
+_det = get_detector("mock", trees=[(1500, 1500, 40)])
+_src = SyntheticImageSource(width=2048, height=2048)
+_res = run_inference(_src, _det, root_size=1024, min_size=256)
+check("engine tiles", _res.tiles_total == 4)
+check("engine fused==1", _res.fused_count == 1)
+_c = _res.detections.items[0].center
+check("engine global coords", abs(_c[0] - 1500) < 1.0 and abs(_c[1] - 1500) < 1.0)
+_det2 = get_detector("mock", trees=[(300, 300, 30), (1300, 300, 30), (1700, 1700, 30)])
+_res2 = run_inference(_src, _det2, root_size=1024, min_size=256)
+check("engine counts all", _res2.fused_count == 3)
+print(f"[engine] checks so far: {ok}")
