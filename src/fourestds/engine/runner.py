@@ -11,11 +11,15 @@ mock 后端不需像素,可在无 GPU/无网环境端到端验证。
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from ..detect.base import BaseDetector, Detection, Detections, Window
+from ..logging_setup import get_logger
 from ..postprocess.wbf import fuse
 from ..preprocess.slicing import build_quadtree, clamp_window
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -61,7 +65,14 @@ def run_inference(
     width = int(image_source.width)
     height = int(image_source.height)
     if width <= 0 or height <= 0:
+        log.warning("空影像: width=%d height=%d, 跳过推理", width, height)
         return InferenceResult(Detections([]), meta={"empty_image": True})
+
+    t0 = time.perf_counter()
+    log.info(
+        "推理开始: 影像 %dx%d backend=%s root_size=%d overlap_px=%d conf_thr=%.2f iou_thr=%.2f conf_type=%s",
+        width, height, getattr(detector, "name", "?"), root_size, overlap_px, conf_thr, iou_thr, conf_type,
+    )
 
     if target_size_fn is None:
         target_size_fn = lambda cx, cy: root_size  # noqa: E731 单一尺度
@@ -85,6 +96,11 @@ def run_inference(
             nx2, ny2 = min(width, x + w + ov), min(height, y + h + ov)
             x, y, w, h = nx, ny, nx2 - nx, ny2 - ny
         coords.append((x, y, w, h))
+
+    log.info(
+        "切片清单: 生成 %d tile, 有效读窗 %d, 跳过空窗 %d (overlap_px=%d)",
+        len(tiles), len(coords), skipped, ov,
+    )
 
     read = getattr(image_source, "read_window", None)
     global_items: list[Detection] = []
@@ -137,6 +153,12 @@ def run_inference(
             for f in fused_boxes
         ],
         {"backend": getattr(detector, "name", "?"), "fusion": "wbf"},
+    )
+    elapsed = time.perf_counter() - t0
+    dedup = (1 - len(fused) / raw_count) * 100 if raw_count else 0.0
+    log.info(
+        "推理完成: tiles=%d 处理=%d 跳空=%d 原始框=%d 融合后=%d 去重率=%.1f%% 耗时=%.2fs",
+        len(tiles), processed, skipped, raw_count, len(fused), dedup, elapsed,
     )
     return InferenceResult(
         detections=fused,
