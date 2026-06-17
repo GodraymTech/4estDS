@@ -14,10 +14,12 @@ from .config import load_settings
 from .logging_setup import setup_logging
 
 
-def _bootstrap():
+def _bootstrap(level: str | None = None):
     paths.ensure_home()
     settings = load_settings()
-    logger, run_id = setup_logging(level=settings.get("logging.level", "INFO"))
+    logger, run_id = setup_logging(
+        level=level or settings.get("logging.level", "INFO")
+    )
     return settings, logger, run_id
 
 
@@ -41,7 +43,7 @@ def _demo_trees(width: int, height: int, n: int) -> list[tuple]:
 def _cmd_infer(args: argparse.Namespace) -> int:
     import time
 
-    settings, logger, run_id = _bootstrap()
+    settings, logger, run_id = _bootstrap(getattr(args, "log_level", None))
     arch = args.arch or settings.get("detect.arch", "yolo12")
     from .db import writer
     from .detect import get_detector
@@ -166,7 +168,7 @@ def _cmd_db(args: argparse.Namespace) -> int:
         path = schema.init_db()
         logger.info(f"[db] 数据库已初始化: {path}")
     elif args.db_action == "migrate":
-        logger.info("[db] TODO: 接入 Alembic 迁移(现以 init 建表作为兜底)")
+        logger.info("[db] TODO: 接入 Alembic 迁移(现以 init 建表作��兜底)")
     else:
         logger.error("[db] 未知子命令")
         return 2
@@ -187,6 +189,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_infer.add_argument("--acquisition-time", dest="acquisition_time", help="地块时相 YYYYMM")
     p_infer.add_argument("--location", help="地块位置标识")
     p_infer.add_argument("--overlap", type=int, default=None, help="读窗外扩重叠像素(边界去重)")
+    p_infer.add_argument(
+        "--log-level", dest="log_level", default=None,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="日志级别(默认读配置)",
+    )
     p_infer.set_defaults(func=_cmd_infer)
 
     p_pre = sub.add_parser("preprocess", help="超大 GeoTIFF 自适应切片(创新点 A)")
