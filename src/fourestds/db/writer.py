@@ -12,7 +12,10 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 
+from ..logging_setup import get_logger
 from .schema import init_db, resolve_db_path
+
+log = get_logger(__name__)
 
 
 def _now() -> str:
@@ -51,6 +54,10 @@ def start_run_log(
         conn.commit()
     finally:
         conn.close()
+    log.info(
+        "run_log 开始: run_id=%s task=%s arch=%s input=%s",
+        run_id, task_type, model_arch, input_path,
+    )
     return run_id
 
 
@@ -72,6 +79,13 @@ def finish_run_log(
             (status, _now(), duration_s,
              json.dumps(metrics or {}, ensure_ascii=False), error, run_id),
         )
+        if status != "succeeded":
+            log.error("run_log 终态: run_id=%s status=%s error=%s", run_id, status, error)
+        else:
+            log.info(
+                "run_log 终态: run_id=%s status=%s 耗时=%ss",
+                run_id, status, f"{duration_s:.2f}" if duration_s is not None else "?",
+            )
         conn.commit()
     finally:
         conn.close()
@@ -143,6 +157,10 @@ def write_observations(
         conn.commit()
     finally:
         conn.close()
+    log.info(
+        "写入观测: %d 条 -> tract_id=%s run_id=%s slice_size=%s",
+        n, tract_id, run_id, slice_size,
+    )
     return n
 
 
