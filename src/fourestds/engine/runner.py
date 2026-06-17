@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..detect.base import BaseDetector, Detection, Detections, Window
-from ..postprocess.wbf import weighted_boxes_fusion
+from ..postprocess.wbf import fuse
 from ..preprocess.slicing import build_quadtree, clamp_window
 
 
@@ -49,6 +49,9 @@ def run_inference(
     conf_thr: float = 0.25,
     iou_thr: float = 0.55,
     batch_size: int = 8,
+    overlap_px: int = 0,
+    conf_type: str = "max",
+    trunc_penalty: float = 0.5,
 ) -> InferenceResult:
     """对一幅影像跑完整的切片->推理->去重流程。
 
@@ -67,13 +70,20 @@ def run_inference(
 
     detector.ensure_loaded()
     # 先收集有效读窗坐标(裁到边界、跳过空窗)
+    # overlap_px>0 时向四周外扩读窗(仍裁到图边),让跨边界的树在相邻 tile 中完整出现,
+    # 交由 WBF 去重(解决非重叠网格的边界重复检出)。
     coords: list[tuple[int, int, int, int]] = []
     skipped = 0
+    ov = max(0, int(overlap_px))
     for tile in tiles:
         x, y, w, h = clamp_window(tile.x, tile.y, tile.size, width, height)
         if w <= 0 or h <= 0:
             skipped += 1
             continue
+        if ov > 0:
+            nx, ny = max(0, x - ov), max(0, y - ov)
+            nx2, ny2 = min(width, x + w + ov), min(height, y + h + ov)
+            x, y, w, h = nx, ny, nx2 - nx, ny2 - ny
         coords.append((x, y, w, h))
 
     read = getattr(image_source, "read_window", None)
@@ -91,20 +101,42 @@ def run_inference(
             for (x, y, w, h) in chunk
         ]
         for win, dets in zip(windows, detector.predict_batch(windows)):
-            kept = dets.filter_score(conf_thr)
-            global_items.extend(kept.offset(win.x, win.y).items)
+            for d in dets.filter_score(conf_thr).items:
+                # 在读窗内部坐标判断是否触及“内部边界”(非图像边缘)->可能被切断
+                trunc = (
+                    (d.x1 <= 1.0 and win.x > 0)
+                    or (d.y1 <= 1.0 and win.y > 0)
+                    or (d.x2 >= win.w - 1.0 and win.x + win.w < width)
+                    or (d.y2 >= win.h - 1.0 and win.y + win.h < height)
+                )
+                gd = d.offset(win.x, win.y)
+                gd.extra = {**gd.extra, "truncated": bool(trunc)}
+                global_items.append(gd)
             processed += 1
 
     raw_count = len(global_items)
+    # 标签感知 + 权重感知 WBF:截断框降权(完整框主导融合坐标),保留物种标签
     boxes = [d.as_box() for d in global_items]
     scores = [d.score for d in global_items]
-    fused_boxes, fused_scores = weighted_boxes_fusion(boxes, scores, iou_thr=iou_thr)
+    labels = [d.label for d in global_items]
+    weights = [
+        d.score * (trunc_penalty if d.extra.get("truncated") else 1.0)
+        for d in global_items
+    ]
+    fused_boxes = fuse(
+        boxes, scores,
+        labels=labels, weights=weights,
+        iou_thr=iou_thr, conf_type=conf_type,
+    )
     fused = Detections(
         [
-            Detection(x1=b[0], y1=b[1], x2=b[2], y2=b[3], score=s, label="tree")
-            for b, s in zip(fused_boxes, fused_scores)
+            Detection(
+                x1=f.box[0], y1=f.box[1], x2=f.box[2], y2=f.box[3],
+                score=f.score, label=f.label, extra={"support": f.support},
+            )
+            for f in fused_boxes
         ],
-        {"backend": getattr(detector, "name", "?")},
+        {"backend": getattr(detector, "name", "?"), "fusion": "wbf"},
     )
     return InferenceResult(
         detections=fused,
