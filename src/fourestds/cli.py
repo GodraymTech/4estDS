@@ -84,6 +84,12 @@ def _cmd_infer(args: argparse.Namespace) -> int:
             min_size=int(settings.get("slicing.min_size", 256)),
             conf_thr=float(settings.get("detect.conf_thr", 0.25)),
             iou_thr=float(settings.get("postprocess.iou_thr", 0.55)),
+            overlap_px=int(
+                args.overlap
+                if args.overlap is not None
+                else settings.get("slicing.overlap_px", 0)
+            ),
+            conf_type=str(settings.get("postprocess.conf_type", "max")),
         )
         tract_id = writer.ensure_tract(
             args.acquisition_time or "000000",
@@ -180,6 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_infer.add_argument("--demo-trees", type=int, dest="demo_trees", help="[mock] 合成真值树数")
     p_infer.add_argument("--acquisition-time", dest="acquisition_time", help="地块时相 YYYYMM")
     p_infer.add_argument("--location", help="地块位置标识")
+    p_infer.add_argument("--overlap", type=int, default=None, help="读窗外扩重叠像素(边界去重)")
     p_infer.set_defaults(func=_cmd_infer)
 
     p_pre = sub.add_parser("preprocess", help="超大 GeoTIFF 自适应切片(创新点 A)")
