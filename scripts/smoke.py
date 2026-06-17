@@ -81,4 +81,39 @@ check("engine global coords", abs(_c[0] - 1500) < 1.0 and abs(_c[1] - 1500) < 1.
 _det2 = get_detector("mock", trees=[(300, 300, 30), (1300, 300, 30), (1700, 1700, 30)])
 _res2 = run_inference(_src, _det2, root_size=1024, min_size=256)
 check("engine counts all", _res2.fused_count == 3)
+
+# predict_batch 默认逐窗 == predict;batch_size 不影响结果
+from fourestds.detect import Window  # noqa: E402
+_w = Window(x=1024, y=1024, w=1024, h=1024)
+_batched = get_detector("mock", trees=[(1500, 1500, 40)]).predict_batch([_w, _w])
+check("predict_batch default", len(_batched) == 2 and len(_batched[0]) == 1)
+_rb = run_inference(_src, _det2, root_size=1024, min_size=256, batch_size=1)
+check("batch_size invariant", _rb.fused_count == 3)
+
+# 真实后端缺 ultralytics 时报出清晰错误
+for _arch in ("yolo12", "rtdetr"):
+    try:
+        get_detector(_arch).load()
+        _clean = False
+    except ImportError as _e:
+        _clean = "ultralytics" in str(_e)
+    except Exception:
+        _clean = False
+    check(f"{_arch} clean import error", _clean)
+
+# RasterImageSource Pillow 回退实读(沙箱有 numpy + Pillow)
+try:
+    import numpy as _np
+    from PIL import Image as _Image
+    from fourestds.engine import RasterImageSource
+    _arr = (_np.random.default_rng(0).random((64, 80, 3)) * 255).astype("uint8")
+    _pp = os.path.join(tempfile.mkdtemp(), "tile.png")
+    _Image.fromarray(_arr).save(_pp)
+    _rsrc = RasterImageSource(_pp)
+    _win = _rsrc.read_window(10, 5, 20, 16)
+    check("raster pillow read", (_rsrc.width, _rsrc.height) == (80, 64) and _win.shape == (16, 20, 3))
+    _rsrc.close()
+except ImportError:
+    print("  skip raster pillow read (no numpy/PIL)")
+
 print(f"[engine] checks so far: {ok}")
