@@ -267,6 +267,23 @@ def build_quadtree(
     return tiles
 
 
+def clamp_window(
+    x: int, y: int, size: int, width: int, height: int
+) -> tuple[int, int, int, int]:
+    """将切片裁剪到影像边界内,返回有效读窗 (x, y, w, h)。
+
+    边界 tile 常会超出影像范围(右/下边缘)。正式推理时按该读窗取像素,
+    避免越界读取;完全越界或非法尺寸返回宽高为 0 的空读窗(调用方可跳过)。
+    """
+    if size <= 0 or width <= 0 or height <= 0:
+        return (max(0, x), max(0, y), 0, 0)
+    x0 = max(0, min(x, width))
+    y0 = max(0, min(y, height))
+    x1 = max(0, min(x + size, width))
+    y1 = max(0, min(y + size, height))
+    return (x0, y0, max(0, x1 - x0), max(0, y1 - y0))
+
+
 # --------------------------------------------------------------------------- #
 # 2) Lindeberg 特征尺度(可选增强,需 numpy)
 # --------------------------------------------------------------------------- #
@@ -314,7 +331,6 @@ def characteristic_scale(gray, sigmas=None):  # pragma: no cover - 需 numpy
 
 def plan_tiles_demo(settings) -> dict:
     """用配置中的参数跑一次最优化演示(无需真实 GeoTIFF),返回摘要。"""
-    gsd = settings.get("detect.model_input", 1024) and settings.get("slicing", {})
     sl = settings.section("slicing")
     det = settings.section("detect")
     expected_crown_m = float(sl.get("expected_crown_m", 4.0))

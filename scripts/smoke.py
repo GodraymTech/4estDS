@@ -54,3 +54,12 @@ check("cli db init", main(["db", "init"]) == 0)
 check("cli preprocess", main(["preprocess"]) == 0)
 
 print(f"\nALL PASSED: {ok} checks")
+
+
+# clamp_window 边界兜底
+print("[slicing.clamp]")
+check("clamp in-bounds", S.clamp_window(0, 0, 1024, 2048, 2048) == (0, 0, 1024, 1024))
+check("clamp overflow", S.clamp_window(1800, 1800, 512, 2048, 2048) == (1800, 1800, 248, 248))
+check("clamp outside", S.clamp_window(5000, 5000, 512, 2048, 2048)[2:] == (0, 0))
+check("clamp invalid", S.clamp_window(0, 0, 0, 2048, 2048) == (0, 0, 0, 0))
+print(f"[clamp] checks so far: {ok}")

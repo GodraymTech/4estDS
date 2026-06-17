@@ -81,3 +81,21 @@ def test_build_quadtree_refines_small_targets():
     small = [t for t in tiles if t.size < 1024]
     assert small, "左半应产生更小的切片"
     assert any(t.size == 1024 for t in tiles), "右半应保留大切片"
+
+
+def test_clamp_window_in_bounds():
+    assert S.clamp_window(0, 0, 1024, 2048, 2048) == (0, 0, 1024, 1024)
+
+
+def test_clamp_window_border_overflow():
+    # 右下边缘 tile 超出影像 -> 裁剪到有效读窗
+    assert S.clamp_window(1800, 1800, 512, 2048, 2048) == (1800, 1800, 248, 248)
+
+
+def test_clamp_window_fully_outside():
+    x, y, w, h = S.clamp_window(5000, 5000, 512, 2048, 2048)
+    assert w == 0 and h == 0
+
+
+def test_clamp_window_invalid_size():
+    assert S.clamp_window(0, 0, 0, 2048, 2048) == (0, 0, 0, 0)
