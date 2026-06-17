@@ -48,7 +48,8 @@ pip install -e ".[dev]"
 4estds db init                 # 在 ~/.4estDS/db 下创建三层单木模型
 4estds preprocess              # 运行创新点 A 的切片优化演示
 4estds infer --arch mock       # 端到端跑通:切片->推理->WBF去重->入库(无需 GPU/权重)
-4estds infer --arch yolo12     # 真实推理(权重加载与解析 TODO)
+4estds infer --arch yolo12 --image ortho.tif   # 真实推理(需 pip install '4estds[yolo]')
+4estds infer --arch rtdetr --image ortho.tif   # RT-DETR 后端
 pytest -q                      # 跑全部单元测试
 ```
 
@@ -129,7 +130,7 @@ FastAPI 中间件校验 JWT 与 feature key。(TODO,阶段后期)
 - [x] 阶段一 底座:配置/路径/日志/CLI 骨架(可运行)
 - [x] 阶段二 数据库:三层单木模型建表 + ORM(`db init` 可用)
 - [x] 阶段四 创新点 A:切片优化数学核心(可单测)
-- [x] 阶段三 推理引擎:切片清单编排 + WBF 去重 + 观测入库(mock 端到端可跑;真实后端 TODO)
+- [x] 阶段三 推理引擎:切片清单编排 + WBF 去重 + 观测入库;mock 端到端可跑;yolo12/rtdetr 真实后端 + 分批推理 + 栓格影像源已接(需装 ultralytics/rasterio)
 - [~] 阶段五 后处理:尺度感知 WBF 基础(去重增强 TODO)
 - [~] 阶段六 统计报告 / 批量处理(出图与导出 TODO)
 - [~] 阶段七 创新点 B:多源融合(CHM 求树高已有标量,接入栅格 TODO)
