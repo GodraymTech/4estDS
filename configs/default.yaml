@@ -1,0 +1,39 @@
+# 4estDS 默认配置(最低优先级)。
+# 分层顺序: 本文件 -> ~/.4estDS/config.yaml -> 环境变量(FOURESTDS_*) -> CLI 覆盖
+
+app:
+  name: 4estDS
+  codename: fourestds
+
+logging:
+  level: INFO
+  rotation_mb: 20        # 单个日志文件滚动大小(MB)
+  backups: 5
+  to_db: true            # 是否把 run 记录写入 run_logs 表
+
+db:
+  # 默认 SQLite(本地);设计上可平滑迁移到 PostgreSQL/PostGIS
+  url: null               # 为空则使用 <home>/db/4estds.sqlite
+  echo: false
+
+detect:
+  arch: yolo12            # yolo12 | rtdetr
+  conf_threshold: 0.25
+  iou_threshold: 0.6
+  model_input: 1024       # 模型输入边长(像素)
+
+slicing:
+  # 创新点 A 参数(自适应切片)
+  expected_crown_m: 4.0   # 期望平均冠幅物理尺寸(米),用于 GSD 归一
+  d_min_px: 24            # 最小冠幅在模型输入下的最小可检测像素
+  epsilon: 0.05           # 允许的大冠幅截断概率上界
+  large_quantile: 0.95    # 用于完整性约束的大冠幅分位
+  lambda_cost: 0.15       # 算力代价权重
+  max_scales: 3           # 离散最优尺度集的最大档数 K
+  fallback_tile: 1024     # 全局回退切片尺寸
+  fallback_overlap: 0.2   # 全局回退 overlap 比例
+
+export:
+  formats: [shp, geojson, gpkg, csv]
+  drop_pixel_columns: true
+  drop_source_column: true
