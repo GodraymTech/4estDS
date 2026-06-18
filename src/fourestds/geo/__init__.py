@@ -53,6 +53,23 @@ class Affine:
     def pixel_size_y(self) -> float:
         return math.hypot(self.b, self.e)
 
+    def pixel_to_world(self, col: float, row: float) -> tuple[float, float]:
+        """像素坐标(col,row) -> 世界坐标(x,y)。"""
+        x = self.a * col + self.b * row + self.c
+        y = self.d * col + self.e * row + self.f
+        return (x, y)
+
+    def world_to_pixel(self, x: float, y: float) -> tuple[float, float]:
+        """世界坐标(x,y) -> 像素坐标(col,row)，仿射逆变换。"""
+        det = self.a * self.e - self.b * self.d
+        if abs(det) < 1e-15:
+            raise ValueError("仿射矩阵不可逆(det≈0)，无法反解像素坐标")
+        dx = x - self.c
+        dy = y - self.f
+        col = (self.e * dx - self.b * dy) / det
+        row = (-self.d * dx + self.a * dy) / det
+        return (col, row)
+
     @classmethod
     def from_world_file(cls, lines) -> "Affine":
         """世界文件 6 行: A(x-scale), D, B, E(y-scale,通常负), C(上左像元**中心**x), F(y)。"""
