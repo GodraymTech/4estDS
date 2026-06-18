@@ -1,11 +1,27 @@
-"""多源融合层(创新点 B,阶段七骨架)。
+"""多源融合层（创新点 B，阶段七）。
 
-RGB + CHM/多光谱跨模态融合:检测框 -> 冠幅多边形;CHM = DSM - DEM 给出树高。
-TODO(阶段七): 配准、框->分割、CHM 采样求树高、多光谱物种特征。
+RGB 检测 × 跨模态高程信息的融合：
+  - CHM = DSM − DEM 给出冠层高度 -> 单木树高；
+  - 仿射变换完成 RGB 与 CHM 的配准（不同分辨率/范围）。
+
+实现见 chm.py。多光谱物种特征为后续扩展点。
 """
 from __future__ import annotations
 
+from .chm import (
+    CHMSampler,
+    build_chm_sampler,
+    chm_from_dsm_dem,
+    load_single_band,
+    sample_height,
+    tree_height_from_chm,
+)
 
-def tree_height_from_chm(dsm: float, dem: float) -> float:
-    """树高 = DSM - DEM(负值裁到 0)。纯标量计算,可单测。"""
-    return max(0.0, dsm - dem)
+__all__ = [
+    "CHMSampler",
+    "build_chm_sampler",
+    "chm_from_dsm_dem",
+    "load_single_band",
+    "sample_height",
+    "tree_height_from_chm",
+]
