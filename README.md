@@ -133,7 +133,7 @@ FastAPI 中间件校验 JWT 与 feature key。(TODO,阶段后期)
 - [x] 阶段四 创新点 A:切片优化数学核心(可单测)
 - [x] 阶段三 推理引擎:切片清单编排 + WBF 去重 + 观测入库;mock 端到端可跑;yolo12/rtdetr 真实后端 + 分批推理 + 栓格影像源已接(需装 ultralytics/rasterio)
 - [x] 阶段五 后处理:尺度感知 WBF（标签感知不跨物种、score×权重坐标加权、conf_type 可选 max/avg、中心距离合并）+ 读窗外扩边界去重 + 截断框降权（soft-NMS 变体与可学习阈值 TODO）
-- [x] 阶段六 统计报告 / 批量处理:report 生成 md/csv/pdf(含物种柱状图/尺度档饼图)、batch 串行批量推理入库(依赖注入、单图失败不中断);真实面积密度/仿射变换待地理坐标接入 TODO
+- [x] 阶段六 统计报告 / 批量处理:report 生成 md/csv/pdf(含物种柱状图/尺度档饼图)、batch 串行批量推理入库(依赖注入、单图失败不中断)、真实面积密度(从 .tfw/.prj 或内嵌 GeoTIFF 标签解析仿射变换,支持投影/地理坐标系)
 - [~] 阶段七 创新点 B:多源融合(CHM 求树高已有标量,接入栅格 TODO)
 - [~] 阶段八 创新点 C:生命周期追踪(最近邻匹配基础,匈牙利/生长曲线 TODO)
 
@@ -197,7 +197,7 @@ INFO | fourestds.engine.runner      | 推理完成: tiles=40 处理=40 跳空=0 
 报告含五个部分：①总量与密度 ②物种组成 ③冠幅与尺寸分布（像素）④置信度与树高 ⑤离散尺度档占比。
 
 **优雅降级**：未安装 `matplotlib` 时跳过出图；未安装 `reportlab` 时 PDF 自动回退为 Markdown，主流程不中断。
-密度（株/公顷）需地块真实面积，待仿射变换/地理坐标接入后自动补全（当前标注 TODO）。
+密度（株/公顷）现已自动计算：系统会依次从 rasterio dataset、sidecar 世界文件（.tfw/.tifw/.wld）+ .prj、以及内嵌 GeoTIFF 标签（ModelPixelScale / ModelTransformation / GeoKeyDirectory）解析仿射变换，算出像元地面面积与地块真实面积。投影坐标系直接取米制；地理坐标系（经纬度）在地块纬度处近似换算为米并告警。三条路径均不可得时，诚实降级为“面积未知”。
 
 ### 批量处理 `batch`
 对一个目录下的多幅 RGB 影像串行批量推理并入库，每幅图独立 run、独立 run_log；单幅失败不中断整批。
