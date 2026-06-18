@@ -100,6 +100,8 @@ def ensure_tract(
     pixel_w: int | None = None,
     pixel_h: int | None = None,
     gsd: float | None = None,
+    geo_area: float | None = None,
+    area_unit: str | None = None,
 ) -> str:
     """按 (acquisition_time, location) 幂等获取/创建地块,返回 tract_id。"""
     conn = _connect(url)
@@ -113,11 +115,18 @@ def ensure_tract(
         tract_id = f"tract_{acquisition_time}_{uuid.uuid4().hex[:8]}"
         conn.execute(
             "INSERT INTO tracts "
-            "(tract_id, name, acquisition_time, location, pixel_w, pixel_h, gsd, status) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "(tract_id, name, acquisition_time, location, pixel_w, pixel_h, gsd, "
+            " geo_area, area_unit, status) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (tract_id, name, acquisition_time, location,
-             pixel_w, pixel_h, gsd, "registered"),
+             pixel_w, pixel_h, gsd, geo_area, area_unit, "registered"),
         )
+        if geo_area:
+            log.info(
+                "地块登录: %s 真实面积=%.1f%s GSD=%s",
+                tract_id, geo_area, area_unit or "m2",
+                f"{gsd:.4f}m" if gsd else "?",
+            )
         conn.commit()
         return tract_id
     finally:
