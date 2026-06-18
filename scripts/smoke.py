@@ -210,3 +210,21 @@ _bres = _run_batch(
 check("batch all succeeded", _bres.succeeded == 2 and _bres.failed == 0)
 check("batch total trees", _bres.total_trees == 4)
 print(f"[batch] checks so far: {ok}")
+
+print("[geo]")
+import os as _os, tempfile as _tf
+from fourestds.geo import Affine as _Affine, GeoInfo as _GeoInfo, compute_tract_geometry as _ctg
+_aff = _Affine.from_world_file(["0.5", "0", "0", "-0.5", "500000", "3000000"])
+check("geo world-file pixel area", abs(_aff.pixel_area() - 0.25) < 1e-12)
+check("geo projected m2", abs(_GeoInfo(transform=_aff, crs_kind="projected").pixel_area_m2() - 0.25) < 1e-12)
+_gi_deg = _GeoInfo(transform=_Affine.from_pixel_scale(5e-6, 5e-6), crs_kind="geographic", origin_lat=0.0)
+check("geo geographic deg->m", abs(_gi_deg.pixel_area_m2() - (5e-6 * 111320.0) ** 2) < 1e-6)
+check("geo geographic needs lat", _GeoInfo(transform=_aff, crs_kind="geographic", origin_lat=None).pixel_area_m2() is None)
+with _tf.TemporaryDirectory() as _d:
+    _tif = _os.path.join(_d, "p.tif"); open(_tif, "wb").write(b"\x00")
+    open(_os.path.join(_d, "p.tfw"), "w").write("0.25\n0\n0\n-0.25\n5e5\n3e6\n")
+    open(_os.path.join(_d, "p.prj"), "w").write('PROJCS["UTM",UNIT["metre",1.0]]')
+    _g = _ctg(_tif, 2048, 2048)
+    check("geo sidecar end-to-end area", _g is not None and abs(_g["geo_area"] - 2048 * 2048 * 0.0625) < 1e-3)
+check("geo missing -> None", _ctg("/no/such/p.tif", 10, 10) is None)
+print(f"[geo] checks so far: {ok}")
