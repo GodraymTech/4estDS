@@ -147,17 +147,70 @@ def _cmd_train(args: argparse.Namespace) -> int:
 
 
 def _cmd_report(args: argparse.Namespace) -> int:
-    _, logger, run_id = _bootstrap()
-    logger.info(f"[report] run_id={run_id}")
-    logger.info("[report] TODO: 专业统计报告(阶段六)")
+    settings, logger, run_id = _bootstrap(getattr(args, "log_level", None))
+    from .report import generate_report
+
+    try:
+        out = generate_report(
+            tract_id=args.tract_id,
+            run_id=args.run_id,
+            acquisition_time=args.acquisition_time,
+            location=args.location,
+            fmt=args.format,
+            out_dir=args.out,
+            with_charts=not args.no_charts,
+            db_url=settings.get("db.url", None),
+        )
+    except ValueError as e:
+        logger.error(f"[report] {e}")
+        return 2
+    if out.get("fallback"):
+        logger.warning(f"[report] 降级: {out['fallback']}")
+    logger.info(f"[report] 完成[{out['format']}] -> {out['out_path']} (株数={out['data'].tree_count})")
     return 0
 
 
 def _cmd_batch(args: argparse.Namespace) -> int:
-    _, logger, run_id = _bootstrap()
+    settings, logger, run_id = _bootstrap(getattr(args, "log_level", None))
     logger.warning("[batch] 仅支持 RGB;批量推理串行执行。")
-    logger.info("[batch] TODO: 批量处理(阶段六)")
-    return 0
+    from .db import writer
+    from .detect import get_detector
+    from .engine import RasterImageSource, discover_inputs, run_batch
+
+    arch = args.arch or settings.get("detect.arch", "yolo12")
+    try:
+        inputs = discover_inputs(args.input_dir, args.glob)
+    except FileNotFoundError as e:
+        logger.error(f"[batch] {e}")
+        return 2
+    if not inputs:
+        logger.warning(f"[batch] 未匹配到输入文件: {args.input_dir} ({args.glob})")
+        return 0
+
+    if arch == "mock":
+        detector = get_detector("mock")
+    else:
+        detector = get_detector(
+            arch,
+            weights=settings.get("detect.weights", None),
+            conf=float(settings.get("detect.conf_threshold", 0.25)),
+            iou=float(settings.get("detect.iou_threshold", 0.55)),
+            imgsz=int(settings.get("detect.model_input", 1024)),
+        )
+    res = run_batch(
+        inputs, detector,
+        acquisition_time=args.acquisition_time or "000000",
+        source_factory=lambda p: RasterImageSource(str(p)),
+        writer=writer,
+        run_kwargs={
+            "root_size": int(settings.get("slicing.root_size", 1024)),
+            "min_size": int(settings.get("slicing.min_size", 256)),
+        },
+    )
+    logger.info(
+        f"[batch] 完成: 成功={res.succeeded} 失败={res.failed} 总株数={res.total_trees} 耗时={res.elapsed_s:.2f}s"
+    )
+    return 0 if res.failed == 0 else 1
 
 
 def _cmd_db(args: argparse.Namespace) -> int:
@@ -203,9 +256,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.set_defaults(func=_cmd_train)
 
     p_report = sub.add_parser("report", help="专业统计报告")
+    p_report.add_argument("--tract-id", dest="tract_id", default=None, help="地块 ID")
+    p_report.add_argument("--run-id", dest="run_id", default=None, help="限定某次 run")
+    p_report.add_argument("--acquisition-time", dest="acquisition_time", default=None, help="地块时相 YYYYMM")
+    p_report.add_argument("--location", default=None, help="地块位置标识")
+    p_report.add_argument("--format", choices=["md", "csv", "pdf"], default="md", help="输出格式")
+    p_report.add_argument("--out", default=None, help="输出目录(默认 <home>/outputs)")
+    p_report.add_argument("--no-charts", dest="no_charts", action="store_true", help="不生成图表(PDF)")
+    p_report.add_argument(
+        "--log-level", dest="log_level", default=None,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="日志级别(默认读配置)",
+    )
     p_report.set_defaults(func=_cmd_report)
 
     p_batch = sub.add_parser("batch", help="批量处理(仅 RGB,串行)")
+    p_batch.add_argument("--input-dir", dest="input_dir", required=True, help="输入目录")
+    p_batch.add_argument("--glob", default="*.tif", help="文件匹配模式(默认 *.tif)")
+    p_batch.add_argument("--arch", choices=["yolo12", "rtdetr", "mock"], default=None, help="模型架构")
+    p_batch.add_argument("--acquisition-time", dest="acquisition_time", default=None, help="地块时相 YYYYMM")
+    p_batch.add_argument(
+        "--log-level", dest="log_level", default=None,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="日志级别(默认读配置)",
+    )
     p_batch.set_defaults(func=_cmd_batch)
 
     p_db = sub.add_parser("db", help="数据库管理")
