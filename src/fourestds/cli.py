@@ -267,6 +267,75 @@ def _cmd_db(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_track(args: argparse.Namespace) -> int:
+    settings, logger, run_id = _bootstrap(getattr(args, "log_level", None))
+    import json
+
+    from .db import reader, writer
+    from .lifecycle import TreeRecord, track_sequence
+
+    db_url = settings.get("db.url", None)
+    tracts = [t for t in reader.list_tracts(url=db_url) if t.get("location") == args.location]
+    tracts.sort(key=lambda t: str(t.get("acquisition_time")))
+    if not tracts:
+        logger.error(f"[track] location={args.location} 无地块")
+        return 2
+    logger.info(f"[track] location={args.location} 命中 {len(tracts)} 个时相地块")
+
+    snapshots: list[tuple[str, list]] = []
+    for t in tracts:
+        tid = t["tract_id"]
+        run_for = reader.latest_run_for_tract(tid, url=db_url)
+        if not run_for:
+            logger.warning(f"[track] 地块 {tid} 无观测 run,跳过")
+            continue
+        obs = reader.fetch_observations(tract_id=tid, run_id=run_for, url=db_url)
+        writer.consolidate_tract_trees(tid, run_for, obs, url=db_url)
+        recs = []
+        for o in obs:
+            pt = writer.parse_point(o.get("geom_point"))
+            if pt is None:
+                continue
+            recs.append(TreeRecord(
+                key=o["obs_id"], x=pt[0], y=pt[1],
+                height=o.get("height"), crown=o.get("crown_area_px"),
+                species=o.get("species"),
+            ))
+        snapshots.append((str(t.get("acquisition_time")), recs))
+        logger.info(f"[track] 时相 {t.get('acquisition_time')}: 规范株 {len(recs)} 位")
+
+    if not snapshots:
+        logger.error("[track] 无可追踪的时相")
+        return 2
+
+    result = track_sequence(
+        snapshots, location_cluster=args.location, max_dist=args.max_dist,
+        use_hungarian=not args.greedy,
+    )
+    payload = [
+        {
+            "individual_id": ind.individual_id,
+            "location_cluster": ind.location_cluster,
+            "first_seen": ind.first_seen,
+            "last_seen": ind.last_seen,
+            "status": ind.status,
+            "growth_json": json.dumps(ind.to_growth_json(), ensure_ascii=False),
+            "members": ind.members,
+        }
+        for ind in result.individuals
+    ]
+    writer.persist_individuals(payload, url=db_url)
+    alive = sum(1 for i in result.individuals if i.status == "alive")
+    rates = [r for r in (i.height_growth_rate() for i in result.individuals) if r is not None]
+    avg_rate = sum(rates) / len(rates) if rates else None
+    logger.info(
+        f"[track] 完成 location={args.location} 时相={len(snapshots)} 个体={result.n_individuals} "
+        f"存活={alive} 枯死={result.n_deaths} 新生={result.n_births} 配对={result.n_matched} "
+        f"平均生长率={avg_rate if avg_rate is None else round(avg_rate, 3)} m/时相"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="4estds", description=f"{__codename__} CLI")
     p.add_argument("--version", action="version", version=f"{__codename__} {__version__}")
@@ -325,6 +394,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_db = sub.add_parser("db", help="数据库管理")
     p_db.add_argument("db_action", choices=["init", "migrate"], help="动作")
     p_db.set_defaults(func=_cmd_db)
+
+    p_track = sub.add_parser("track", help="单木生命周期追踪(创新点 C)")
+    p_track.add_argument("--location", required=True, help="要追踪的地块位置标识(跨多个时相)")
+    p_track.add_argument("--max-dist", dest="max_dist", type=float, default=20.0, help="跨时相匹配位置门控(像素,默认 20)")
+    p_track.add_argument("--greedy", action="store_true", help="使用贪婪匹配(默认医牛利最优)")
+    p_track.add_argument(
+        "--log-level", dest="log_level", default=None,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="日志级别(默认读配置)",
+    )
+    p_track.set_defaults(func=_cmd_track)
 
     return p
 

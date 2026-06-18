@@ -223,3 +223,91 @@ def register_source(
         return source_id
     finally:
         conn.close()
+
+
+def parse_point(wkt: str | None) -> tuple[float, float] | None:
+    """解析 'POINT(cx cy)' 文本为 (x, y);无法解析返回 None。"""
+    if not wkt or not isinstance(wkt, str):
+        return None
+    s = wkt.strip()
+    if "(" not in s or ")" not in s:
+        return None
+    try:
+        inner = s[s.index("(") + 1: s.index(")")]
+        parts = inner.replace(",", " ").split()
+        return float(parts[0]), float(parts[1])
+    except (ValueError, IndexError):
+        return None
+
+
+def consolidate_tract_trees(
+    tract_id: str,
+    run_id: str,
+    observations,
+    *,
+    url: str | None = None,
+) -> int:
+    """将某 run 的观测整理为地块规范单木 tract_trees(幂等: 先清空该地块再重建)。
+
+    observations: fetch_observations 返回的 dict 列表
+    (含 obs_id/geom_point/geom_crown/height/crown_area_px/species/confidence)。
+    返回写入的规范株条数。保留已有 individual_id 链接(重建后由 persist_individuals 回填)。
+    """
+    conn = _connect(url)
+    n = 0
+    try:
+        conn.execute("DELETE FROM tract_trees WHERE tract_id=?", (tract_id,))
+        for o in observations:
+            canonical_id = f"ct_{uuid.uuid4().hex[:12]}"
+            conn.execute(
+                "INSERT INTO tract_trees "
+                "(canonical_id, tract_id, individual_id, species, confidence, "
+                " geom_point, geom_crown, height, crown, chosen_obs_id, active_run_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
+                 o.get("geom_point"), o.get("geom_crown"),
+                 o.get("height"), o.get("crown_area_px"),
+                 o.get("obs_id"), run_id),
+            )
+            n += 1
+        conn.commit()
+    finally:
+        conn.close()
+    log.info("规范单木整理: %d 株 -> tract_id=%s run_id=%s", n, tract_id, run_id)
+    return n
+
+
+def persist_individuals(individuals, *, url: str | None = None) -> int:
+    """写入跨时相个体 tree_individuals,并按 chosen_obs_id 回填 tract_trees.individual_id。
+
+    individuals: dict 列表,每项含 individual_id/location_cluster/first_seen/last_seen/
+    status/growth_json(str)/members(dict: time->obs_key)。返回写入的个体数。
+    """
+    conn = _connect(url)
+    n = 0
+    linked = 0
+    try:
+        for ind in individuals:
+            conn.execute(
+                "INSERT INTO tree_individuals "
+                "(individual_id, location_cluster, first_seen, last_seen, status, growth_json) "
+                "VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(individual_id) DO UPDATE SET "
+                " location_cluster=excluded.location_cluster, first_seen=excluded.first_seen, "
+                " last_seen=excluded.last_seen, status=excluded.status, growth_json=excluded.growth_json",
+                (ind["individual_id"], ind.get("location_cluster"), ind.get("first_seen"),
+                 ind.get("last_seen"), ind.get("status"), ind.get("growth_json")),
+            )
+            n += 1
+            for _time, obs_key in (ind.get("members") or {}).items():
+                cur = conn.execute(
+                    "UPDATE tract_trees SET individual_id=? WHERE chosen_obs_id=?",
+                    (ind["individual_id"], obs_key),
+                )
+                if cur.rowcount and cur.rowcount > 0:
+                    linked += cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    log.info("个体持久化: %d 个体, 回填规范株 %d 条", n, linked)
+    return n
