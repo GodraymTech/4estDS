@@ -93,11 +93,27 @@ def _cmd_infer(args: argparse.Namespace) -> int:
             ),
             conf_type=str(settings.get("postprocess.conf_type", "max")),
         )
+        from .geo import compute_tract_geometry
+
+        geo = compute_tract_geometry(
+            args.image,
+            result.meta.get("width"), result.meta.get("height"),
+            transform=getattr(source, "transform", None),
+            crs=getattr(source, "crs", None),
+        ) or {}
+        if not geo:
+            logger.warning(
+                "[infer] 未获取到仿射变换(无 .tfw/.prj 且无内嵌 GeoTIFF 标签),"
+                "真实面积/密度将缺失。"
+            )
         tract_id = writer.ensure_tract(
             args.acquisition_time or "000000",
             args.location or "demo",
-            pixel_w=result.meta.get("width"),
-            pixel_h=result.meta.get("height"),
+            pixel_w=geo.get("pixel_w") or result.meta.get("width"),
+            pixel_h=geo.get("pixel_h") or result.meta.get("height"),
+            gsd=geo.get("gsd"),
+            geo_area=geo.get("geo_area"),
+            area_unit=geo.get("area_unit"),
         )
         written = writer.write_observations(tract_id, run_id, result.detections)
         dur = time.time() - t0

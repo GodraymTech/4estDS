@@ -99,9 +99,20 @@ def run_batch(
             item.fused_count = res.fused_count
             item.tree_count = len(res.detections)
             if persist and writer is not None:
+                from ..geo import compute_tract_geometry
+
+                geo = compute_tract_geometry(
+                    str(path), res.meta.get("width"), res.meta.get("height"),
+                    transform=getattr(src, "transform", None),
+                    crs=getattr(src, "crs", None),
+                ) or {}
                 tract_id = writer.ensure_tract(
                     acquisition_time, location,
-                    pixel_w=res.meta.get("width"), pixel_h=res.meta.get("height"),
+                    pixel_w=geo.get("pixel_w") or res.meta.get("width"),
+                    pixel_h=geo.get("pixel_h") or res.meta.get("height"),
+                    gsd=geo.get("gsd"),
+                    geo_area=geo.get("geo_area"),
+                    area_unit=geo.get("area_unit"),
                 )
                 item.tract_id = tract_id
                 writer.write_observations(tract_id, run_id, res.detections)
