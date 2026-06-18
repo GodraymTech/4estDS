@@ -115,6 +115,29 @@ def _cmd_infer(args: argparse.Namespace) -> int:
             geo_area=geo.get("geo_area"),
             area_unit=geo.get("area_unit"),
         )
+        # 阶段七: 多源 RGB × CHM 树高(提供 --chm 或 --dsm+--dem 时启用)
+        chm_path = getattr(args, "chm", None)
+        dsm_path = getattr(args, "dsm", None)
+        dem_path = getattr(args, "dem", None)
+        if chm_path or (dsm_path and dem_path):
+            from .fusion import build_chm_sampler
+            from .geo import resolve_geo
+
+            rgb_geo = resolve_geo(
+                args.image,
+                transform=getattr(source, "transform", None),
+                crs=getattr(source, "crs", None),
+            )
+            sampler = build_chm_sampler(
+                chm_path=chm_path, dsm_path=dsm_path, dem_path=dem_path,
+                rgb_transform=rgb_geo.transform if rgb_geo else None,
+                stat=str(settings.get("fusion.height_stat", "p95")),
+            )
+            if sampler is not None:
+                sampler.annotate(result.detections)
+                for _stype, _path in (("chm", chm_path), ("dsm", dsm_path), ("dem", dem_path)):
+                    if _path:
+                        writer.register_source(tract_id, _stype, _path)
         written = writer.write_observations(tract_id, run_id, result.detections)
         dur = time.time() - t0
         metrics = {
@@ -258,6 +281,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_infer.add_argument("--acquisition-time", dest="acquisition_time", help="地块时相 YYYYMM")
     p_infer.add_argument("--location", help="地块位置标识")
     p_infer.add_argument("--overlap", type=int, default=None, help="读窗外扩重叠像素(边界去重)")
+    p_infer.add_argument("--chm", default=None, help="[阶段七] CHM 冠层高度模型栈格路径(单波段),用于树高")
+    p_infer.add_argument("--dsm", default=None, help="[阶段七] DSM 地表高程,与 --dem 配合算 CHM")
+    p_infer.add_argument("--dem", default=None, help="[阶段七] DEM 裸地高程,与 --dsm 配合算 CHM")
     p_infer.add_argument(
         "--log-level", dest="log_level", default=None,
         choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="日志级别(默认读配置)",
