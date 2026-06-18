@@ -178,3 +178,35 @@ check("run_id propagates to child logger", ("run=" + _rid) in _out and len(_rid)
 check("stage4 size-dist logged", "冠幅像素尺寸 分布" in _out or "切片边长 分布" in _out)
 check("stage3 pipeline logged", "推理开始" in _out and "推理完成" in _out)
 print(f"[logging] checks so far: {ok}")
+
+print("[report]")
+from fourestds.report.metrics import compute_report as _compute_report, scale_class_breakdown as _scb, species_composition as _spc
+from fourestds.report.render import to_markdown as _to_md, to_csv as _to_csv
+_obs = (
+    [{"species": "avicennia", "crown_w_px": 40.0, "crown_h_px": 40.0, "crown_area_px": 1600.0, "confidence": 0.9, "slice_size": 512} for _ in range(6)]
+    + [{"species": "sonneratia", "crown_w_px": 80.0, "crown_h_px": 80.0, "crown_area_px": 6400.0, "confidence": 0.8, "slice_size": 1024} for _ in range(2)]
+)
+_rep = _compute_report(_obs, tract={"tract_id": "t-smoke", "geo_area": 40000.0}, run_id="r-smoke")
+check("report tree_count", _rep.tree_count == 8)
+check("report species composition", list(_spc(_obs))[0] == "avicennia")
+check("report crown dist median", _rep.crown_w_px["median"] == 40.0 and _rep.crown_w_px["max"] == 80.0)
+check("report density /ha", abs(_rep.density_per_ha - 2.0) < 1e-6)  # 8株 / 4ha
+_b = _scb(_obs)
+check("report scale-class share", _b["512"]["count"] == 6 and abs(_b["1024"]["ratio"] - 0.25) < 1e-9)
+check("report markdown sections", all(k in _to_md(_rep) for k in ["物种组成", "离散尺度档占比"]))
+check("report csv shape", "tree_count,8" in _to_csv(_rep))
+print(f"[report] checks so far: {ok}")
+
+print("[batch]")
+from fourestds.engine import run_batch as _run_batch, discover_inputs as _discover
+from pathlib import Path as _Path
+_bres = _run_batch(
+    [_Path("/tmp/p1.tif"), _Path("/tmp/p2.tif")],
+    get_detector("mock", trees=[(500, 500, 40), (2600, 2600, 30)]),
+    acquisition_time="202406",
+    source_factory=lambda p: SyntheticImageSource(4096, 4096),
+    persist=False, run_kwargs={"root_size": 1024, "min_size": 256},
+)
+check("batch all succeeded", _bres.succeeded == 2 and _bres.failed == 0)
+check("batch total trees", _bres.total_trees == 4)
+print(f"[batch] checks so far: {ok}")
