@@ -134,8 +134,8 @@ FastAPI 中间件校验 JWT 与 feature key。(TODO,阶段后期)
 - [x] 阶段三 推理引擎:切片清单编排 + WBF 去重 + 观测入库;mock 端到端可跑;yolo12/rtdetr 真实后端 + 分批推理 + 栓格影像源已接(需装 ultralytics/rasterio)
 - [x] 阶段五 后处理:尺度感知 WBF（标签感知不跨物种、score×权重坐标加权、conf_type 可选 max/avg、中心距离合并）+ 读窗外扩边界去重 + 截断框降权（soft-NMS 变体与可学习阈值 TODO）
 - [x] 阶段六 统计报告 / 批量处理:report 生成 md/csv/pdf(含物种柱状图/尺度档饼图)、batch 串行批量推理入库(依赖注入、单图失败不中断)、真实面积密度(从 .tfw/.prj 或内嵌 GeoTIFF 标签解析仿射变换,支持投影/地理坐标系)
-- [x] 阶段七 创新点 B:多源融合(RGB×CHM 树高:CHM=DSM−DEM、仿射配准跨分辨率采样 p95/max、nodata/负值/超限兜底、多源文件登记;多光谱物种特征 TODO)
-- [~] 阶段八 创新点 C:生命周期追踪(最近邻匹配基础,匈牙利/生长曲线 TODO)
+- [x] 阶段��� 创新点 B:多源融合(RGB×CHM 树高:CHM=DSM−DEM、仿射配准跨分辨率采样 p95/max、nodata/负值/超限兜底、多源文件登记;多光谱物种特征 TODO)
+- [x] 阶段八 创新点 C:单木生命周期追踪(匈牙利最优匹配,无 scipy;位置门控 + 冠幅/树高/物种多特征代价;跨时相个体识别与新生/枯死;生长轨迹线性拟合;`track` 子命令落库 tree_individuals/tract_trees;前端可视化 TODO)
 
 图例:`[x]` 已可用 · `[~]` 骨架就绪 + TODO
 
