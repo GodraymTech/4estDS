@@ -152,14 +152,19 @@ def write_observations(
         for d in detections:
             obs_id = f"obs_{uuid.uuid4().hex[:12]}"
             cx, cy = d.center
+            extra = getattr(d, "extra", None) or {}
+            height = extra.get("height")
+            height_source = extra.get("height_source")
             conn.execute(
                 "INSERT INTO tree_observations "
                 "(obs_id, tract_id, run_id, species, confidence, box_px_full, "
-                " crown_w_px, crown_h_px, crown_area_px, geom_point, slice_size) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " crown_w_px, crown_h_px, crown_area_px, height, height_source, "
+                " geom_point, slice_size) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (obs_id, tract_id, run_id, d.label, d.score,
                  json.dumps([d.x1, d.y1, d.x2, d.y2]),
                  d.width, d.height, d.width * d.height,
+                 height, height_source,
                  f"POINT({cx} {cy})", slice_size),
             )
             n += 1
@@ -181,5 +186,40 @@ def count_observations(run_id: str, *, url: str | None = None) -> int:
             "SELECT COUNT(*) FROM tree_observations WHERE run_id=?", (run_id,)
         ).fetchone()
         return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def register_source(
+    tract_id: str,
+    source_type: str,
+    path: str,
+    *,
+    meta: dict | None = None,
+    url: str | None = None,
+) -> str:
+    """登记地块的一个多源文件(RGB/CHM/DSM/DEM/多光谱)。
+
+    按 (tract_id, source_type, path) 幂等: 已存在则返回原 source_id。
+    """
+    conn = _connect(url)
+    try:
+        row = conn.execute(
+            "SELECT source_id FROM tract_sources "
+            "WHERE tract_id=? AND source_type=? AND path=?",
+            (tract_id, source_type, path),
+        ).fetchone()
+        if row:
+            return row[0]
+        source_id = f"src_{uuid.uuid4().hex[:10]}"
+        conn.execute(
+            "INSERT INTO tract_sources (source_id, tract_id, source_type, path, meta_json) "
+            "VALUES (?,?,?,?,?)",
+            (source_id, tract_id, source_type, path,
+             json.dumps(meta, ensure_ascii=False) if meta else None),
+        )
+        conn.commit()
+        log.info("多源登记: tract=%s type=%s path=%s", tract_id, source_type, path)
+        return source_id
     finally:
         conn.close()
