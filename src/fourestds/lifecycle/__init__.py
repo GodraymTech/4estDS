@@ -10,6 +10,20 @@ from __future__ import annotations
 
 import math
 
+from .matching import (
+    MatchResult,
+    TreeRecord,
+    build_cost_matrix,
+    linear_sum_assignment,
+    match_trees,
+)
+from .tracking import (
+    GrowthPoint,
+    Individual,
+    TrackingResult,
+    track_sequence,
+)
+
 Point = tuple[float, float]
 
 
@@ -44,3 +58,20 @@ def match_nearest(
         used_prev.add(i)
         used_curr.add(j)
     return pairs
+
+
+__all__ = [
+    "Point",
+    "distance",
+    "match_nearest",
+    # 阶段八:跨时相匹配与生命周期追踪
+    "MatchResult",
+    "TreeRecord",
+    "build_cost_matrix",
+    "linear_sum_assignment",
+    "match_trees",
+    "GrowthPoint",
+    "Individual",
+    "TrackingResult",
+    "track_sequence",
+]
