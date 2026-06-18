@@ -133,7 +133,7 @@ FastAPI 中间件校验 JWT 与 feature key。(TODO,阶段后期)
 - [x] 阶段四 创新点 A:切片优化数学核心(可单测)
 - [x] 阶段三 推理引擎:切片清单编排 + WBF 去重 + 观测入库;mock 端到端可跑;yolo12/rtdetr 真实后端 + 分批推理 + 栓格影像源已接(需装 ultralytics/rasterio)
 - [x] 阶段五 后处理:尺度感知 WBF（标签感知不跨物种、score×权重坐标加权、conf_type 可选 max/avg、中心距离合并）+ 读窗外扩边界去重 + 截断框降权（soft-NMS 变体与可学习阈值 TODO）
-- [~] 阶段六 统计报告 / 批量处理(出图与导出 TODO)
+- [x] 阶段六 统计报告 / 批量处理:report 生成 md/csv/pdf(含物种柱状图/尺度档饼图)、batch 串行批量推理入库(依赖注入、单图失败不中断);真实面积密度/仿射变换待地理坐标接入 TODO
 - [~] 阶段七 创新点 B:多源融合(CHM 求树高已有标量,接入栅格 TODO)
 - [~] 阶段八 创新点 C:生命周期追踪(最近邻匹配基础,匈牙利/生长曲线 TODO)
 
@@ -173,3 +173,40 @@ INFO | fourestds.engine.runner      | 推理完成: tiles=40 处理=40 跳空=0 
 ```
 
 > 分布工具 `summarize_distribution(values)` / `log_distribution(log, label, values)` 可复用于任何数值序列（树高、置信度、面积…）。
+
+
+## 阶段六：统计报告与批量处理
+
+### 统计报告 `report`
+基于已入库的观测数据，生成专业统计报告。支持 Markdown / CSV / PDF 三种格式，PDF 内嵌物种组成柱状图与离散尺度档饼图（创新点 A 的尺度聚类落地呈现）。
+
+```bash
+# 按地块时相 + 位置定位最近一次 run，生成 Markdown
+4estds report --acquisition-time 202406 --location demo-A --format md
+
+# 生成 CSV（便于二次分析）
+4estds report --acquisition-time 202406 --location demo-A --format csv
+
+# 生成带图表的 PDF
+4estds report --acquisition-time 202406 --location demo-A --format pdf
+
+# 也可直接用 tract-id / run-id 定位
+4estds report --tract-id tract_202406_xxxx --run-id <run_id> --format pdf
+```
+
+报告含五个部分：①总量与密度 ②物种组成 ③冠幅与尺寸分布（像素）④置信度与树高 ⑤离散尺度档占比。
+
+**优雅降级**：未安装 `matplotlib` 时跳过出图；未安装 `reportlab` 时 PDF 自动回退为 Markdown，主流程不中断。
+密度（株/公顷）需地块真实面积，待仿射变换/地理坐标接入后自动补全（当前标注 TODO）。
+
+### 批量处理 `batch`
+对一个目录下的多幅 RGB 影像串行批量推理并入库，每幅图独立 run、独立 run_log；单幅失败不中断整批。
+
+```bash
+4estds batch --input-dir /data/plots --glob "*.tif" --arch yolo12 --acquisition-time 202406
+# 沙盒/无权重环境可用 mock 验证编排
+4estds batch --input-dir /data/plots --glob "*.tif" --arch mock
+```
+
+架构上 `run_batch` 采用依赖注入（`source_factory` 注入影像源、`detector` 注入后端、`writer` 注入入库层），
+因此可在不碰真实文件/GPU 的前提下用合成影像源完成单测。
