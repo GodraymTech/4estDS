@@ -136,6 +136,7 @@ FastAPI 中间件校验 JWT 与 feature key。(TODO,阶段后期)
 - [x] 阶段六 统计报告 / 批量处理:report 生成 md/csv/pdf(含物种柱状图/尺度档饼图)、batch 串行批量推理入库(依赖注入、单图失败不中断)、真实面积密度(从 .tfw/.prj 或内嵌 GeoTIFF 标签解析仿射变换,支持投影/地理坐标系)
 - [x] 阶段��� 创新点 B:多源融合(RGB×CHM 树高:CHM=DSM−DEM、仿射配准跨分辨率采样 p95/max、nodata/负值/超限兜底、多源文件登记;多光谱物种特征 TODO)
 - [x] 阶段八 创新点 C:单木生命周期追踪(匈牙利最优匹配,无 scipy;位置门控 + 冠幅/树高/物种多特征代价;跨时相个体识别与新生/枯死;生长轨迹线性拟合;`track` 子命令落库 tree_individuals/tract_trees;前端可视化 TODO)
+- [~] 阶段九 前端商业化平台:营销官网(About/Contact/Pricing/法务)+ 应用控制台(地图中控/推理工作台/单木与报告/生命周期可视化)+ FastAPI 桥接 + Supabase 按功能授权;规划已定稿见 `docs/4estDS前端规划方案.md`(实现 TODO)
 
 图例:`[x]` 已可用 · `[~]` 骨架就绪 + TODO
 
