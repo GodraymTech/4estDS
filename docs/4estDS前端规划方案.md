@@ -68,7 +68,7 @@ flowchart TB
 | 国际化 | **i18next**(中/英) | 商业出海必备 |
 | API 客户端 | **openapi-typescript**(从 FastAPI OpenAPI 生成) | 前后端类型契约统一 |
 | 测试 | **Vitest + Testing Library + Playwright + MSW** | 单测/组件/E2E/接口 mock |
-| 后端 API | **FastAPI** 复用核心引擎 | 与 CLI 共享 `fourestds` 核心 |
+| 后端 API | **FastAPI** 复用核心引擎 | 与 CLI 共享 `forestds` 核心 |
 
 **主推**:`Vite + React + TS + shadcn/ui + Tailwind + TanStack + Tremor + MapLibre/deck.gl`,以 **Shadcn Admin** 这类开源商业模板为脚手架参考。若偏好开箱即用的企业密集表格,可整体切到 **Ant Design Pro**(待拍板)。
 
@@ -117,7 +117,7 @@ flowchart TB
 
 ## 5. 后端 API 契约(FastAPI 桥接层)
 
-复用 `fourestds` 核心(与 CLI 同一逻辑),FastAPI 暴露 REST + 任务接口;OpenAPI → 前端类型化客户端。
+复用 `forestds` 核心(与 CLI 同一逻辑),FastAPI 暴露 REST + 任务接口;OpenAPI → 前端类型化客户端。
 
 - `GET/POST /tracts`、`/tracts/{id}`、`/tracts/{id}/sources`(上传与登记)
 - `POST /infer`(异步,返回 run_id)、`GET /runs/{id}`、`GET /runs/{id}/logs`(SSE/轮询实时日志)

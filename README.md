@@ -1,49 +1,15 @@
-# 4estDS — 红树林单木智能解译平台
+# 4estDS — 林木智能检测系统
 
-> Mangrove individual-tree intelligent interpretation platform.
+> forest detection system
 > 从超大正射影像中,自动、可追溯地解译每一棵红树,并跨时相追踪其生命周期。
-
-本仓库是分阶段构建的工程骨架。**每个阶段都保证可运行、可测试、可独立 commit**;尚未完成的功能以 `TODO` 显式标记,不影响整体运行。
-
----
-
-## 为什么
-
-红树林监测面临三个工程难点,本项目逐一对应:
-
-1. **超大影像 + 固定输入的检测器** → 创新点 A:最优多尺度规则切片(本仓库已实现数学核心)。
-2. **RGB 信息不足以判高/判种** → 创新点 B:RGB + CHM/多光谱跨模态融合。
-3. **多期影像如何认出"同一棵树"** → 创新点 C:单木生命周期追踪(项目最核心价值)。
-
----
-
-## 安装
-
-推荐使用 [uv](https://github.com/astral-sh/uv):
-
-```bash
-# 仅核心(可跑 CLI / 切片优化 / 建库)
-uv sync
-
-# 按需安装重依赖(按模块分组,不必一次装全)
-uv sync --extra geo --extra yolo --extra infer --extra preprocess --extra db
-```
-
-或用 pip:
-
-```bash
-pip install -e ".[dev]"
-```
-
-> ⚙️ **优雅降级设计**:`loguru / typer / pydantic-settings / sqlalchemy` 等重依赖在
-> `pyproject.toml` 中声明。运行时**装了就用、没装自动回退到标准库**,因此最小环境下
-> CLI、切片优化、`db init`、全部单元测试都能直接跑通。
-
----
 
 ## 快速开始
 
 ```bash
+git clone https://github.com/GodraymTech/4estDS.git
+cd 4estDS
+uv sync --extra detect --extra geo
+
 4estds --version
 4estds db init                 # 在 ~/.4estDS/db 下创建三层单木模型
 4estds preprocess              # 运行创新点 A 的切片优化演示
@@ -54,7 +20,7 @@ pip install -e ".[dev]"
 pytest -q                      # 跑全部单元测试
 ```
 
-运行期数据目录默认 `~/.4estDS`(可用环境变量 `FOURESTDS_HOME` 覆盖),
+运行期数据目录默认 `~/.4estDS`(可用环境变量 `forestds_HOME` 覆盖),
 子目录:`config / cache / logs / db / outputs / models / tmp`。
 
 ---
@@ -63,7 +29,7 @@ pytest -q                      # 跑全部单元测试
 
 一句话:**给定影像 GSD 与检测器输入尺寸,自动算出最优的切片边长 T\* 与重叠 o\*,并给出可证明的最优性**,而不是拍脑袋设 1024/overlap=0.2。
 
-关键函数(`src/fourestds/preprocess/slicing.py`,均为纯 Python、可单测):
+关键函数(`src/forestds/preprocess/slicing.py`,均为纯 Python、可单测):
 
 | 步骤 | 函数 | 作用 |
 |------|------|------|
@@ -153,7 +119,7 @@ CI 见 `.github/workflows/ci.yml`(ruff + pytest)。
 
 ## 日志与可观测（跟踪进度 / debug）
 
-统一日志通道：所有模块用 `get_logger(__name__)` 取 logger，挂在 `fourestds` 根下；
+统一日志通道：所有模块用 `get_logger(__name__)` 取 logger，挂在 `forestds` 根下；
 `setup_logging()` 同时输出到**控制台 + 滚动文件**（`~/.4estDS/logs/4estds_<run_id>.log`，20MB×5）。
 每条日志携带 `run_id`，一次运行的全部日志可按它串起来查。装了 `loguru` 则自动走 loguru sink（InterceptHandler 转发），未装则纯标准库。
 
@@ -167,10 +133,10 @@ cat ~/.4estDS/logs/4estds_*.log
 阶段四（切片数学核心）会打印：
 
 ```
-INFO | fourestds.preprocess.slicing | 冠幅像素尺寸 分布: n=8 min=8.0px p10=8.7px median=41.0px mean=50.5px p90=123.0px max=130.0px std=45.5px
-INFO | fourestds.preprocess.slicing | 离散尺度集(k=3): [9.0px, 42.3px, 124.9px]
-INFO | fourestds.preprocess.slicing | 四叉树切片: 共 40 块 (root=1024 min=256 图4096x4096) 层级分布[L0:8, L1:32]
-INFO | fourestds.engine.runner      | 推理完成: tiles=40 处理=40 跳空=0 原始框=93 融合后=60 去重率=35.5% 耗时=0.12s
+INFO | forestds.preprocess.slicing | 冠幅像素尺寸 分布: n=8 min=8.0px p10=8.7px median=41.0px mean=50.5px p90=123.0px max=130.0px std=45.5px
+INFO | forestds.preprocess.slicing | 离散尺度集(k=3): [9.0px, 42.3px, 124.9px]
+INFO | forestds.preprocess.slicing | 四叉树切片: 共 40 块 (root=1024 min=256 图4096x4096) 层级分布[L0:8, L1:32]
+INFO | forestds.engine.runner      | 推理完成: tiles=40 处理=40 跳空=0 原始框=93 融合后=60 去重率=35.5% 耗时=0.12s
 ```
 
 > 分布工具 `summarize_distribution(values)` / `log_distribution(log, label, values)` 可复用于任何数值序列（树高、置信度、面积…）。

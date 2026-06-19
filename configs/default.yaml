@@ -1,9 +1,9 @@
 # 4estDS 默认配置(最低优先级)。
-# 分层顺序: 本文件 -> ~/.4estDS/config.yaml -> 环境变量(FOURESTDS_*) -> CLI 覆盖
+# 分层顺序: 本文件 -> ~/.4estDS/config.yaml -> 环境变量(forestds_*) -> CLI 覆盖
 
 app:
   name: 4estDS
-  codename: fourestds
+  codename: forestds
 
 logging:
   level: INFO
