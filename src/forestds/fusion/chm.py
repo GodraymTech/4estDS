@@ -100,18 +100,18 @@ def load_single_band(path: str):
             if nod is not None:
                 arr = np.where(arr == np.float32(nod), np.nan, arr).astype("float32")
             geo = resolve_geo(path, transform=ds.transform, crs=ds.crs)
-        log.info("[fusion] rasterio 载入单波段: %s 尺寸=%s", path, (arr.shape[1], arr.shape[0]))
+        log.info("[fusion] rasterio 载入单波段: {} 尺寸={}", path, (arr.shape[1], arr.shape[0]))
         return arr, geo
     except ImportError:
         pass
     except Exception as e:  # 损坏/不支持 -> 回退 Pillow
-        log.warning("[fusion] rasterio 读取失败,回退 Pillow: %s (%s)", path, e)
+        log.warning("[fusion] rasterio 读取失败,回退 Pillow: {} ({})", path, e)
     from PIL import Image
 
     with Image.open(path) as im:
         arr = np.asarray(im.convert("F"), dtype="float32")
     log.warning(
-        "[fusion] 未装 rasterio,Pillow 整图载入单波段: %s 尺寸=%s",
+        "[fusion] 未装 rasterio,Pillow 整图载入单波段: {} 尺寸={}",
         path, (arr.shape[1], arr.shape[0]),
     )
     geo = resolve_geo(path)
@@ -190,7 +190,7 @@ class CHMSampler:
             else:
                 n_unreg += 1
         log.info(
-            "[fusion] 树高标注: 成功=%d nodata=%d 超限=%d 未配准=%d",
+            "[fusion] 树高标注: 成功={} nodata={} 超限={} 未配准={}",
             n_h, n_nod, n_out, n_unreg,
         )
         if heights:
@@ -221,7 +221,7 @@ def build_chm_sampler(
         dsm, dsm_geo = load_single_band(dsm_path)
         dem, dem_geo = load_single_band(dem_path)
         if dsm.shape != dem.shape:
-            log.warning("[fusion] DSM/DEM 尺寸不一致,跳过 CHM: %s vs %s", dsm.shape, dem.shape)
+            log.warning("[fusion] DSM/DEM 尺寸不一致,跳过 CHM: {} vs {}", dsm.shape, dem.shape)
             return None
         chm = chm_from_dsm_dem(dsm, dem)
         chm_geo = dsm_geo or dem_geo

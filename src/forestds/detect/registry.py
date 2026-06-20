@@ -1,7 +1,7 @@
 """检测器后端注册表。
 
 通过 `@register("name")` 装饰器注册后端类;`get_detector(arch)` 延迟导入并实例化。
-内置后端:yolo12 / rtdetr / mock。
+内置后端:yolo12 / rtdetr。
 """
 from __future__ import annotations
 

@@ -71,7 +71,7 @@ def expected_truncation(sizes: list[float], tile: float, overlap: float) -> floa
 @dataclass
 class TileParams:
     tile: int          # 切片边长(原始像素)
-    overlap: int       # 重叠(原始像素)
+    overlap_ratio: float  # 重叠率
     scale_px: float    # 该档代表冠幅像素尺寸
     exp_trunc: float   # 期望截断概率
     cost: float        # 目标函数值
@@ -119,7 +119,7 @@ def optimize_tile_params(
             density = (model_input / step) ** 2
             cost = density + lambda_cost * trunc
             cand = TileParams(
-                tile=tile, overlap=overlap, scale_px=scale_px,
+                tile=tile, overlap_ratio=r, scale_px=scale_px,
                 exp_trunc=trunc, cost=cost,
             )
             # 记录放宽解(仅要求可检测)
@@ -132,25 +132,26 @@ def optimize_tile_params(
 
     if best is not None:
         log.info(
-            "最优切片(严格解 scale=%.1fpx): tile=%d overlap=%d exp_trunc=%.3f cost=%.3f t_max=%.1f",
-            scale_px, best.tile, best.overlap, best.exp_trunc, best.cost, t_max,
+            "最优切片(严格解 scale={:.1f}px): tile={} overlap_ratio={:.2%} exp_trunc={:.3f} cost={:.3f} t_max={:.1f}",
+            scale_px, best.tile, best.overlap_ratio, best.exp_trunc, best.cost, t_max,
         )
         return best
     if relaxed_best is not None:
         log.warning(
-            "最优切片(放宽解 scale=%.1fpx, 截断约束未满足): tile=%d overlap=%d exp_trunc=%.3f cost=%.3f",
-            scale_px, relaxed_best.tile, relaxed_best.overlap, relaxed_best.exp_trunc, relaxed_best.cost,
+            "最优切片(放宽解 scale={:.1f}px, 截断约束未满足): tile={} overlap_ratio={:.2%} exp_trunc={:.3f} cost={:.3f}",
+            scale_px, relaxed_best.tile, relaxed_best.overlap_ratio, relaxed_best.exp_trunc, relaxed_best.cost,
         )
         return relaxed_best
     # 连可检测性都无法满足(目标太大):选最小切片作为兜底
     tile = min(tile_grid)
-    overlap = int(round(tile * overlap_ratios[len(overlap_ratios) // 2]))
+    r_mid = overlap_ratios[len(overlap_ratios) // 2]
+    overlap = int(round(tile * r_mid))
     trunc = truncation_probability(w_large_px, tile, overlap)
     log.warning(
-        "最优切片(兑底解 scale=%.1fpx 目标过大 t_max=%.1f): tile=%d overlap=%d exp_trunc=%.3f",
-        scale_px, t_max, tile, overlap, trunc,
+        "最优切片(兑底解 scale={:.1f}px 目标过大 t_max={:.1f}): tile={} overlap_ratio={:.2%} exp_trunc={:.3f}",
+        scale_px, t_max, tile, r_mid, trunc,
     )
-    return TileParams(tile, overlap, scale_px, trunc, float("inf"))
+    return TileParams(tile, r_mid, scale_px, trunc, float("inf"))
 
 
 # --------------------------------------------------------------------------- #
@@ -190,7 +191,7 @@ def cluster_scales(sizes: list[float], k: int = 3, iters: int = 50) -> list[floa
     sizes_valid = [s for s in sizes if s > 0]
     log_distribution(log, "冠幅像素尺寸", sizes_valid, unit="px")
     log.info(
-        "离散尺度集(k=%d): [%s]",
+        "离散尺度集(k={}): [{}]",
         len(result),
         ", ".join(f"{c:.1f}px" for c in result),
     )
@@ -294,12 +295,12 @@ def build_quadtree(
             levels[t.level] = levels.get(t.level, 0) + 1
         hist = ", ".join(f"L{lv}:{levels[lv]}" for lv in sorted(levels))
         log.info(
-            "四叉树切片: 共 %d 块 (root=%d min=%d 图%dx%d) 层级分布[%s]",
+            "四叉树切片: 共 {} 块 (root={} min={} 图{}x{}) 层级分布[{}]",
             len(tiles), root_size, min_size, width, height, hist,
         )
         log_distribution(log, "切片边长", [t.size for t in tiles], unit="px")
     else:
-        log.warning("四叉树切片: 未生成任何 tile (图%dx%d)", width, height)
+        log.warning("四叉树切片: 未生成任何 tile (图{}x{})", width, height)
     return tiles
 
 

@@ -49,7 +49,9 @@ def subdir(name: str) -> Path:
 
 
 def config_file() -> Path:
-    return home_dir() / "config" / "config.yaml"
+    # return home_dir() / "config" / "config.yaml"
+    # TODO: debug，暂时改用。
+    return Path("/home/ray/rays/repos/4estDS/configs/default.yaml")
 
 
 def logs_dir() -> Path:

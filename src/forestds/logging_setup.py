@@ -42,25 +42,35 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
     _CURRENT_RUN_ID = run_id
 
     def _formatter(record) -> str:
-        name = record["name"]
-        if name.startswith("forestds."):
-            name = name[9:]
+        import os
+        try:
+            # 自动计算相对于当前工作区根目录的物理相对路径，实现 VS Code/Cursor 终端中 Cmd/Ctrl+Click 的完美超链接跳转
+            rel_path = os.path.relpath(record["file"].path)
+        except Exception:
+            rel_path = record["file"].name
+        
+        exc_part = "{exception}" if record["exception"] else ""
         return (
             f"<green>{{time:YYYY-MM-DD HH:mm:ss}}</green> | "
             f"<level>{{level: <4}}</level> | "
             f"<cyan>{{extra[run_id]}}</cyan> | "
-            f"<cyan>{name}:{{line}}</cyan> | "
-            f"<level>{{message}}</level>\n"
+            f"<cyan>{rel_path}:{{line}}</cyan> | "
+            f"<level>{{message}}</level>\n{exc_part}"
         )
+
+    def _filter(record) -> bool:
+        # 仅放行本项目模块 (forestds) 与主入口模块 (__main__) 的日志，过滤其它依赖日志
+        name = record["name"]
+        return name.startswith("forestds") or name == "__main__"
 
     _loguru_logger.remove()
     _loguru_logger.configure(extra={"run_id": _CURRENT_RUN_ID})
-    _loguru_logger.add(sys.stderr, level=level, format=_formatter, enqueue=True)
+    _loguru_logger.add(sys.stderr, level=level, format=_formatter, filter=_filter, enqueue=True)
     if to_file:
         log_path = paths.logs_dir() / f"4estds_{_CURRENT_RUN_ID}.log"
         _loguru_logger.add(
             str(log_path), level=level, format=_formatter,
-            rotation="20 MB", retention=5, enqueue=True,
+            filter=_filter, rotation="20 MB", retention=5, enqueue=True,
         )
 
     class InterceptHandler(logging.Handler):
@@ -92,6 +102,10 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
 
     # 全局重定向标准 library logging 到 loguru InterceptHandler
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+
+    # 显式限制第三方高噪声依赖的日志等级，避免其底层 C/C++ 库 (如 GDAL) 的 DEBUG 日志倾泻
+    for noise_logger in ("rasterio", "gdal", "fiona", "shapely", "PIL", "matplotlib", "urllib3"):
+        logging.getLogger(noise_logger).setLevel(logging.WARNING)
 
     _loguru_logger.debug("loguru logging initialised")
     return _loguru_logger, _CURRENT_RUN_ID
@@ -153,6 +167,6 @@ def format_distribution(values, *, unit: str = "") -> str:
 def log_distribution(log, label: str, values, *, unit: str = "", level: str | int = "INFO") -> dict:
     """打印并返回分布摘要。供“尺寸分布估计”等场景一行观测。"""
     summary = summarize_distribution(values)
-    log.log(level, "%s 分布: %s", label, format_distribution(values, unit=unit))
+    log.log(level, "{} 分布: {}", label, format_distribution(values, unit=unit))
     return summary
 

@@ -6,7 +6,7 @@ app:
   codename: forestds
 
 logging:
-  level: INFO
+  level: DEBUG
   rotation_mb: 20        # 单个日志文件滚动大小(MB)
   backups: 5
   to_db: true            # 是否把 run 记录写入 run_logs 表
@@ -20,18 +20,48 @@ detect:
   arch: yolo12            # yolo12 | rtdetr
   conf_threshold: 0.25
   iou_threshold: 0.6
-  model_input: 1024       # 模型输入边长(像素)
+  model_input: 640       # 模型输入边长(像素)
+  batch_size: 16          # 批量推理单批次最大子图数，防 OOM
+  draw_box: true         # 推理后是否在原图上绘制检测框输出保存
+  models:
+    yolo12:
+      weights: "m03-yolo12x-det-2cls-SOTA.pt"
+    rtdetr:
+      weights: "rtdetr_l.pt"
 
-slicing:
-  # 创新点 A 参数(自适应切片)
-  expected_crown_m: 4.0   # 期望平均冠幅物理尺寸(米),用于 GSD 归一
-  d_min_px: 24            # 最小冠幅在模型输入下的最小可检测像素
-  epsilon: 0.05           # 允许的大冠幅截断概率上界
-  large_quantile: 0.95    # 用于完整性约束的大冠幅分位
-  lambda_cost: 0.15       # 算力代价权重
-  max_scales: 3           # 离散最优尺度集的最大档数 K
-  fallback_tile: 1024     # 全局回退切片尺寸
-  fallback_overlap: 0.2   # 全局回退 overlap 比例
+preprocess:
+  # COG (Cloud Optimized GeoTIFF) 检查与转换配置
+  cog:
+    enable: true
+    out_suffix: "_cog.tif"      # 转换后的输出后缀
+    block_size: 512             # COG 瓦片大小 (通常为 512 或 256)
+    compress: "deflate"         # 压缩算法 (deflate / lzw)
+    resampling: "nearest"       # 金字塔重采样方法 (nearest/bilinear/cubic/average)
+    min_overview_dim: 256       # 金字塔构建停止的最小尺寸维度
+
+  # 切片 (Slicing) 基础配置
+  slice:
+    enable: true
+    action: "none"             # 切片执行行为: slice (执行切片落盘) | none (仅计算参数，不落盘)
+    default_tile: 640           # 非 TIFF 图像或回退时的默认切片大小
+    default_overlap: 0.2        # 默认重叠率 (0.0 - 0.5)
+    save_quality: 95            # 切片导出 JPEG 瓦片时的压缩质量
+
+    # SCOPE 预推理自适应求解切片参数
+    scope:
+      enable: true              # 对 TIFF 影像是否启用 SCOPE 自标定，False 则用默认/先验参数
+      seed_window_size: 2560    # 采样种子窗口边长
+      sample_delta: 4           # 每一轮采样追加的种子窗口数
+      sample_budget: 16         # 采样种子窗口上限数目
+      nodata_tolerance: 0.10    # 每个种子窗口允许的 nodata 占比上限
+      iou_threshold: 0.45       # 跨尺度合并去重的 IoU 阈值
+      large_quantile: 0.95      # 用于完整性约束的大冠幅分位数
+      lambda_cost: 0.15         # 算力代价在联合优化目标中的权重
+      d_min_px: 24              # 最小冠幅在模型输入下的最小可检测像素 (常数，用于约束求解)
+      incomplete_area_ratio: 0.9  # 非完整树过滤面积占比阈值
+      incomplete_border_px: 2     # 非完整树贴边判定边界距离（像素）
+      tile_grid: [512, 640, 768, 896, 1024, 1280, 1536, 2048] # 寻优边长候选集
+      overlap_grid: [0.1, 0.15, 0.2, 0.25, 0.3]              # 寻优重叠率候选集
 
 export:
   formats: [shp, geojson, gpkg, csv]

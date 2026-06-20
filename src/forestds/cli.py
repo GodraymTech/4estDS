@@ -18,14 +18,17 @@ from . import __codename__, __version__, paths
 from .config import load_settings
 from .logging_setup import setup_logging
 
-app = typer.Typer(help="4estDS - 林木智能检测系统 (forest detection system)")
+app = typer.Typer(
+    help="4estDS - 林木智能检测系统 (forest detection system)",
+    pretty_exceptions_enable=False
+)
 
 
 def _bootstrap(level: str | None = None):
     paths.ensure_home()
     settings = load_settings()
     _, run_id = setup_logging(
-        level=level or settings.get("logging.level", "INFO")
+        level=level or settings.get("level", "INFO")
     )
     return settings, run_id
 
@@ -36,21 +39,22 @@ def cmd_infer(
     arch: Optional[str] = Option(None, "--arch", help="模型架构 (yolo12 / rtdetr)"),
     acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYMM"),
     location: Optional[str] = Option(None, "--location", help="地块位置标识"),
-    overlap: Optional[int] = Option(None, "--overlap", help="读窗外扩重叠像素(边界去重)"),
+    overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="重叠率 (0.0~1.0，如0.15代表15%)"),
     chm: Optional[str] = Option(None, "--chm", help="[阶段七] CHM 冠层高度模型栈格路径(单波段),用于树高"),
     dsm: Optional[str] = Option(None, "--dsm", help="[阶段七] DSM 地表高程,与 --dem 配合算 CHM"),
     dem: Optional[str] = Option(None, "--dem", help="[阶段七] DEM 裸地高程,与 --dsm 配合算 CHM"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
+    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否绘制边界框并保存结果图像"),
 ) -> int:
     import time
 
     args = SimpleNamespace(
         image=image, arch=arch, acquisition_time=acquisition_time, location=location,
-        overlap=overlap, chm=chm, dsm=dsm, dem=dem, log_level=log_level
+        overlap_rate=overlap_rate, chm=chm, dsm=dsm, dem=dem, log_level=log_level, draw_box=draw_box
     )
 
     settings, run_id = _bootstrap(args.log_level)
-    arch_val = args.arch or settings.get("detect.arch", "yolo12")
+    arch_val = args.arch or settings.get("arch", "yolo12")
     from .db import writer
     from .detect import get_detector
     from .engine import run_inference
@@ -71,26 +75,26 @@ def cmd_infer(
 
         detector = get_detector(
             arch_val,
-            weights=settings.get("detect.weights", None),
-            conf=float(settings.get("detect.conf_thr", 0.25)),
-            iou=float(settings.get("postprocess.iou_thr", 0.55)),
-            imgsz=int(settings.get("detect.model_input", 1024)),
-            device=settings.get("detect.device", None),
+            weights=settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights")),
+            conf=float(settings.get("conf_threshold", 0.25)),
+            iou=float(settings.get("detect.iou_threshold", 0.6)),
+            imgsz=int(settings.get("model_input", 1024)),
+            device=settings.get("device", None),
         )
         source = RasterImageSource(args.image)
 
         result = run_inference(
             source, detector,
-            root_size=int(settings.get("slicing.root_size", 1024)),
-            min_size=int(settings.get("slicing.min_size", 256)),
-            conf_thr=float(settings.get("detect.conf_thr", 0.25)),
-            iou_thr=float(settings.get("postprocess.iou_thr", 0.55)),
-            overlap_px=int(
-                args.overlap
-                if args.overlap is not None
-                else settings.get("slicing.overlap_px", 0)
+            root_size=int(settings.get("root_size", 1024)),
+            min_size=int(settings.get("min_size", 256)),
+            conf_thr=float(settings.get("conf_threshold", 0.25)),
+            iou_thr=float(settings.get("detect.iou_threshold", 0.6)),
+            overlap_rate=float(
+                args.overlap_rate
+                if args.overlap_rate is not None
+                else settings.get("default_overlap", 0.2)
             ),
-            conf_type=str(settings.get("postprocess.conf_type", "max")),
+            conf_type=str(settings.get("conf_type", "max")),
         )
         from .geo import compute_tract_geometry
 
@@ -107,7 +111,7 @@ def cmd_infer(
             )
         tract_id = writer.ensure_tract(
             args.acquisition_time or "000000",
-            args.location or "demo",
+            args.location or "default",
             pixel_w=geo.get("pixel_w") or result.meta.get("width"),
             pixel_h=geo.get("pixel_h") or result.meta.get("height"),
             gsd=geo.get("gsd"),
@@ -130,7 +134,7 @@ def cmd_infer(
             sampler = build_chm_sampler(
                 chm_path=chm_path, dsm_path=dsm_path, dem_path=dem_path,
                 rgb_transform=rgb_geo.transform if rgb_geo else None,
-                stat=str(settings.get("fusion.height_stat", "p95")),
+                stat=str(settings.get("height_stat", "p95")),
             )
             if sampler is not None:
                 sampler.annotate(result.detections)
@@ -138,6 +142,17 @@ def cmd_infer(
                     if _path:
                         writer.register_source(tract_id, _stype, _path)
         written = writer.write_observations(tract_id, run_id, result.detections)
+        
+        # 绘制检测框输出保存（系统架构复用 visualize 模块）
+        do_draw = args.draw_box if args.draw_box is not None else settings.get("draw_box", False)
+        if do_draw:
+            from .visualize import draw_detections_on_image
+            from pathlib import Path
+            out_dir = paths.outputs_dir()
+            out_dir.mkdir(parents=True, exist_ok=True)
+            vis_out = out_dir / f"{Path(args.image).stem}_detected.jpg"
+            draw_detections_on_image(args.image, result.detections, output_path=vis_out)
+            logger.info(f"[infer] 检测框结果图已保存至: {vis_out}")
         dur = time.time() - t0
         metrics = {
             "tiles_total": result.tiles_total,
@@ -167,130 +182,145 @@ def cmd_infer(
             source.close()
 
 
-@app.command("preprocess", help="超大图像自适应切片并保存为独立切片")
+@app.command("preprocess", help="影像预处理(自适应切片与 COG 转换)")
 def cmd_preprocess(
-    tiff: Optional[str] = Option(None, "--tiff", help="输入 GeoTIFF 路径"),
-    out_dir: Optional[str] = Option(None, "--out-dir", "--out", help="输出目录 (默认 <home>/outputs/tiles)"),
+    image: str = Argument(..., help="输入影像/图像路径(支持 TIFF/PNG/JPG 等)"),
+    out_dir: Optional[str] = Option(None, "--out-dir", "--out", help="切片输出目录 (默认 <home>/outputs/preprocess/tiles__xxx/)"),
     tile_size: Optional[int] = Option(None, "--tile-size", help="手动指定切片边长(不指定则自适应)"),
-    overlap: Optional[int] = Option(None, "--overlap", help="手动指定重叠像素(不指定则自适应)"),
+    overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="手动指定重叠率(0.0~0.5，不指定则自适应)"),
+    slice: Optional[bool] = Option(None, "--slice/--no-slice", help="是否激活切片功能"),
+    cog: Optional[bool] = Option(None, "--cog/--no-cog", help="是否激活 COG 转换功能"),
+    cog_out: Optional[str] = Option(None, "--cog-out", help="COG 转换输出影像路径(默认同级 *_cog.tif)"),
+    action: Optional[str] = Option(None, "--action", help="切片行为: slice (切片落盘) | none (仅计算参数，不落盘)"),
+    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否在自标定样本图上绘制检测框（用于调试）"),
 ) -> int:
     settings, run_id = _bootstrap()
-    logger.info(f"[preprocess] tiff={tiff}")
-
-    if not tiff:
-        logger.info("[preprocess] 未指定输入 TIFF 文件，跳过实际切片。")
-        return 0
+    if draw_box is not None:
+        settings.data["draw_box"] = draw_box
+    logger.info(f"开始预处理输入文件: {image}")
 
     import os
     from pathlib import Path
-    from PIL import Image
 
-    from .engine.sources import RasterImageSource
-    from .geo import resolve_geo
-    from .preprocess.slicing import (
-        build_quadtree,
-        clamp_window,
-        cluster_scales,
-        crown_px_size,
-        optimize_tile_params,
-    )
-
-    if not os.path.exists(tiff):
-        logger.error(f"[preprocess] 输入文件不存在: {tiff}")
+    if not os.path.exists(image):
+        logger.error(f"输入文件不存在: {image}")
         return 1
 
-    geo = resolve_geo(tiff)
-    gsd_val = None
-    if geo is not None:
-        gsd_val = geo.gsd_m()
+    is_tiff = image.lower().endswith((".tif", ".tiff"))
 
-    sl = settings.section("slicing") if hasattr(settings, "section") else settings.get("slicing", {})
-    det = settings.section("detect") if hasattr(settings, "section") else settings.get("detect", {})
+    # 1. 读取配置（消除层级字典，通过 Settings 扁平安全获取）
+    do_cog = cog if cog is not None else settings.get("preprocess.cog.enable", True)
+    do_slice = slice if slice is not None else settings.get("preprocess.slice.enable", True)
+    slice_action = action if action is not None else settings.get("preprocess.slice.action", "slice")
 
-    model_input = int(det.get("model_input", 1024))
-    d_min = float(sl.get("d_min_px", 24))
-    epsilon = float(sl.get("epsilon", 0.05))
-    lam = float(sl.get("lambda_cost", 0.15))
+    # ---- 第一阶段: COG 检测与转换 ----
+    if is_tiff and do_cog:
+        from .preprocess.cog import check_cog_format, convert_to_cog
+        status = check_cog_format(image)
+        logger.info(f"影像 COG 状态检测结果: {status}")
+        
+        if status != "cog":
+            if not cog_out:
+                p = Path(image)
+                out_suffix = settings.get("out_suffix", "_cog.tif") or "_cog.tif"
+                cog_out_path = p.parent / f"{p.stem}{out_suffix}"
+            else:
+                cog_out_path = Path(cog_out)
 
-    if gsd_val is None or gsd_val <= 0:
-        logger.warning(f"[preprocess] 无法解析 {tiff} 的 GSD，使用默认值 0.1 m/px")
-        gsd_val = 0.1
+            success = convert_to_cog(
+                image,
+                cog_out_path,
+                block_size=int(settings.get("block_size", 512)),
+                compress=str(settings.get("compress", "deflate")),
+                resampling=str(settings.get("resampling", "nearest")),
+                min_overview_dim=int(settings.get("min_overview_dim", 256))
+            )
+            if success:
+                logger.info(f"COG 转换成功，后续切片将切换至新影像: {cog_out_path.name}")
+                image = str(cog_out_path)
+            else:
+                logger.error("COG 转换失败，将尝试基于原影像进行切片。")
+        else:
+            logger.info("影像已经是标准 COG 格式，无需转换。")
 
-    crowns_m = [2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]
-    sizes_px = [crown_px_size(c, gsd_val) for c in crowns_m]
-    scales = cluster_scales(sizes_px, k=int(sl.get("max_scales", 3)))
-    w_large = max(sizes_px)
+    # ---- 第二阶段: 切片决策网格计算与执行 ----
+    if do_slice:
+        # 获取图像宽高
+        width, height = 0, 0
+        if is_tiff:
+            try:
+                import rasterio
+                with rasterio.open(image) as src:
+                    width, height = src.width, src.height
+            except Exception:
+                pass
+        
+        if width == 0 or height == 0:
+            try:
+                from PIL import Image
+                with Image.open(image) as img:
+                    width, height = img.size
+            except Exception as e:
+                logger.error(f"无法打开影像以读取像素大小: {e}")
+                return 1
 
-    plans = [
-        optimize_tile_params(
-            scale_px=s, model_input=model_input, d_min_px=d_min,
-            w_large_px=w_large, epsilon=epsilon, lambda_cost=lam,
-        )
-        for s in scales
-    ]
+        min_dim = min(width, height)
+        if min_dim < 2560:
+            logger.info(f"图像较短边 {min_dim}px < 2560px，跳过切片逻辑。")
+            return 0
 
-    if plans:
-        mid_idx = len(plans) // 2
-        opt_plan = plans[mid_idx]
-        resolved_tile_size = opt_plan.tile
-        resolved_overlap = opt_plan.overlap
-        logger.info(
-            f"[preprocess] 自适应切片参数优化完成: tile_size={resolved_tile_size}, overlap={resolved_overlap}"
-        )
-    else:
-        resolved_tile_size = int(sl.get("fallback_tile", 1024))
-        resolved_overlap = int(resolved_tile_size * float(sl.get("fallback_overlap", 0.2)))
-        logger.info(
-            f"[preprocess] 自适应优化失败，使用回退参数: tile_size={resolved_tile_size}, overlap={resolved_overlap}"
-        )
+        t_size = tile_size
+        r_ov = overlap_rate
 
-    t_size = tile_size if tile_size is not None else resolved_tile_size
-    ov = overlap if overlap is not None else resolved_overlap
+        # 当输入是 TIFF，且启用了自标定，且用户未手动指定参数时
+        if is_tiff and settings.get("preprocess.slice.scope.enable", True) and (t_size is None or r_ov is None):
+            logger.info("TIFF 格式触发 SCOPE 尺度空间自标定...")
+            from .detect import get_detector
+            from .preprocess.scope import run_scope_calibration
 
-    source = RasterImageSource(tiff)
-    width = source.width
-    height = source.height
+            arch_val = settings.get("arch", "yolo12")
+            detector = get_detector(
+                arch=arch_val,
+                weights=settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights")),
+                conf=float(settings.get("conf_threshold", 0.25)),
+                iou=float(settings.get("detect.iou_threshold", 0.6)),
+                imgsz=int(settings.get("model_input", 1024)),
+            )
 
-    if out_dir is None:
-        from .paths import outputs_dir
-        out_path = outputs_dir() / "tiles"
-    else:
-        out_path = Path(out_dir)
+            resolved_tile, resolved_overlap_rate = run_scope_calibration(
+                image, detector, settings, run_id=run_id
+            )
 
-    out_path.mkdir(parents=True, exist_ok=True)
+            if t_size is None:
+                t_size = resolved_tile
+            if r_ov is None:
+                r_ov = resolved_overlap_rate
 
-    tiles = build_quadtree(
-        width=width, height=height,
-        target_size_fn=lambda cx, cy: t_size,
-        root_size=t_size,
-        min_size=t_size,
-    )
+            logger.info(f"SCOPE 自标定决策：tile_size={t_size}px, overlap_rate={r_ov:.2%}")
+        else:
+            # 非 TIFF 图像，或者用户指定了切片大小，或者关闭了自标定
+            if t_size is None:
+                t_size = int(settings.get("default_tile", 640))
+            if r_ov is None:
+                r_ov = float(settings.get("default_overlap", 0.2))
+            logger.info(f"采用切片默认参数：tile_size={t_size}px, overlap_rate={r_ov:.2%}")
 
-    saved_count = 0
-    tiff_basename = Path(tiff).stem
+        # 判断切片落盘行为
+        if slice_action == "slice":
+            from .preprocess.tiling import execute_slicing
+            save_quality = int(settings.get("save_quality", 95))
+            saved_count = execute_slicing(
+                image_path=image,
+                out_dir=out_dir,
+                tile_size=t_size,
+                overlap_rate=r_ov,
+                run_id=run_id,
+                save_quality=save_quality
+            )
+            logger.info(f"均匀切片落盘完成: 成功保存 {saved_count} 块瓦片。")
+        else:
+            logger.info(f"根据配置 action={slice_action}，跳过切片文件落盘 (等待基于 COG 的 on-the-fly 动态切片)。")
 
-    for tile in tiles:
-        x, y, w, h = clamp_window(tile.x, tile.y, tile.size, width, height)
-        if w <= 0 or h <= 0:
-            continue
-
-        if ov > 0:
-            nx, ny = max(0, x - ov), max(0, y - ov)
-            nx2, ny2 = min(width, x + w + ov), min(height, y + h + ov)
-            x, y, w, h = nx, ny, nx2 - nx, ny2 - ny
-
-        pixels = source.read_window(x, y, w, h)
-        if pixels is None:
-            continue
-
-        tile_img = Image.fromarray(pixels)
-        tile_name = f"{tiff_basename}_tile_{x}_{y}_{w}x{h}.png"
-        tile_file = out_path / tile_name
-        tile_img.save(tile_file)
-        saved_count += 1
-
-    source.close()
-    logger.info(f"[preprocess] 成功将影像切分为 {saved_count} 块，输出目录: {out_path}")
     return 0
 
 
@@ -330,7 +360,7 @@ def cmd_report(
             fmt=args.format,
             out_dir=args.out,
             with_charts=not args.no_charts,
-            db_url=settings.get("db.url", None),
+            db_url=settings.get("url", None),
         )
     except ValueError as e:
         logger.error(f"[report] {e}")
@@ -347,7 +377,7 @@ def cmd_report(
 def cmd_batch(
     input_dir: str = Option(..., "--input-dir", help="输入目录"),
     glob: str = Option("*.tif", "--glob", help="文件匹配模式(默认 *.tif)"),
-    arch: Optional[str] = Option(None, "--arch", help="模型架构 (yolo12 / rtdetr / mock)"),
+    arch: Optional[str] = Option(None, "--arch", help="模型架构 (yolo12 / rtdetr)"),
     acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYMM"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
@@ -361,7 +391,7 @@ def cmd_batch(
     from .detect import get_detector
     from .engine import RasterImageSource, discover_inputs, run_batch
 
-    arch_val = args.arch or settings.get("detect.arch", "yolo12")
+    arch_val = args.arch or settings.get("arch", "yolo12")
     try:
         inputs = discover_inputs(args.input_dir, args.glob)
     except FileNotFoundError as e:
@@ -371,24 +401,21 @@ def cmd_batch(
         logger.warning(f"[batch] 未匹配到输入文件: {args.input_dir} ({args.glob})")
         return 0
 
-    if arch_val == "mock":
-        detector = get_detector("mock")
-    else:
-        detector = get_detector(
-            arch_val,
-            weights=settings.get("detect.weights", None),
-            conf=float(settings.get("detect.conf_threshold", 0.25)),
-            iou=float(settings.get("detect.iou_threshold", 0.55)),
-            imgsz=int(settings.get("detect.model_input", 1024)),
-        )
+    detector = get_detector(
+        arch_val,
+        weights=settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights")),
+        conf=float(settings.get("conf_threshold", 0.25)),
+        iou=float(settings.get("detect.iou_threshold", 0.55)),
+        imgsz=int(settings.get("model_input", 1024)),
+    )
     res = run_batch(
         inputs, detector,
         acquisition_time=args.acquisition_time or "000000",
         source_factory=lambda p: RasterImageSource(str(p)),
         writer=writer,
         run_kwargs={
-            "root_size": int(settings.get("slicing.root_size", 1024)),
-            "min_size": int(settings.get("slicing.min_size", 256)),
+            "root_size": int(settings.get("root_size", 1024)),
+            "min_size": int(settings.get("min_size", 256)),
         },
     )
     logger.info(
@@ -434,7 +461,7 @@ def cmd_track(
     from .db import reader, writer
     from .lifecycle import TreeRecord, track_sequence
 
-    db_url = settings.get("db.url", None)
+    db_url = settings.get("url", None)
     tracts = [t for t in reader.list_tracts(url=db_url) if t.get("location") == args.location]
     tracts.sort(key=lambda t: str(t.get("acquisition_time")))
     if not tracts:
@@ -523,7 +550,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except typer.Exit as e:
         return e.exit_code
-    except click.ClickException as e:
+    except (click.ClickException, typer._click.exceptions.ClickException) as e:
         e.show()
         return e.exit_code
     except (typer.Abort, click.Abort):

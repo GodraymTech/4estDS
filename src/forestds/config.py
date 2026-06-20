@@ -68,17 +68,46 @@ class Settings:
     """托管所有配置的扁平容器。各节点为普通 dict,便于演进与测试。"""
 
     data: dict[str, Any] = field(default_factory=dict)
+    _flat: dict[str, Any] = field(default_factory=dict, init=False)
+
+    def __post_init__(self):
+        self._flat = {}
+        duplicates = set()
+
+        def flatten(d: dict):
+            for k, v in d.items():
+                if isinstance(v, dict):
+                    flatten(v)
+                else:
+                    if k in self._flat:
+                        duplicates.add(k)
+                    else:
+                        self._flat[k] = v
+
+        flatten(self.data)
+        for dup in duplicates:
+            self._flat.pop(dup, None)
 
     def section(self, name: str) -> dict[str, Any]:
         return dict(self.data.get(name, {}))
 
     def get(self, path: str, default: Any = None) -> Any:
+        # 1. 优先作为点分隔路径查找
         cur: Any = self.data
+        found = True
         for part in path.split("."):
             if not isinstance(cur, dict) or part not in cur:
-                return default
+                found = False
+                break
             cur = cur[part]
-        return cur
+        if found:
+            return cur
+
+        # 2. 如果没找到且没有点分隔，尝试从扁平唯一叶子映射中获取
+        if "." not in path and path in self._flat:
+            return self._flat[path]
+
+        return default
 
 
 def load_settings(overrides: dict | None = None) -> Settings:
