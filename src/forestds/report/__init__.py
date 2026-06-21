@@ -73,7 +73,7 @@ def generate_report(
     observations = reader.fetch_observations(run_id=used_run, tract_id=rid, url=db_url) \
         if used_run else reader.fetch_observations(tract_id=rid, url=db_url)
     log.info(
-        "报告数据: tract_id=%s run_id=%s 观测=%d 条",
+        "报告数据: tract_id={} run_id={} 观测={} 条",
         rid, used_run, len(observations),
     )
 
@@ -106,10 +106,10 @@ def generate_report(
         out_path.write_text(to_markdown(data), encoding="utf-8")
         result.update(format="md", out_path=str(out_path))
 
-    log.info("报告已生成[%s] -> %s", result["format"], result["out_path"])
+    log.info("报告已生成[{}] -> {}", result["format"], result["out_path"])
     return result
 
 
 def _default_out_dir() -> Path:
     from .. import paths
-    return paths.outputs_dir()
+    return paths.outputs_postprocess_dir()

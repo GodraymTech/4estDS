@@ -3,6 +3,37 @@
 > forest detection system
 > 从超大正射影像中,自动、可追溯地解译每一棵红树,并跨时相追踪其生命周期。
 
+## 分层架构
+
+┌──────────────── Interface Layer ─────────────────┐
+│  cli.py                                          │  ← 只解析参数、调 tasks
+└──────────────────────────────────────────────────┘
+              ↓ calls
+┌──────────────── Use Case Layer ──────────────────┐
+│  tasks/infer.py  tasks/batch.py                  │  ← 业务编排，无 typer 依赖
+└──────────────────────────────────────────────────┘
+              ↓ calls
+┌──────────────── Domain / Service Layer ──────────┐
+│  engine/        ← 瓦片推理循环                    │
+│  preprocess/    ← COG/SCOPE/切片                 │
+│  postprocess/   ← WBF/NMS                        │
+│  fusion/        ← CHM 高程融合                   │
+│  geo/           ← 地理坐标投影                   │
+│  lifecycle/     ← 跨时相追踪                     │
+└──────────────────────────────────────────────────┘
+              ↓ calls
+┌──────────────── Adapter / Infra Layer ───────────┐
+│  detect/        ← 模型适配器（yolo12/rtdetr）    │
+│  db/            ← 数据库读写                     │
+│  report/        ← 报告渲染                       │
+│  export.py      ← GIS 导出                       │
+│  visualize.py   ← 可视化                         │
+└──────────────────────────────────────────────────┘
+┌──────────────── Cross-cutting ───────────────────┐
+│  config.py, paths.py, logging_setup.py, utils.py │
+└──────────────────────────────────────────────────┘
+
+
 ## 快速开始
 
 ```bash
@@ -13,10 +44,10 @@ uv sync --extra detect --extra geo
 4estds --version
 4estds db init                 # 在 ~/.4estDS/db 下创建三层单木模型
 4estds preprocess              # 运行创新点 A 的切片优化演示
-4estds infer --arch mock       # 端到端跑通:切片->推理->WBF去重->入库(无需 GPU/权重)
-4estds infer --arch yolo12 --image ortho.tif   # 真实推理(需 pip install '4estds[yolo]')
-4estds infer --arch rtdetr --image ortho.tif   # RT-DETR 后端
-4estds infer --arch mock --overlap 128         # 读窗外扩重叠，跨 tile 边界树由 WBF 去重
+4estds infer data/xuwen_1024px.jpg --arch mock       # 端到端跑通:切片->推理->WBF去重->入库(无需 GPU/权重)
+4estds infer ortho.tif --arch yolo12                 # 真实推理(需 pip install '4estds[yolo]')
+4estds infer ortho.tif --arch rtdetr                 # RT-DETR 后端
+4estds infer data/xuwen_1024px.jpg --arch mock --overlap-rate 0.2  # 读窗外扩重叠，跨 tile 边界树由 WBF 去重
 pytest -q                      # 跑全部单元测试
 ```
 

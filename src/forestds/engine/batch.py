@@ -13,7 +13,7 @@ from typing import Callable
 
 from loguru import logger as log
 from ..logging_setup import new_run_id
-from .runner import run_inference
+from .infer import run_inference
 
 # 默认可识别的 RGB 栅格后缀
 DEFAULT_GLOB = "*.tif"
@@ -78,7 +78,7 @@ def run_batch(
     run_kwargs = run_kwargs or {}
     result = BatchResult(total=len(inputs))
     t0 = time.perf_counter()
-    log.info("批量开始: %d 个输入 acquisition_time=%s", len(inputs), acquisition_time)
+    log.info("批量开始: {} 个输入 acquisition_time={}", len(inputs), acquisition_time)
 
     for idx, path in enumerate(inputs, 1):
         location = path.stem
@@ -107,6 +107,7 @@ def run_batch(
                 ) or {}
                 tract_id = writer.ensure_tract(
                     acquisition_time, location,
+                    name=path.stem,
                     pixel_w=geo.get("pixel_w") or res.meta.get("width"),
                     pixel_h=geo.get("pixel_h") or res.meta.get("height"),
                     gsd=geo.get("gsd"),
@@ -121,7 +122,7 @@ def run_batch(
                 )
             item.status = "succeeded"
             result.succeeded += 1
-            log.info("[%d/%d] %s -> %d 株", idx, len(inputs), location, item.tree_count)
+            log.info("[{}/{}] {} -> {} 株", idx, len(inputs), location, item.tree_count)
         except Exception as e:  # noqa: BLE001  单图失败不中断整批
             item.error = str(e)
             result.failed += 1
@@ -130,7 +131,7 @@ def run_batch(
                     writer.finish_run_log(run_id, "failed", error=str(e))
                 except Exception:  # noqa: BLE001
                     pass
-            log.exception("[%d/%d] %s 失败: %s", idx, len(inputs), location, e)
+            log.exception("[{}/{}] {} 失败: {}", idx, len(inputs), location, e)
         finally:
             if src is not None and hasattr(src, "close"):
                 src.close()
@@ -138,7 +139,7 @@ def run_batch(
 
     result.elapsed_s = time.perf_counter() - t0
     log.info(
-        "批量完成: 成功=%d 失败=%d 总株数=%d 耗时=%.2fs",
+        "批量完成: 成功={} 失败={} 总株数={} 耗时={:.2f}s",
         result.succeeded, result.failed, result.total_trees, result.elapsed_s,
     )
     return result

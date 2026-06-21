@@ -25,6 +25,11 @@ from . import paths
 _CURRENT_RUN_ID = "-"
 
 
+# 允许放行的第三方依赖日志白名单及其对应的最低显示级别（默认只放行 forestds 和 __main__）
+# 未在此列表中的第三方依赖，仅在其日志级别 >= WARNING 时放行
+DEPENDENCY_LOG_WHITELIST = {}
+
+
 def new_run_id() -> str:
     """生成一个短 run_id（全链路关联用）。"""
     return uuid.uuid4().hex[:5]
@@ -59,9 +64,24 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
         )
 
     def _filter(record) -> bool:
-        # 仅放行本项目模块 (forestds) 与主入口模块 (__main__) 的日志，过滤其它依赖日志
-        name = record["name"]
-        return name.startswith("forestds") or name == "__main__"
+        name = record["extra"].get("logger_name", record["name"])
+        # 1. 本项目和主入口，全部放行
+        if name.startswith("forestds") or name == "__main__":
+            return True
+        # 2. 对白名单中的依赖包，根据对应的最小日志等级放行
+        for wl_name, min_level in DEPENDENCY_LOG_WHITELIST.items():
+            if name.startswith(wl_name):
+                try:
+                    record_level_no = record["level"].no
+                    wl_level_no = _loguru_logger.level(min_level).no
+                    if record_level_no >= wl_level_no:
+                        return True
+                except Exception:
+                    pass
+        # 3. 任何非白名单中的其他依赖，如果是 WARNING 或以上级别，也放行以防静默报错
+        if record["level"].no >= 30:  # WARNING 级别是 30
+            return True
+        return False
 
     _loguru_logger.remove()
     _loguru_logger.configure(extra={"run_id": _CURRENT_RUN_ID})
@@ -96,7 +116,7 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
                 depth += 1
 
             run_id = getattr(record, "run_id", _CURRENT_RUN_ID)
-            _loguru_logger.bind(run_id=run_id).opt(
+            _loguru_logger.bind(run_id=run_id, logger_name=record.name).opt(
                 depth=depth, exception=record.exc_info
             ).log(lvl, record.getMessage())
 
@@ -104,7 +124,7 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
     # 显式限制第三方高噪声依赖的日志等级，避免其底层 C/C++ 库 (如 GDAL) 的 DEBUG 日志倾泻
-    for noise_logger in ("rasterio", "gdal", "fiona", "shapely", "PIL", "matplotlib", "urllib3"):
+    for noise_logger in ("rasterio", "gdal", "fiona", "shapely", "PIL", "matplotlib", "urllib3", "ultralytics"):
         logging.getLogger(noise_logger).setLevel(logging.WARNING)
 
     _loguru_logger.debug("loguru logging initialised")

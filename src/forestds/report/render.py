@@ -107,7 +107,7 @@ def render_charts(data: ReportData, out_dir: Path) -> list[Path]:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception as e:  # noqa: BLE001
-        log.warning("matplotlib 不可用，跳过图表: %s", e)
+        log.warning("matplotlib 不可用，跳过图表: {}", e)
         return []
 
     out_dir = Path(out_dir)
@@ -139,7 +139,7 @@ def render_charts(data: ReportData, out_dir: Path) -> list[Path]:
         plt.close(fig)
         produced.append(p)
 
-    log.info("生成图表 %d 张 -> %s", len(produced), out_dir)
+    log.info("生成图表 {} 张 -> {}", len(produced), out_dir)
     return produced
 
 
@@ -150,7 +150,7 @@ def to_pdf(data: ReportData, out_path: Path, *, charts: list[Path] | None = None
         from reportlab.lib.units import cm
         from reportlab.pdfgen import canvas
     except Exception as e:  # noqa: BLE001
-        log.warning("reportlab 不可用，无法生成 PDF: %s", e)
+        log.warning("reportlab 不可用，无法生成 PDF: {}", e)
         return None
 
     out_path = Path(out_path)
@@ -201,9 +201,9 @@ def to_pdf(data: ReportData, out_path: Path, *, charts: list[Path] | None = None
             c.drawImage(img, 2 * cm, y - disp_h, width=disp_w, height=disp_h)
             y -= disp_h + 0.5 * cm
         except Exception as e:  # noqa: BLE001
-            log.warning("PDF 嵌入图表失败 %s: %s", chart, e)
+            log.warning("PDF 嵌入图表失败 {}: {}", chart, e)
 
     c.showPage()
     c.save()
-    log.info("生成 PDF -> %s", out_path)
+    log.info("生成 PDF -> {}", out_path)
     return out_path

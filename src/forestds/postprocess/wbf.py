@@ -103,7 +103,13 @@ def fuse(
         else:
             sc = sum(scores[k] for k in cluster) / len(cluster)
         out.append(
-            FusedBox(box=fb, score=sc, label=labels[i], support=len(cluster))
+            FusedBox(
+                box=fb,
+                score=sc,
+                label=labels[i],
+                support=len(cluster),
+                extra={"best_index": i}
+            )
         )
     return out
 

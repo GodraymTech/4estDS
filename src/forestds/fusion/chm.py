@@ -131,7 +131,7 @@ class CHMSampler:
 
     def __post_init__(self) -> None:
         if self.stat not in _VALID_STATS:
-            log.warning("[fusion] 未知统计量 %s,回退 p95", self.stat)
+            log.warning("[fusion] 未知统计量 {},回退 p95", self.stat)
             self.stat = "p95"
         coreg = self.chm_transform is not None and self.rgb_transform is not None
         mode = "仿射配准" if coreg else "像素对齐"
@@ -233,7 +233,7 @@ def build_chm_sampler(
     lo = float(np.min(finite)) if finite.size else float("nan")
     hi = float(np.max(finite)) if finite.size else float("nan")
     log.info(
-        "CHM 计算: 尺寸=%s 有效像元=%d/%d (%.1f%%) 高程范围=[%.2f, %.2f]m",
+        "CHM 计算: 尺寸={} 有效像元={}/{} ({:.1f}%) 高程范围=[{:.2f}, {:.2f}]m",
         (chm.shape[1], chm.shape[0]), valid, total, 100.0 * valid / max(total, 1), lo, hi,
     )
     chm_transform = chm_geo.transform if chm_geo is not None else None

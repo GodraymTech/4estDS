@@ -132,13 +132,13 @@ def optimize_tile_params(
 
     if best is not None:
         log.info(
-            "最优切片(严格解 scale={:.1f}px): tile={} overlap_ratio={:.2%} exp_trunc={:.3f} cost={:.3f} t_max={:.1f}",
+            "最优切片(严格解 scale={:.0f}px): tile={} overlap_ratio={:.2%} exp_trunc={:.3f} cost={:.3f} t_max={:.0f}",
             scale_px, best.tile, best.overlap_ratio, best.exp_trunc, best.cost, t_max,
         )
         return best
     if relaxed_best is not None:
         log.warning(
-            "最优切片(放宽解 scale={:.1f}px, 截断约束未满足): tile={} overlap_ratio={:.2%} exp_trunc={:.3f} cost={:.3f}",
+            "最优切片(放宽解 scale={:.0f}px, 截断约束未满足): tile={} overlap_ratio={:.2%} exp_trunc={:.3f} cost={:.3f}",
             scale_px, relaxed_best.tile, relaxed_best.overlap_ratio, relaxed_best.exp_trunc, relaxed_best.cost,
         )
         return relaxed_best
@@ -148,7 +148,7 @@ def optimize_tile_params(
     overlap = int(round(tile * r_mid))
     trunc = truncation_probability(w_large_px, tile, overlap)
     log.warning(
-        "最优切片(兑底解 scale={:.1f}px 目标过大 t_max={:.1f}): tile={} overlap_ratio={:.2%} exp_trunc={:.3f}",
+        "最优切片(兑底解 scale={:.0f}px 目标过大 t_max={:.0f}): tile={} overlap_ratio={:.2%} exp_trunc={:.3f}",
         scale_px, t_max, tile, r_mid, trunc,
     )
     return TileParams(tile, r_mid, scale_px, trunc, float("inf"))
@@ -193,7 +193,7 @@ def cluster_scales(sizes: list[float], k: int = 3, iters: int = 50) -> list[floa
     log.info(
         "离散尺度集(k={}): [{}]",
         len(result),
-        ", ".join(f"{c:.1f}px" for c in result),
+        ", ".join(f"{c:.0f}px" for c in result),
     )
     return result
 
@@ -319,6 +319,37 @@ def clamp_window(
     x1 = max(0, min(x + size, width))
     y1 = max(0, min(y + size, height))
     return (x0, y0, max(0, x1 - x0), max(0, y1 - y0))
+
+
+def generate_slice_windows(
+    width: int, height: int, tile_size: int, overlap_rate: float
+) -> list[tuple[int, int, int, int]]:
+    """产生规则网格均匀切片读窗清单 [(x, y, w, h), ...]，已通过 clamp_window 裁剪防越界。"""
+    overlap = int(round(tile_size * overlap_rate))
+    step = tile_size - overlap
+    if step <= 0:
+        step = tile_size
+
+    x_coords = []
+    x = 0
+    while x < width:
+        x_coords.append(x)
+        x += step
+
+    y_coords = []
+    y = 0
+    while y < height:
+        y_coords.append(y)
+        y += step
+
+    windows = []
+    for y in y_coords:
+        for x in x_coords:
+            wx, wy, w, h = clamp_window(x, y, tile_size, width, height)
+            if w <= 0 or h <= 0:
+                continue
+            windows.append((wx, wy, w, h))
+    return windows
 
 
 # --------------------------------------------------------------------------- #

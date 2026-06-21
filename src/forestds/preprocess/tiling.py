@@ -20,7 +20,7 @@ except ImportError:
     Image = None
 
 from ..engine.sources import RasterImageSource
-from ..preprocess.slicing import clamp_window
+from ..preprocess.slicing import generate_slice_windows
 
 
 def execute_slicing(
@@ -36,7 +36,7 @@ def execute_slicing(
     瓦片命名格式: {image_stem}__run_{run_id}__o{x}_{y}__s{tile_size}.jpg
     """
     if Image is None or np is None:
-        log.error("缺少 Pillow 或 numpy，无法执行切片落盘。")
+        log.error("缺少 Pillow 或 numpy，无法执行静态切片落盘。")
         return 0
 
     path = Path(image_path)
@@ -49,11 +49,11 @@ def execute_slicing(
 
     # 确定输出路径，将 {image_stem}__run_{run_id} 作为父目录插在尾部
     if out_dir is None:
-        from ..paths import outputs_dir
-        base_out = outputs_dir() / "preprocess"
+        from .. import paths
+        base_out = paths.outputs_preprocess_dir()
     else:
         base_out = Path(out_dir)
-    out_path = base_out / f"tiles__{image_stem}__run_{run_id}"
+    out_path = base_out / f"tiles__{image_stem}"
 
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -81,40 +81,19 @@ def execute_slicing(
         log.error(f"初始化图像数据源失败: {e}")
         return 0
 
-    # 2. 构建均匀切片网格 (所有 px 均为整数)
-    overlap = int(round(tile_size * overlap_rate))
-    step = tile_size - overlap
-    if step <= 0:
-        step = tile_size
-
-    x_coords = []
-    x = 0
-    while x < width:
-        x_coords.append(x)
-        x += step
-
-    y_coords = []
-    y = 0
-    while y < height:
-        y_coords.append(y)
-        y += step
-
-    expected_count = len(x_coords) * len(y_coords)
+    # 2. 调用预处理公共切片清单生成，拒绝推理/切片重复造轮子
+    windows = generate_slice_windows(width, height, tile_size, overlap_rate)
     log.info(
-        f"开始切片: 图像={path.name} 尺寸={width}x{height}px, "
-        f"瓦片={tile_size}px, 重叠率={overlap_rate:.2%}({overlap}px), "
-        f"预计数量={expected_count} 块"
+        f"开始切片: 图像={path.name} ({width}x{height}), "
+        f"瓦片={tile_size}px, 重叠率={overlap_rate:.0%}, "
+        f"预计数量={len(windows)} 块"
     )
 
     saved_count = 0
 
     try:
-        for y in y_coords:
-            for x in x_coords:
-                # 考虑边界的原始读窗计算
-                wx, wy, w, h = clamp_window(x, y, tile_size, width, height)
-                if w <= 0 or h <= 0:
-                    continue
+        from tqdm import tqdm
+        for (wx, wy, w, h) in tqdm(windows, desc="切片落盘中", ncols=80, leave=False):
 
                 # 3. 获取局部像素
                 pixels = None
@@ -137,7 +116,7 @@ def execute_slicing(
                 saved_count += 1
 
     except Exception as e:
-        log.exception(f"切片并落盘时发生异常: {e}")
+        log.exception(f"静态切片落盘时发生异常: {e}")
     finally:
         if source is not None:
             try:
@@ -145,5 +124,5 @@ def execute_slicing(
             except Exception:
                 pass
 
-    log.info(f"切片导出成功！共保存 {saved_count} 块瓦片到: {out_path}")
+    log.info(f"{saved_count} 块切片导出成功！")
     return saved_count

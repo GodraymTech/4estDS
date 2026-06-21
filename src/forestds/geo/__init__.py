@@ -107,21 +107,55 @@ class GeoInfo:
     origin_lat: float | None = None     # 地理坐标系度->米所需纬度
     source: str = "unknown"             # rasterio | world_file | geotiff_tags
 
+    def __post_init__(self):
+        dx = abs(self.transform.a)
+        dy = abs(self.transform.e)
+        pixel_sz = math.sqrt(dx * dy)
+        if self.crs_kind == "geographic":
+            if self.origin_lat is not None:
+                if -90.0 <= self.origin_lat <= 90.0 and pixel_sz < 0.5:
+                    log.warning(
+                        "地理坐标系,在纬度 {:.4f}° 处用近似换算度->米(结果为近似值)。",
+                        self.origin_lat,
+                    )
+                else:
+                    log.warning(
+                        "地理坐标系但纬度/像元异常 (lat={:.4f}°, size={:.6f}°)，极可能是投影坐标系被误判。自动退化为投影/线性米制计算。",
+                        self.origin_lat, pixel_sz,
+                    )
+        else:
+            if pixel_sz < 0.005 and self.origin_lat is not None and -90.0 <= self.origin_lat <= 90.0:
+                log.warning(
+                    "投影或未知坐标系但像元尺寸极小 (size={:.6f}m)，极可能是地理坐标系被误判。自动修正为地理坐标系计算。",
+                    pixel_sz,
+                )
+
     def pixel_area_m2(self) -> float | None:
         """单像元真实地面面积(㎡)；无法可靠推算时返回 None。"""
+        dx = abs(self.transform.a)
+        dy = abs(self.transform.e)
+        pixel_sz = math.sqrt(dx * dy)
+
+        # 1. 判定为地理坐标系的分流
         if self.crs_kind == "geographic":
             if self.origin_lat is None:
-                log.warning("[geo] 地理坐标系但缺纬度,无法将度换算为米,面积置空。")
+                log.warning("地理坐标系但缺纬度,无法将度换算为米,面积置空。")
                 return None
-            dx_deg = abs(self.transform.a)  # 经度方向像元尺寸(度)
-            dy_deg = abs(self.transform.e)  # 纬度方向像元尺寸(度)
-            m_per_deg_lon = _M_PER_DEG_LAT * math.cos(math.radians(self.origin_lat))
-            log.warning(
-                "[geo] 地理坐标系,在纬度 %.4f° 处用近似换算度->米(结果为近似值)。",
-                self.origin_lat,
-            )
-            return (dx_deg * m_per_deg_lon) * (dy_deg * _M_PER_DEG_LAT)
-        # projected / unknown: 假定线性米制
+            # 校验纬度是否在合理范围内 [-90, 90] 且像元大小在合理度数内
+            if -90.0 <= self.origin_lat <= 90.0 and pixel_sz < 0.5:
+                m_per_deg_lon = _M_PER_DEG_LAT * math.cos(math.radians(self.origin_lat))
+                return (dx * m_per_deg_lon) * (dy * _M_PER_DEG_LAT)
+            else:
+                pass
+        
+        # 2. 判定为投影/未知坐标系的分流
+        else:
+            # 校验是否是地理坐标系被误判为投影/未知 (像元极小, 且 Y 坐标在合理纬度区间)
+            if pixel_sz < 0.005 and self.origin_lat is not None and -90.0 <= self.origin_lat <= 90.0:
+                m_per_deg_lon = _M_PER_DEG_LAT * math.cos(math.radians(self.origin_lat))
+                return (dx * m_per_deg_lon) * (dy * _M_PER_DEG_LAT)
+
+        # 3. 正常的投影 / 线性米制计算
         return self.transform.pixel_area() * (self.linear_unit_m ** 2)
 
     def gsd_m(self) -> float | None:
@@ -177,7 +211,7 @@ def _geo_from_sidecar(image_path: str) -> GeoInfo | None:
             lines = fh.read().splitlines()
         aff = Affine.from_world_file(lines)
     except (OSError, ValueError) as e:
-        log.warning("[geo] 世界文件解析失败 %s: %s", world, e)
+        log.warning("世界文件解析失败 {}: {}", world, e)
         return None
 
     crs_kind, unit_m, origin_lat = "unknown", 1.0, None
@@ -192,7 +226,7 @@ def _geo_from_sidecar(image_path: str) -> GeoInfo | None:
         # 无 .prj 时用量级启发式: 像元 < 0.01 极可能是度(地理坐标系)。
         if aff.pixel_size_x() < 0.01:
             crs_kind = "geographic"
-            log.warning("[geo] 无 .prj,依像元尺寸启发式判为地理坐标系(经纬度)。")
+            log.warning("无 .prj,依像元尺寸启发式判为地理坐标系(经纬度)。")
         else:
             crs_kind = "projected"
     if crs_kind == "geographic":
@@ -303,6 +337,9 @@ def _geo_from_rasterio(transform, crs) -> GeoInfo | None:
     )
 
 
+_GEO_CACHE: dict[str, GeoInfo] = {}
+
+
 def resolve_geo(
     image_path: str | None,
     *,
@@ -310,15 +347,21 @@ def resolve_geo(
     crs=None,
 ) -> GeoInfo | None:
     """依次尝试 rasterio -> 世界文件 -> GeoTIFF 内嵌标签，均失败返回 None。"""
+    if image_path:
+        cache_key = f"{os.path.abspath(image_path)}_{id(transform)}_{id(crs)}"
+        if cache_key in _GEO_CACHE:
+            return _GEO_CACHE[cache_key]
+
     info = _geo_from_rasterio(transform, crs)
-    if info is not None:
-        return info
-    if not image_path or not os.path.isfile(image_path):
-        return None
-    info = _geo_from_sidecar(image_path)
-    if info is not None:
-        return info
-    return _geo_from_geotiff_tags(image_path)
+    if info is None:
+        if image_path and os.path.isfile(image_path):
+            info = _geo_from_sidecar(image_path)
+            if info is None:
+                info = _geo_from_geotiff_tags(image_path)
+
+    if image_path and info is not None:
+        _GEO_CACHE[cache_key] = info
+    return info
 
 
 def compute_tract_geometry(
@@ -341,7 +384,7 @@ def compute_tract_geometry(
     if pa is None or pa <= 0:
         return None
     out = {
-        "gsd": geo.gsd_m(),
+        "gsd": math.sqrt(pa),
         "area_unit": "m2",
         "pixel_w": int(width) if width else None,
         "pixel_h": int(height) if height else None,
@@ -353,7 +396,7 @@ def compute_tract_geometry(
     else:
         out["geo_area"] = None
     log.info(
-        "[geo] 解析成功(源=%s,坐标系=%s): GSD=%.4fm 像元面积=%.4f㎡ 地块面积=%s㎡",
+        "原图地块GIS信息: 源={}, 坐标系={}, GSD={:.4f}m, 像元面积={:.4f}㎡, 地块面积={}㎡",
         geo.source, geo.crs_kind, out["gsd"] or -1, pa,
         f"{out['geo_area']:.1f}" if out["geo_area"] else "?",
     )

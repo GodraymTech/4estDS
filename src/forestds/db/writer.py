@@ -53,7 +53,7 @@ def start_run_log(
     finally:
         conn.close()
     log.info(
-        "run_log 开始: run_id=%s task=%s arch=%s input=%s",
+        "写入「run_log」表: run_id={} task={} arch={} input={}",
         run_id, task_type, model_arch, input_path,
     )
     return run_id
@@ -78,15 +78,30 @@ def finish_run_log(
              json.dumps(metrics or {}, ensure_ascii=False), error, run_id),
         )
         if status != "succeeded":
-            log.error("run_log 终态: run_id=%s status=%s error=%s", run_id, status, error)
+            log.error("run_log 终态: run_id={} status={} error={}", run_id, status, error)
         else:
             log.info(
-                "run_log 终态: run_id=%s status=%s 耗时=%ss",
+                "「run_log」表更新终态: run_id={} status={} 耗时={}s",
                 run_id, status, f"{duration_s:.2f}" if duration_s is not None else "?",
             )
         conn.commit()
     finally:
         conn.close()
+
+
+def update_tiles_dir(run_id: str, tiles_dir, *, url: str | None = None) -> None:
+    """切片落盘成功后，将目录绝对路径写入 run_logs.tiles_dir。"""
+    from pathlib import Path as _Path
+    conn = _connect(url)
+    try:
+        conn.execute(
+            "UPDATE run_logs SET tiles_dir=? WHERE run_id=?",
+            (str(_Path(tiles_dir).resolve()), run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    log.debug("tiles_dir 已记录至 run_logs: run_id={} dir={}", run_id, tiles_dir)
 
 
 def ensure_tract(
@@ -110,7 +125,11 @@ def ensure_tract(
         ).fetchone()
         if row:
             return row[0]
-        tract_id = f"tract_{acquisition_time}_{uuid.uuid4().hex[:8]}"
+        name_part = ""
+        if name:
+            clean_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name)
+            name_part = f"{clean_name[:20]}_"
+        tract_id = f"tract_{name_part}{acquisition_time}_{uuid.uuid4().hex[:5]}"
         conn.execute(
             "INSERT INTO tracts "
             "(tract_id, name, acquisition_time, location, pixel_w, pixel_h, gsd, "
@@ -121,10 +140,7 @@ def ensure_tract(
         )
         if geo_area:
             log.info(
-                "地块登录: %s 真实面积=%.1f%s GSD=%s",
-                tract_id, geo_area, area_unit or "m2",
-                f"{gsd:.4f}m" if gsd else "?",
-            )
+                "原图地块信息注入「tracts」表: tract_id={}", tract_id )
         conn.commit()
         return tract_id
     finally:
@@ -138,12 +154,24 @@ def write_observations(
     *,
     url: str | None = None,
     slice_size: int | None = None,
+    image_path: str | None = None,
+    transform=None,
+    crs=None,
 ) -> int:
     """将一次 run 的全图检测(已 WBF 去重)写入 tree_observations。返回写入条数。
 
-    detections: 可迭代的 Detection(含 x1,y1,x2,y2,score,label,center)。
-    box 以 JSON 文本存 box_px_full;几何/地理坐标待仿射变换接入(TODO)。
+    detections: 可迭代 of Detection(含 x1,y1,x2,y2,score,label,center)。
     """
+    from ..geo import resolve_geo
+    geo = None
+    try:
+        geo = resolve_geo(image_path, transform=transform, crs=crs)
+    except Exception as geo_err:
+        log.warning(f"解析地理元数据失败: {geo_err}")
+        
+    gsd = geo.gsd_m() if geo else None
+    pixel_area_val = geo.pixel_area_m2() if geo else None
+
     conn = _connect(url)
     n = 0
     try:
@@ -153,25 +181,60 @@ def write_observations(
             extra = getattr(d, "extra", None) or {}
             height = extra.get("height")
             height_source = extra.get("height_source")
+            box_px_sub = extra.get("box_px_sub")
+            source_subimage_path = extra.get("source_subimage_path")
+            
+            # 计算地理空间字段
+            center_geo = None
+            box_geo = None
+            geom_crown = None
+            crown_w_geo = None
+            crown_h_geo = None
+            crown_area_geo = None
+            
+            if geo:
+                try:
+                    cx_geo, cy_geo = geo.transform.pixel_to_world(cx, cy)
+                    center_geo = f"POINT({cx_geo} {cy_geo})"
+                    
+                    x1_geo, y1_geo = geo.transform.pixel_to_world(d.x1, d.y1)
+                    x2_geo, y2_geo = geo.transform.pixel_to_world(d.x2, d.y2)
+                    box_geo = json.dumps([x1_geo, y1_geo, x2_geo, y2_geo])
+                    geom_crown = f"POLYGON(({x1_geo} {y1_geo}, {x2_geo} {y1_geo}, {x2_geo} {y2_geo}, {x1_geo} {y2_geo}, {x1_geo} {y1_geo}))"
+                    
+                    if gsd:
+                        crown_w_geo = d.width * gsd
+                        crown_h_geo = d.height * gsd
+                        if pixel_area_val:
+                            crown_area_geo = (d.width * d.height) * pixel_area_val
+                        else:
+                            crown_area_geo = (d.width * d.height) * (gsd * gsd)
+                except Exception as e:
+                    log.warning(f"单木像素坐标转地理坐标失败: {e}")
+
             conn.execute(
                 "INSERT INTO tree_observations "
-                "(obs_id, tract_id, run_id, species, confidence, box_px_full, "
-                " crown_w_px, crown_h_px, crown_area_px, height, height_source, "
-                " geom_point, slice_size) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "(obs_id, tract_id, run_id, species, confidence, box_px_sub, box_px_full, box_geo, "
+                " crown_w_px, crown_h_px, crown_area_px, crown_w_geo, crown_h_geo, crown_area_geo, "
+                " height, height_source, center_geo, source_subimage_path, slice_size, geom_point, geom_crown) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (obs_id, tract_id, run_id, d.label, d.score,
+                 json.dumps(box_px_sub) if box_px_sub else None,
                  json.dumps([d.x1, d.y1, d.x2, d.y2]),
+                 box_geo,
                  d.width, d.height, d.width * d.height,
+                 crown_w_geo, crown_h_geo, crown_area_geo,
                  height, height_source,
-                 f"POINT({cx} {cy})", slice_size),
+                 center_geo, source_subimage_path, slice_size,
+                 f"POINT({cx} {cy})", geom_crown),
             )
             n += 1
         conn.commit()
     finally:
         conn.close()
     log.info(
-        "写入观测: %d 条 -> tract_id=%s run_id=%s slice_size=%s",
-        n, tract_id, run_id, slice_size,
+        "本轮最终单木集合写入「tree_observations」表: {} 株 -> run_id={} slice_size={}",
+        n, run_id, slice_size,
     )
     return n
 
@@ -217,7 +280,7 @@ def register_source(
              json.dumps(meta, ensure_ascii=False) if meta else None),
         )
         conn.commit()
-        log.info("多源登记: tract=%s type=%s path=%s", tract_id, source_type, path)
+        log.info("多源登记: tract={} type={} path={}", tract_id, source_type, path)
         return source_id
     finally:
         conn.close()
@@ -271,7 +334,7 @@ def consolidate_tract_trees(
         conn.commit()
     finally:
         conn.close()
-    log.info("规范单木整理: %d 株 -> tract_id=%s run_id=%s", n, tract_id, run_id)
+    log.info("规范单木整理: {} 株 -> tract_id={} run_id={}", n, tract_id, run_id)
     return n
 
 
@@ -307,5 +370,5 @@ def persist_individuals(individuals, *, url: str | None = None) -> int:
         conn.commit()
     finally:
         conn.close()
-    log.info("个体持久化: %d 个体, 回填规范株 %d 条", n, linked)
+    log.info("个体持久化: {} 个体, 回填规范株 {} 条", n, linked)
     return n

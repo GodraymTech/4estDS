@@ -24,174 +24,130 @@ app = typer.Typer(
 )
 
 
-def _bootstrap(level: str | None = None):
+def _bootstrap(level: str | None = None, task_type: str | None = None):
     paths.ensure_home()
     settings = load_settings()
     _, run_id = setup_logging(
         level=level or settings.get("level", "INFO")
     )
+    paths.set_run_context(run_id, task_type)
     return settings, run_id
 
 
 @app.command("infer", help="图像推理")
 def cmd_infer(
-    image: Optional[str] = Option(None, "--image", help="输入图像路径"),
+    images: list[str] = Argument(..., help="输入影像/图像路径(支持 TIFF/PNG/JPG 等)或目录"),
     arch: Optional[str] = Option(None, "--arch", help="模型架构 (yolo12 / rtdetr)"),
-    acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYMM"),
+    acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYmmdd"),
     location: Optional[str] = Option(None, "--location", help="地块位置标识"),
-    overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="重叠率 (0.0~1.0，如0.15代表15%)"),
-    chm: Optional[str] = Option(None, "--chm", help="[阶段七] CHM 冠层高度模型栈格路径(单波段),用于树高"),
-    dsm: Optional[str] = Option(None, "--dsm", help="[阶段七] DSM 地表高程,与 --dem 配合算 CHM"),
-    dem: Optional[str] = Option(None, "--dem", help="[阶段七] DEM 裸地高程,与 --dsm 配合算 CHM"),
+    overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="重叠率 (0.0~1.0)"),
+    chm: Optional[str] = Option(None, "--chm", help="CHM 冠层高度模型栅格路径"),
+    dsm: Optional[str] = Option(None, "--dsm", help="DSM 地表高程，与 --dem 配合算 CHM"),
+    dem: Optional[str] = Option(None, "--dem", help="DEM 裸地高程，与 --dsm 配合算 CHM"),
+    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否绘制边界框"),
+    export_format: Optional[str] = Option(
+        None, "--export-format",
+        help="推理完成后自动导出 GIS 图层格式 (geojson / shp / gpkg / csv)，不指定则不导出",
+    ),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
-    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否绘制边界框并保存结果图像"),
 ) -> int:
-    import time
-
-    args = SimpleNamespace(
-        image=image, arch=arch, acquisition_time=acquisition_time, location=location,
-        overlap_rate=overlap_rate, chm=chm, dsm=dsm, dem=dem, log_level=log_level, draw_box=draw_box
-    )
-
-    settings, run_id = _bootstrap(args.log_level)
-    arch_val = args.arch or settings.get("arch", "yolo12")
+    from pathlib import Path
     from .db import writer
-    from .detect import get_detector
-    from .engine import run_inference
+    from .tasks.infer import VALID_EXPORT_FORMATS, run_infer_pipeline
 
-    logger.info(f"[infer] run_id={run_id} arch={arch_val} image={args.image}")
-    writer.start_run_log(
-        run_id, "infer", model_arch=arch_val, input_path=args.image,
-        params={"arch": arch_val, "image": args.image},
-    )
-    t0 = time.time()
-    source = None
-    try:
-        if not args.image:
-            logger.error("[infer] 真实推理需要 --image")
-            writer.finish_run_log(run_id, "failed", error="missing --image")
-            return 2
-        from .engine import RasterImageSource
-
-        detector = get_detector(
-            arch_val,
-            weights=settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights")),
-            conf=float(settings.get("conf_threshold", 0.25)),
-            iou=float(settings.get("detect.iou_threshold", 0.6)),
-            imgsz=int(settings.get("model_input", 1024)),
-            device=settings.get("device", None),
+    if export_format and export_format not in VALID_EXPORT_FORMATS:
+        logger.error(
+            "[infer] 不支持的导出格式 '{}', 可选: {}", export_format, ", ".join(VALID_EXPORT_FORMATS)
         )
-        source = RasterImageSource(args.image)
+        return 2
 
-        result = run_inference(
-            source, detector,
-            root_size=int(settings.get("root_size", 1024)),
-            min_size=int(settings.get("min_size", 256)),
-            conf_thr=float(settings.get("conf_threshold", 0.25)),
-            iou_thr=float(settings.get("detect.iou_threshold", 0.6)),
-            overlap_rate=float(
-                args.overlap_rate
-                if args.overlap_rate is not None
-                else settings.get("default_overlap", 0.2)
-            ),
-            conf_type=str(settings.get("conf_type", "max")),
+    settings, run_id = _bootstrap(log_level, task_type="infer") 
+    logger.info("[infer] settings snapshot: {}", settings)
+
+    # 路由分支：如果大于 1 个输入路径，或者单个路径是目录，则走批量流程
+    is_batch = len(images) > 1 or (len(images) == 1 and Path(images[0]).is_dir())
+
+    if not is_batch:
+        image = images[0]
+        arch_val = arch or settings.get("detect.arch", "yolo12")
+
+        logger.info("[infer] run_id={} arch={} image={}", run_id, arch_val, image)
+        writer.start_run_log(
+            run_id, "infer", model_arch=arch_val, input_path=image,
+            params={"arch": arch_val, "image": image},
+            url=settings.get("url", None),
         )
-        from .geo import compute_tract_geometry
 
-        geo = compute_tract_geometry(
-            args.image,
-            result.meta.get("width"), result.meta.get("height"),
-            transform=getattr(source, "transform", None),
-            crs=getattr(source, "crs", None),
-        ) or {}
-        if not geo:
-            logger.warning(
-                "[infer] 未获取到仿射变换(无 .tfw/.prj 且无内嵌 GeoTIFF 标签),"
-                "真实面积/密度将缺失。"
+        try:
+            result = run_infer_pipeline(
+                image, run_id=run_id, settings=settings,
+                arch=arch_val, acquisition_time=acquisition_time, location=location,
+                overlap_rate=overlap_rate, chm=chm, dsm=dsm, dem=dem,
+                draw_box=draw_box, export_fmt=export_format,
             )
-        tract_id = writer.ensure_tract(
-            args.acquisition_time or "000000",
-            args.location or "default",
-            pixel_w=geo.get("pixel_w") or result.meta.get("width"),
-            pixel_h=geo.get("pixel_h") or result.meta.get("height"),
-            gsd=geo.get("gsd"),
-            geo_area=geo.get("geo_area"),
-            area_unit=geo.get("area_unit"),
+        except NotImplementedError as e:
+            writer.finish_run_log(run_id, "failed", error=str(e), url=settings.get("url", None))
+            logger.warning("[infer] {}", e)
+            return 0
+        except FileNotFoundError as e:
+            writer.finish_run_log(run_id, "failed", error=str(e), url=settings.get("url", None))
+            logger.error("[infer] 文件未找到: {}", e)
+            return 1
+        except Exception as e:
+            writer.finish_run_log(run_id, "failed", error=str(e), url=settings.get("url", None))
+            logger.exception("[infer] 失败: {}", e)
+            return 1
+
+        logger.info(
+            "[infer] 完成！耗时={:.1f}s  瓦片={}/{}  检测={} 株  入库={} 条",
+            result["duration_s"], result["tiles_processed"], result["tiles_total"],
+            result["fused_count"], result["observations_written"],
         )
-        # 阶段七: 多源 RGB × CHM 树高(提供 --chm 或 --dsm+--dem 时启用)
-        chm_path = args.chm
-        dsm_path = args.dsm
-        dem_path = args.dem
-        if chm_path or (dsm_path and dem_path):
-            from .fusion import build_chm_sampler
-            from .geo import resolve_geo
+        if result.get("report_path"):
+            logger.info("[infer] 报告 → {}", result["report_path"])
+        if result.get("export_path"):
+            logger.info("[infer] 导出 → {}", result["export_path"])
+        return 0
+    else:
+        # 批量预处理推理
+        from .tasks.batch import run_batch_pipeline
 
-            rgb_geo = resolve_geo(
-                args.image,
-                transform=getattr(source, "transform", None),
-                crs=getattr(source, "crs", None),
-            )
-            sampler = build_chm_sampler(
-                chm_path=chm_path, dsm_path=dsm_path, dem_path=dem_path,
-                rgb_transform=rgb_geo.transform if rgb_geo else None,
-                stat=str(settings.get("height_stat", "p95")),
-            )
-            if sampler is not None:
-                sampler.annotate(result.detections)
-                for _stype, _path in (("chm", chm_path), ("dsm", dsm_path), ("dem", dem_path)):
-                    if _path:
-                        writer.register_source(tract_id, _stype, _path)
-        written = writer.write_observations(tract_id, run_id, result.detections)
+        batch_summary = run_batch_pipeline(
+            images,
+            settings=settings,
+            arch=arch,
+            acquisition_time=acquisition_time,
+            location=location,
+            overlap_rate=overlap_rate,
+            chm=chm,
+            dsm=dsm,
+            dem=dem,
+            draw_box=draw_box,
+            export_fmt=export_format,
+        )
+
+        if batch_summary.total == 0:
+            logger.warning("[infer] 批量推理未处理任何有效影像。")
+            return 0
         
-        # 绘制检测框输出保存（系统架构复用 visualize 模块）
-        do_draw = args.draw_box if args.draw_box is not None else settings.get("draw_box", False)
-        if do_draw:
-            from .visualize import draw_detections_on_image
-            from pathlib import Path
-            out_dir = paths.outputs_dir()
-            out_dir.mkdir(parents=True, exist_ok=True)
-            vis_out = out_dir / f"{Path(args.image).stem}_detected.jpg"
-            draw_detections_on_image(args.image, result.detections, output_path=vis_out)
-            logger.info(f"[infer] 检测框结果图已保存至: {vis_out}")
-        dur = time.time() - t0
-        metrics = {
-            "tiles_total": result.tiles_total,
-            "tiles_processed": result.tiles_processed,
-            "tiles_skipped_empty": result.tiles_skipped_empty,
-            "raw_count": result.raw_count,
-            "fused_count": result.fused_count,
-            "observations_written": written,
-        }
-        writer.finish_run_log(run_id, "succeeded", metrics=metrics, duration_s=dur)
-        logger.info(f"[infer] 完成: {metrics}")
-        return 0
-    except NotImplementedError as e:
-        writer.finish_run_log(
-            run_id, "failed", error=str(e), duration_s=time.time() - t0
+        logger.info(
+            "[infer] 批量推理完成！总数={} 成功={} 失败={} 累计单木={} 耗时={:.1f}s",
+            batch_summary.total, batch_summary.succeeded, batch_summary.failed,
+            batch_summary.total_trees, batch_summary.elapsed_s
         )
-        logger.warning(f"[infer] {e}")
-        return 0
-    except Exception as e:  # 兑底:记录失败但不崩溃
-        writer.finish_run_log(
-            run_id, "failed", error=str(e), duration_s=time.time() - t0
-        )
-        logger.exception(f"[infer] 失败: {e}")
-        return 1
-    finally:
-        if source is not None and hasattr(source, "close"):
-            source.close()
+        return 0 if batch_summary.failed == 0 else 1
 
 
 @app.command("preprocess", help="影像预处理(自适应切片与 COG 转换)")
 def cmd_preprocess(
     image: str = Argument(..., help="输入影像/图像路径(支持 TIFF/PNG/JPG 等)"),
-    out_dir: Optional[str] = Option(None, "--out-dir", "--out", help="切片输出目录 (默认 <home>/outputs/preprocess/tiles__xxx/)"),
+    out_dir: Optional[str] = Option(None, "--out-dir", "--out", help="切片输出目录 (默认 <home>/outputs/<YYmmdd_HHMM>_<run_id>/preprocess/tiles__xxx/)"),
     tile_size: Optional[int] = Option(None, "--tile-size", help="手动指定切片边长(不指定则自适应)"),
     overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="手动指定重叠率(0.0~0.5，不指定则自适应)"),
     slice: Optional[bool] = Option(None, "--slice/--no-slice", help="是否激活切片功能"),
     cog: Optional[bool] = Option(None, "--cog/--no-cog", help="是否激活 COG 转换功能"),
     cog_out: Optional[str] = Option(None, "--cog-out", help="COG 转换输出影像路径(默认同级 *_cog.tif)"),
-    action: Optional[str] = Option(None, "--action", help="切片行为: slice (切片落盘) | none (仅计算参数，不落盘)"),
+    action: Optional[str] = Option(None, "--action", help="切片行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)"),
     draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否在自标定样本图上绘制检测框（用于调试）"),
 ) -> int:
     settings, run_id = _bootstrap()
@@ -206,127 +162,45 @@ def cmd_preprocess(
         logger.error(f"输入文件不存在: {image}")
         return 1
 
-    is_tiff = image.lower().endswith((".tif", ".tiff"))
-
-    # 1. 读取配置（消除层级字典，通过 Settings 扁平安全获取）
-    do_cog = cog if cog is not None else settings.get("preprocess.cog.enable", True)
-    do_slice = slice if slice is not None else settings.get("preprocess.slice.enable", True)
-    slice_action = action if action is not None else settings.get("preprocess.slice.action", "slice")
-
-    # ---- 第一阶段: COG 检测与转换 ----
-    if is_tiff and do_cog:
-        from .preprocess.cog import check_cog_format, convert_to_cog
-        status = check_cog_format(image)
-        logger.info(f"影像 COG 状态检测结果: {status}")
+    try:
+        from .preprocess.pipeline import prepare_inference_image
         
-        if status != "cog":
-            if not cog_out:
-                p = Path(image)
-                out_suffix = settings.get("out_suffix", "_cog.tif") or "_cog.tif"
-                cog_out_path = p.parent / f"{p.stem}{out_suffix}"
-            else:
-                cog_out_path = Path(cog_out)
-
-            success = convert_to_cog(
-                image,
-                cog_out_path,
-                block_size=int(settings.get("block_size", 512)),
-                compress=str(settings.get("compress", "deflate")),
-                resampling=str(settings.get("resampling", "nearest")),
-                min_overview_dim=int(settings.get("min_overview_dim", 256))
-            )
-            if success:
-                logger.info(f"COG 转换成功，后续切片将切换至新影像: {cog_out_path.name}")
-                image = str(cog_out_path)
-            else:
-                logger.error("COG 转换失败，将尝试基于原影像进行切片。")
-        else:
-            logger.info("影像已经是标准 COG 格式，无需转换。")
-
-    # ---- 第二阶段: 切片决策网格计算与执行 ----
-    if do_slice:
-        # 获取图像宽高
-        width, height = 0, 0
-        if is_tiff:
-            try:
-                import rasterio
-                with rasterio.open(image) as src:
-                    width, height = src.width, src.height
-            except Exception:
-                pass
+        # 调用统一预处理管道
+        res = prepare_inference_image(
+            image_path=image,
+            slice_action=action,
+            slice_enable=slice,
+            cog_enable=cog,
+            cog_out=cog_out,
+            tile_size=tile_size,
+            overlap_rate=overlap_rate,
+            settings=settings,
+            run_id=run_id,
+            out_dir=out_dir
+        )
         
-        if width == 0 or height == 0:
-            try:
-                from PIL import Image
-                with Image.open(image) as img:
-                    width, height = img.size
-            except Exception as e:
-                logger.error(f"无法打开影像以读取像素大小: {e}")
-                return 1
-
-        min_dim = min(width, height)
-        if min_dim < 2560:
-            logger.info(f"图像较短边 {min_dim}px < 2560px，跳过切片逻辑。")
-            return 0
-
-        t_size = tile_size
-        r_ov = overlap_rate
-
-        # 当输入是 TIFF，且启用了自标定，且用户未手动指定参数时
-        if is_tiff and settings.get("preprocess.slice.scope.enable", True) and (t_size is None or r_ov is None):
-            logger.info("TIFF 格式触发 SCOPE 尺度空间自标定...")
-            from .detect import get_detector
-            from .preprocess.scope import run_scope_calibration
-
-            arch_val = settings.get("arch", "yolo12")
-            detector = get_detector(
-                arch=arch_val,
-                weights=settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights")),
-                conf=float(settings.get("conf_threshold", 0.25)),
-                iou=float(settings.get("detect.iou_threshold", 0.6)),
-                imgsz=int(settings.get("model_input", 1024)),
-            )
-
-            resolved_tile, resolved_overlap_rate = run_scope_calibration(
-                image, detector, settings, run_id=run_id
-            )
-
-            if t_size is None:
-                t_size = resolved_tile
-            if r_ov is None:
-                r_ov = resolved_overlap_rate
-
-            logger.info(f"SCOPE 自标定决策：tile_size={t_size}px, overlap_rate={r_ov:.2%}")
+        logger.info("完成预处理: ")
+        logger.info(f"运行模式: {res['mode']}")
+        logger.info(f"处理后原图路径: {res['image_path']}")
+        logger.info(f"切片参数: tile_size={res['tile_size']}px, overlap_rate={res['overlap_rate']:.0%}")
+        if res["tiles_dir"]:
+            logger.info(f"切片输出目录: {res['tiles_dir']}")
+            logger.info(f"静态切片落盘完成: 成功保存 {res['saved_count']} 块瓦片。")
         else:
-            # 非 TIFF 图像，或者用户指定了切片大小，或者关闭了自标定
-            if t_size is None:
-                t_size = int(settings.get("default_tile", 640))
-            if r_ov is None:
-                r_ov = float(settings.get("default_overlap", 0.2))
-            logger.info(f"采用切片默认参数：tile_size={t_size}px, overlap_rate={r_ov:.2%}")
-
-        # 判断切片落盘行为
-        if slice_action == "slice":
-            from .preprocess.tiling import execute_slicing
-            save_quality = int(settings.get("save_quality", 95))
-            saved_count = execute_slicing(
-                image_path=image,
-                out_dir=out_dir,
-                tile_size=t_size,
-                overlap_rate=r_ov,
-                run_id=run_id,
-                save_quality=save_quality
-            )
-            logger.info(f"均匀切片落盘完成: 成功保存 {saved_count} 块瓦片。")
-        else:
-            logger.info(f"根据配置 action={slice_action}，跳过切片文件落盘 (等待基于 COG 的 on-the-fly 动态切片)。")
-
-    return 0
+            logger.info("未生成物理切片。")
+            
+        return 0
+    except FileNotFoundError as e:
+        logger.error(f"预处理失败:\n{e}")
+        return 1
+    except Exception as e:
+        logger.exception(f"预处理管道运行失败: {e}")
+        return 1
 
 
 @app.command("train", help="模型训练(feature-gated)")
 def cmd_train() -> int:
-    _, run_id = _bootstrap()
+    _, run_id = _bootstrap(task_type="train")
     logger.info(f"[train] run_id={run_id} (feature-gated)")
     logger.info("[train] TODO: 训练模块按功能授权解锁(阶段八)")
     return 0
@@ -336,7 +210,7 @@ def cmd_train() -> int:
 def cmd_report(
     tract_id: Optional[str] = Option(None, "--tract-id", help="地块 ID"),
     run_id: Optional[str] = Option(None, "--run-id", help="限定某次 run"),
-    acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYMM"),
+    acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYmmdd"),
     location: Optional[str] = Option(None, "--location", help="地块位置标识"),
     format: str = Option("md", "--format", help="输出格式 (md / csv / pdf)"),
     out: Optional[str] = Option(None, "--out", help="输出目录(默认 <home>/outputs)"),
@@ -373,12 +247,46 @@ def cmd_report(
     return 0
 
 
+@app.command("export", help="导出检测到的树木空间图层(shp/geojson/gpkg/csv)")
+def cmd_export(
+    tract_id: Optional[str] = Option(None, "--tract-id", help="地块 ID(默认最新)"),
+    run_id: Optional[str] = Option(None, "--run-id", help="限定特定运行(默认最新)"),
+    format: str = Option("geojson", "--format", help="导出格式: shp / geojson / gpkg / csv"),
+    out: Optional[str] = Option(None, "--out", help="导出路径/目录(默认 outputs 目录)"),
+    log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
+) -> int:
+    args = SimpleNamespace(
+        tract_id=tract_id, run_id=run_id, format=format, out=out, log_level=log_level
+    )
+
+    settings, _ = _bootstrap(args.log_level)
+    from .export import export_tract_to_file
+
+    try:
+        res = export_tract_to_file(
+            tract_id=args.tract_id,
+            run_id=args.run_id,
+            fmt=args.format,
+            out_path=args.out,
+            db_url=settings.get("url", None),
+        )
+        if res.get("fallback"):
+            logger.warning(f"[export] 降级: {res['fallback']}")
+        logger.info(
+            f"[export] 导出成功[{res['format']}]，共计 {res['count']} 株单木 -> {res['out_path']}"
+        )
+        return 0
+    except Exception as e:
+        logger.error(f"[export] 导出失败: {e}")
+        return 1
+
+
 @app.command("batch", help="批量处理(仅 RGB,串行)")
 def cmd_batch(
     input_dir: str = Option(..., "--input-dir", help="输入目录"),
     glob: str = Option("*.tif", "--glob", help="文件匹配模式(默认 *.tif)"),
     arch: Optional[str] = Option(None, "--arch", help="模型架构 (yolo12 / rtdetr)"),
-    acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYMM"),
+    acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYmmdd"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
     args = SimpleNamespace(

@@ -34,6 +34,7 @@ DDL: tuple[str, ...] = (
         ended_at      TEXT,
         duration_s    REAL,
         input_path    TEXT,
+        tiles_dir     TEXT,
         params_json   TEXT,
         metrics_json  TEXT,
         error         TEXT,
@@ -154,6 +155,11 @@ def init_db(url: str | None = None) -> Path:
         conn.execute("PRAGMA foreign_keys = ON")
         for stmt in DDL:
             conn.execute(stmt)
+        # 向后兼容迁移：为旧库补充 tiles_dir 列（SQLite 不支持 IF NOT EXISTS，忽略重复错误）
+        try:
+            conn.execute("ALTER TABLE run_logs ADD COLUMN tiles_dir TEXT")
+        except sqlite3.OperationalError:
+            pass  # 列已存在，无需处理
         conn.commit()
     finally:
         conn.close()

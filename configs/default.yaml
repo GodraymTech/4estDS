@@ -6,7 +6,7 @@ app:
   codename: forestds
 
 logging:
-  level: DEBUG
+  level: INFO             # DEBUG
   rotation_mb: 20        # 单个日志文件滚动大小(MB)
   backups: 5
   to_db: true            # 是否把 run 记录写入 run_logs 表
@@ -15,19 +15,6 @@ db:
   # 默认 SQLite(本地);设计上可平滑迁移到 PostgreSQL/PostGIS
   url: null               # 为空则使用 <home>/db/4estds.sqlite
   echo: false
-
-detect:
-  arch: yolo12            # yolo12 | rtdetr
-  conf_threshold: 0.25
-  iou_threshold: 0.6
-  model_input: 640       # 模型输入边长(像素)
-  batch_size: 16          # 批量推理单批次最大子图数，防 OOM
-  draw_box: true         # 推理后是否在原图上绘制检测框输出保存
-  models:
-    yolo12:
-      weights: "m03-yolo12x-det-2cls-SOTA.pt"
-    rtdetr:
-      weights: "rtdetr_l.pt"
 
 preprocess:
   # COG (Cloud Optimized GeoTIFF) 检查与转换配置
@@ -41,18 +28,18 @@ preprocess:
 
   # 切片 (Slicing) 基础配置
   slice:
-    enable: true
-    action: "none"             # 切片执行行为: slice (执行切片落盘) | none (仅计算参数，不落盘)
-    default_tile: 640           # 非 TIFF 图像或回退时的默认切片大小
-    default_overlap: 0.2        # 默认重叠率 (0.0 - 0.5)
+    enable: true                # 推理流水线里，必须为true
+    action: "none"             # 切片执行行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)
+    default_tile: 640           # 默认切片大小【scope.enable=false时生效】
+    default_overlap: 0.2        # 默认重叠率 (0.0 - 0.5)【scope.enable=false时生效】
     save_quality: 95            # 切片导出 JPEG 瓦片时的压缩质量
 
     # SCOPE 预推理自适应求解切片参数
     scope:
       enable: true              # 对 TIFF 影像是否启用 SCOPE 自标定，False 则用默认/先验参数
       seed_window_size: 2560    # 采样种子窗口边长
-      sample_delta: 4           # 每一轮采样追加的种子窗口数
-      sample_budget: 16         # 采样种子窗口上限数目
+      sample_delta: 2           # 每一轮采样追加的种子窗口数
+      sample_budget: 8          # 采样种子窗口上限数目
       nodata_tolerance: 0.10    # 每个种子窗口允许的 nodata 占比上限
       iou_threshold: 0.45       # 跨尺度合并去重的 IoU 阈值
       large_quantile: 0.95      # 用于完整性约束的大冠幅分位数
@@ -62,8 +49,30 @@ preprocess:
       incomplete_border_px: 2     # 非完整树贴边判定边界距离（像素）
       tile_grid: [512, 640, 768, 896, 1024, 1280, 1536, 2048] # 寻优边长候选集
       overlap_grid: [0.1, 0.15, 0.2, 0.25, 0.3]              # 寻优重叠率候选集
+      draw_box: false           # (调试)查看预推理的效果
+
+detect:
+  arch: yolo12            # yolo12 | rtdetr
+  conf_threshold: 0.25
+  iou_threshold: 0.6
+  model_input: 640       # 模型输入边长(像素)
+  batch_size: 16          # 批量推理单批次最大子图数，防 OOM
+  verbose: true         # 推理时是否输出 ultralytics 自身的详细推理日志
+  models:
+    yolo12:
+      weights: "m03-yolo12x-det-2cls-SOTA.pt"
+    rtdetr:
+      weights: "rtdetr_l.pt"
+
+postprocess:
+  draw_box: true                 # 推理后是否在原图(或原图中心5000*5000的子图）上绘制检测框输出保存
+  trunc_penalty: 0.5            # 局部碰边（被切断）框的置信度折扣系数
+  conf_type: "max"               # 跨瓦片 WBF 融合时的置信度聚合方式
+  center_merge_frac: 0.0         # 跨缝断裂拼合的中心距离门控
+  keep_tiles: true               # 推理结束后是否保留物理切片目录(若为false则只删除图像瓦片，保留空文件夹)
 
 export:
-  formats: [shp, geojson, gpkg, csv]
+  default_format: shp          # 推理完成后导出 GIS 图层格式。可选值: geojson | shp | gpkg | csv | null（null 表示不自动导出，仅通过 `4estds export` 手动触发）
   drop_pixel_columns: true
   drop_source_column: true
+

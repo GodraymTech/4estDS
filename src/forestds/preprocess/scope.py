@@ -125,7 +125,7 @@ def solve_joint_optimization(
     d_q95 = weighted_quantile(sizes_px, weights, large_quantile)
     sum_w = sum(weights)
 
-    log.debug(f"经验冠幅尺寸无偏估计: 样本数={len(sizes_px)}, 加权总体={sum_w:.1f}, 95分位数(大冠幅)={d_q95:.1f}px")
+    log.debug(f"经验冠幅尺寸无偏估计: 样本数={len(sizes_px)}, 加权总体={sum_w:.1f}, 95分位数(大冠幅)={int(round(d_q95))}px")
 
     area_full = width_full * height_full
     if tile_grid is None:
@@ -168,7 +168,7 @@ def solve_joint_optimization(
                 best_T = T
                 best_r = r
 
-    log.info(f"联合优化求解完成: 最优边长 T*={best_T}px, 最优重叠率 r*={best_r:.2%}")
+    log.info(f"联合优化求解完成: 最优边长 T*={best_T}px, 最优重叠率 r*={best_r:.0%}")
     return best_T, best_r
 
 
@@ -191,6 +191,10 @@ def run_scope_calibration(
     if detector is None:
         raise ValueError("SCOPE self-calibration requires a valid detector instance. No detector was provided or initialization failed.")
 
+    # 临时禁用自标定推理时的 verbose 输出，避免日志污染
+    orig_verbose = detector.kwargs.get("verbose", True)
+    detector.kwargs["verbose"] = False
+
     seed_window_size = int(settings.get("seed_window_size", 2560))
     probe_size = int(settings.get("detect.model_input", 640))
 
@@ -207,7 +211,7 @@ def run_scope_calibration(
     
     scope_batch_size = int(settings.get("batch_size", 16))
     save_quality = int(settings.get("save_quality", 95))
-    draw_box = bool(settings.get("draw_box", False))
+    draw_box = bool(settings.get("preprocess.slice.scope.draw_box", False))
     
     tile_grid = settings.get("tile_grid", [512, 640, 768, 896, 1024, 1280, 1536, 2048])
     overlap_grid = settings.get("overlap_grid", [0.1, 0.15, 0.2, 0.25, 0.3])
@@ -217,10 +221,10 @@ def run_scope_calibration(
         log.error(f"输入影像不存在: {path}")
         return 640, 0.2
 
-    with rasterio.open(path) as src:
-        W, H = src.width, src.height
+    from ..utils import get_image_dimensions
+    W, H = get_image_dimensions(path)
 
-    log.info(f"开始对影像 {path.name}({W} x {H}) 进行 SCOPE 尺度空间探测...")
+    log.debug(f"开始对影像 {path.name}({W}x{H}) 进行 SCOPE 尺度空间探测...")
 
     # 创建临时工作区
     tmp_dir = Path(tempfile.mkdtemp(prefix="scope_tiling_"))
@@ -241,7 +245,7 @@ def run_scope_calibration(
         # x/y_steps是网格线的`交叉点`，用来作为种子窗口的`中心点`，gx/gy则是种子窗口的`左上角`。
         x_steps = [int(W * i / (grid_cols + 1)) for i in range(1, grid_cols + 1)]
         y_steps = [int(H * i / (grid_rows + 1)) for i in range(1, grid_rows + 1)]
-        log.info(f"种子窗口({seed_window_size}px) 中心点数量: {len(x_steps)} x {len(y_steps)} = {len(x_steps) * len(y_steps)}")
+        log.info(f"种子窗口({seed_window_size}px) 均匀分布中心点数量: {len(x_steps)} x {len(y_steps)} = {len(x_steps) * len(y_steps)}")
         candidates = []
         seen_coords = set()
         for xs in x_steps:
@@ -271,12 +275,12 @@ def run_scope_calibration(
             with rasterio.open(path) as src:
                 for gx, gy in batch_candidates:
                     # Nodata 占比过滤 (积分图或快速采样)
-                    # 读窗并快速计算 0 占比
-                    # 采样读 64x64 缩小片计算 background
-                    samp = src.read(1, window=rasterio.windows.Window(gx, gy, seed_window_size, seed_window_size), out_shape=(64, 64))
+                    # 读窗并快速计算 0 占比。避免使用 rasterio 容易在 C 层引发 SegFault 的 out_shape 参数
+                    samp_full = src.read(1, window=rasterio.windows.Window(gx, gy, seed_window_size, seed_window_size))
+                    samp = samp_full[::40, ::40]
                     nodata_ratio = np.sum(samp == 0) / samp.size
                     if nodata_ratio > nodata_tolerance:
-                        log.debug(f"窗口 ({gx}, {gy}) nodata 占比 {nodata_ratio:.1%} > {nodata_tolerance:.1%}，舍弃。")
+                        log.debug(f"窗口 ({gx}, {gy}) nodata 占比 {nodata_ratio:.0%} > {nodata_tolerance:.0%}，舍弃。")
                         continue
 
                     # 记录成功窗口
@@ -304,7 +308,7 @@ def run_scope_calibration(
                             l3_tiles.append((cx, cy, sz3))
                     levels[3] = l3_tiles
 
-                    # 切片落盘
+                    # 静态切片落盘
                     for L, tiles in levels.items():
                         for tx, ty, T_size in tiles:
                             full_x = gx + tx
@@ -382,11 +386,11 @@ def run_scope_calibration(
                                     "y2": d.y2 * scale,
                                 })
                             
-                            debug_dir = paths.outputs_dir() / "preprocess" / "scope_debug" / f"{path.stem}_run_{run_id}"
+                            debug_dir = paths.outputs_preprocess_dir() / f"scopedebug__{path.stem}"
                             debug_dir.mkdir(parents=True, exist_ok=True)
                             raw_vis_out = debug_dir / f"o{fx}_{fy}__s{t_sz}_detected.jpg"
                             
-                            from ..visualize import draw_detections_on_image
+                            from ..export.visualize import draw_detections_on_image
                             draw_detections_on_image(
                                 raw_im,
                                 scaled_dets,
@@ -418,6 +422,8 @@ def run_scope_calibration(
                             
                         det = Detection(bx1, by1, bx2, by2, d.score, d.label)
                         batch_dets.append((det, fx, fy, t_sz))
+            except (FileNotFoundError, ImportError) as e:
+                raise e
             except Exception as e:
                 log.exception("预推理异常")
                 raise e
@@ -475,13 +481,13 @@ def run_scope_calibration(
                 theta_samples.sort()
                 ci_half = (theta_samples[int(50 * 0.95)] - theta_samples[int(50 * 0.05)]) / 2.0
                 
-                log.debug(f"采样进度: 激活窗口={len(sampled_coords)}/{actual_sample_budget}, 样本数={len(detected_sizes)} (+{len(keep_boxes)}), 加权总体={sum_w:.1f}, 大冠幅估计d_q95={d_q95:.1f}px, CI半宽={ci_half:.2f}px")
+                log.debug(f"采样进度: 激活窗口={len(sampled_coords)}/{actual_sample_budget}, 样本数={len(detected_sizes)} (+{len(keep_boxes)}), 加权总体={sum_w:.1f}, 大冠幅估计d_q95={int(round(d_q95))}px, CI半宽={int(round(ci_half))}px")
                 
                 if ci_half < 2.0 and len(sampled_coords) >= actual_sample_delta * 2:
-                    log.info(f"序贯检测收敛 (CI半宽 {ci_half:.2f} < 2px)，提前结束探测。")
+                    log.info(f"序贯检测收敛 (CI半宽 {int(round(ci_half))} < 2px)，提前结束探测。")
                     break
 
-        log.info(f"特征尺度探测结束，共采样窗口 {len(sampled_coords)} 个，收集有效冠幅分布数据点 {len(detected_sizes)} 个。")
+        log.info(f"🎇 SCOPE探测结束: 种子窗口 {len(sampled_coords)} 个, 有效检测框 {len(detected_sizes)} 个。")
 
         # 阶段 7: 最优几何求解
         T_star, r_star = solve_joint_optimization(
@@ -498,6 +504,9 @@ def run_scope_calibration(
         return T_star, r_star
 
     finally:
+        # 恢复 verbose 设置
+        if detector is not None:
+            detector.kwargs["verbose"] = orig_verbose
         # 清理临时文件
         if tmp_dir.exists():
             shutil.rmtree(tmp_dir)

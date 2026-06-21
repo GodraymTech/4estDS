@@ -30,11 +30,33 @@ class Yolo12Detector(BaseDetector):
             raise ImportError(
                 "yolo12 后端需要 ultralytics:  pip install '4estds[yolo]'"
             ) from e
+            
+        # 强制打通并重置 ultralytics 日志通道，避免其内部覆盖 propagate 属性
+        import logging
+        ultra_log = logging.getLogger("ultralytics")
+        ultra_log.propagate = True
+        ultra_log.handlers = []
+        
         weights = self.weights or "yolo12n.pt"
         if "/" not in weights and "\\" not in weights:
             import os
             from ... import paths
             weights = os.path.join(str(paths.models_dir()), weights)
+
+        # 检查自定义本地权重文件是否存在，若缺失则抛出友好错误
+        import os
+        base = os.path.basename(weights)
+        # is_official = (
+        #     base.startswith(("yolo12", "rtdetr"))
+        #     and base.endswith(".pt")
+        #     and len(base.split("-")) <= 2
+        #     and not any(char.isupper() for char in base)
+        # )
+        if not os.path.exists(weights):
+            raise FileNotFoundError(
+                f"找不到模型权重: {weights}\n"
+                f"请确保路径正确, 或手动下载: 'cp ~/.4estDS/models/{base} .4estDS/models/{base}'. 然后再重新运行。"
+            )
         self._model = YOLO(weights)
 
     def _predict_arrays(self, arrays):  # pragma: no cover - 需重依赖
@@ -45,7 +67,7 @@ class Yolo12Detector(BaseDetector):
             imgsz=int(self.kwargs.get("imgsz", 1024)),
             device=self.kwargs.get("device"),
             half=bool(self.kwargs.get("half", False)),
-            verbose=False,
+            verbose=bool(self.kwargs.get("verbose", False)),
         )
 
     def predict(self, window: Window) -> Detections:  # pragma: no cover - 需重依赖

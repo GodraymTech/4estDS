@@ -38,6 +38,7 @@ class RunLog(Base):
     ended_at: Mapped[str | None] = mapped_column(String)
     duration_s: Mapped[float | None] = mapped_column(Float)
     input_path: Mapped[str | None] = mapped_column(Text)
+    tiles_dir: Mapped[str | None] = mapped_column(Text)
     params_json: Mapped[str | None] = mapped_column(Text)
     metrics_json: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
