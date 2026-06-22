@@ -12,7 +12,7 @@
 调用关系（单向，不可逆）：
   detect/ ← engine/（engine 是唯一合法调用方；tasks/ 间接通过 engine 使用）
 """
-from .base import BaseDetector, Detection, Detections, Window
+from .base import BaseDetector, Detection, Detections, Window, calculate_max_batch_size
 from .registry import available_backends, get_detector, register
 
 __all__ = [
@@ -23,4 +23,5 @@ __all__ = [
     "available_backends",
     "get_detector",
     "register",
+    "calculate_max_batch_size",
 ]

@@ -431,6 +431,50 @@ def cmd_track(
     return 0
 
 
+@app.command("clean", help="清理运行期目录(保留子目录结构，默认不删 models)")
+def cmd_clean(
+    delete_models: bool = Option(
+        False,
+        "--delete-models",
+        help="是否连同 models 目录下的模型权重一并删除(默认保留)",
+    ),
+) -> int:
+    import shutil
+    from . import paths
+
+    root = paths.home_dir()
+    logger.info(f"[clean] 开始清理运行期目录: {root}")
+    if not root.exists():
+        logger.info("[clean] 运行期目录不存在，无需清理。")
+        return 0
+
+    for item in root.iterdir():
+        if item.is_dir():
+            # 保留 models 目录及其内容（除非 delete_models 为 True）
+            if item.name == "models" and not delete_models:
+                logger.info(f"[clean] 保留模型目录: {item}")
+                continue
+
+            logger.info(f"[clean] 清空目录内容: {item}")
+            for sub_item in item.iterdir():
+                try:
+                    if sub_item.is_dir() and not sub_item.is_symlink():
+                        shutil.rmtree(sub_item)
+                    else:
+                        sub_item.unlink()
+                except Exception as e:
+                    logger.warning(f"[clean] 无法删除 {sub_item}: {e}")
+        else:
+            try:
+                item.unlink()
+                logger.info(f"[clean] 删除文件: {item}")
+            except Exception as e:
+                logger.warning(f"[clean] 无法删除文件 {item}: {e}")
+
+    logger.info("[clean] 清理完成！已保留子目录结构。")
+    return 0
+
+
 def version_callback(value: bool):
     if value:
         print(f"{__codename__} {__version__}")

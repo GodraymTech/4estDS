@@ -114,3 +114,94 @@ class BaseDetector(ABC):
         if not self._loaded:
             self.load()
             self._loaded = True
+
+
+def calculate_max_batch_size(
+    detector: BaseDetector,
+    imgsz: int = 640,
+    safety_margin: float = 0.8,
+) -> int:
+    """通过动态探针（Active Probe）严谨测算出当前显卡在特定模型和输入尺寸下，
+    不发生 OOM 的最大安全 batch_size。
+    
+    参数:
+        detector: BaseDetector 检测器适配器实例
+        imgsz: 推理时的输入图像尺寸 (如 640 或 1024)
+        safety_margin: 安全系数余量，推荐 0.8 左右以抵御显存碎片
+    """
+    import gc
+    import numpy as np
+
+    detector.ensure_loaded()
+
+    # 检测是否能够使用 CUDA
+    try:
+        import torch
+        has_cuda = torch.cuda.is_available()
+    except ImportError:
+        has_cuda = False
+
+    if not has_cuda:
+        return 1
+
+    # 1. 深度清空显存缓存，准备探针
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+    # 构造虚拟像素矩阵 (numpy) 喂给 Window
+    dummy_pixels = np.zeros((imgsz, imgsz, 3), dtype=np.uint8)
+
+    # 2. 指数级探针测试上限 (1, 2, 4, 8, 16, 32, 64, 128...)
+    low = 0
+    high = 1
+
+    try:
+        while True:
+            windows = [
+                Window(x=0, y=0, w=imgsz, h=imgsz, pixels=dummy_pixels)
+                for _ in range(high)
+            ]
+            _ = detector.predict_batch(windows)
+
+            # 推理成功，记录为下限，并将上限翻倍继续测试
+            low = high
+            high *= 2
+
+            if high > 512:
+                break
+    except RuntimeError as e:
+        if "out of memory" in str(e).lower():
+            pass
+        else:
+            raise e
+    finally:
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    # 3. 在 [low, high] 区间内进行二分查找精确逼近
+    best_bs = low
+    if low < high:
+        while low <= high:
+            mid = (low + high) // 2
+            if mid <= 0:
+                break
+            try:
+                windows = [
+                    Window(x=0, y=0, w=imgsz, h=imgsz, pixels=dummy_pixels)
+                    for _ in range(mid)
+                ]
+                _ = detector.predict_batch(windows)
+                best_bs = mid
+                low = mid + 1
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    high = mid - 1
+                else:
+                    raise e
+            finally:
+                gc.collect()
+                torch.cuda.empty_cache()
+
+    # 4. 应用安全系数余量
+    return max(1, int(best_bs * safety_margin))

@@ -158,7 +158,7 @@ def find_cached_tiles(input_path: str, *, url: str | None = None) -> Path | None
         return None
     td = Path(row["tiles_dir"])
     if td.is_dir() and any(td.glob("*.*")):
-        log.warning("命中切片缓存: run_id={} tiles_dir={}", row["run_id"], td)
+        log.warning("命中切片缓存, 无需执行切割: run_id={} tiles_dir={}", row["run_id"], td)
         return td
     log.warning("缓存记录存在但目录已失效: {}", td)
     return None

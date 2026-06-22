@@ -19,7 +19,7 @@ db:
 preprocess:
   # COG (Cloud Optimized GeoTIFF) 检查与转换配置
   cog:
-    enable: true
+    enable: false               # 🔴 
     out_suffix: "_cog.tif"      # 转换后的输出后缀
     block_size: 512             # COG 瓦片大小 (通常为 512 或 256)
     compress: "deflate"         # 压缩算法 (deflate / lzw)
@@ -29,7 +29,7 @@ preprocess:
   # 切片 (Slicing) 基础配置
   slice:
     enable: true                # 推理流水线里，必须为true
-    action: "none"             # 切片执行行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)
+    action: "slice"              # 🔴 切片执行行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)
     default_tile: 640           # 默认切片大小【scope.enable=false时生效】
     default_overlap: 0.2        # 默认重叠率 (0.0 - 0.5)【scope.enable=false时生效】
     save_quality: 95            # 切片导出 JPEG 瓦片时的压缩质量
@@ -52,12 +52,12 @@ preprocess:
       draw_box: false           # (调试)查看预推理的效果
 
 detect:
-  arch: yolo12            # yolo12 | rtdetr
+  arch: rtdetr            # yolo12 | rtdetr
   conf_threshold: 0.25
   iou_threshold: 0.6
-  model_input: 640       # 模型输入边长(像素)
-  batch_size: 16          # 批量推理单批次最大子图数，防 OOM
-  verbose: true         # 推理时是否输出 ultralytics 自身的详细推理日志
+  model_input: 640        # 模型输入边长(像素)
+  batch_size: 32          # 🔴 
+  verbose: true           # 推理时是否输出 ultralytics 自身的详细推理日志
   models:
     yolo12:
       weights: "m03-yolo12x-det-2cls-SOTA.pt"
@@ -65,14 +65,14 @@ detect:
       weights: "rtdetr_l.pt"
 
 postprocess:
-  draw_box: true                 # 推理后是否在原图(或原图中心5000*5000的子图）上绘制检测框输出保存
-  trunc_penalty: 0.5            # 局部碰边（被切断）框的置信度折扣系数
+  draw_box: true                 # 🔴 是否在原图(或原图中心5000*5000的子图）上绘制检测框, 并保存
+  trunc_penalty: 0.5             # 局部碰边（被切断）框的置信度折扣系数
   conf_type: "max"               # 跨瓦片 WBF 融合时的置信度聚合方式
   center_merge_frac: 0.0         # 跨缝断裂拼合的中心距离门控
-  keep_tiles: true               # 推理结束后是否保留物理切片目录(若为false则只删除图像瓦片，保留空文件夹)
+  keep_tiles: true               # 🔴 是否清空切片目录
 
 export:
-  default_format: shp          # 推理完成后导出 GIS 图层格式。可选值: geojson | shp | gpkg | csv | null（null 表示不自动导出，仅通过 `4estds export` 手动触发）
+  default_format: null          # 🔴 推理完成后导出 GIS 图层格式。可选值: geojson | shp | gpkg | csv | null（null 表示不自动导出，仅通过 `4estds export` 手动触发）
   drop_pixel_columns: true
   drop_source_column: true
 
