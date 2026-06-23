@@ -19,6 +19,7 @@ from ..logging_setup import log_distribution
 # 树高合理上限(m)。
 _MAX_PLAUSIBLE_HEIGHT = 120.0
 _VALID_STATS = ("p95", "max", "median", "mean")
+_VALID_VOLUME_METHODS = ("cbh", "paraboloid", "cone", "ellipsoid", "column")
 
 
 def tree_height_from_chm(dsm: float, dem: float) -> float:
@@ -83,7 +84,7 @@ def chm_from_las(
     las_path: str,
     grid_size: float = 0.05,
     rgb_geo: Optional[GeoInfo] = None,
-) -> tuple[np.ndarray, Optional[GeoInfo]]:
+) -> tuple[np.ndarray, Optional[GeoInfo], Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]]:
     """读取 LAS 点云，进行高度归一化并格网化，生成 CHM 矩阵与 GeoInfo。
 
     利用地面点(Class 2)估计背景DEM，并计算非地面点的高度。支持未分类点云自动退级。
@@ -218,7 +219,7 @@ def chm_from_las(
         source="las_mesh",
     )
     log.info("[fusion] 点云网格化成功: CHM 尺寸=%dx%d 范围=[{:.2f}, {:.2f}]m", cols, rows, float(np.nanmin(chm)), float(np.nanmax(chm)))
-    return chm, geo_info
+    return chm, geo_info, (x, y, height_above_ground)
 
 
 @dataclass
@@ -230,16 +231,25 @@ class CHMSampler:
     rgb_transform: Optional[Affine] = None
     stat: str = "max"
     max_height: float = _MAX_PLAUSIBLE_HEIGHT
+    source_name: str = "chm"
+    volume_method: str = "cbh"
+    cbh_factor: float = 0.3
+    voxel_size: float = 0.2
+    raw_points: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]] = None
+    las_grid_size: float = 0.05
     
     def __post_init__(self) -> None:
         if self.stat not in _VALID_STATS:
             log.warning("[fusion] 未知统计量 {},回退 max", self.stat)
             self.stat = "max"
+        if self.volume_method not in _VALID_VOLUME_METHODS:
+            log.warning("[fusion] 未知体积估算方法 {}, 回退 cbh", self.volume_method)
+            self.volume_method = "cbh"
         coreg = self.chm_transform is not None and self.rgb_transform is not None
         mode = "仿射配准" if coreg else "像素对齐"
         log.info(
-            "CHMSampler 初始化: CHM 尺寸=%dx%d 配准模式=%s 统计量=%s",
-            self.chm.shape[1], self.chm.shape[0], mode, self.stat,
+            "CHMSampler 初始化: CHM 尺寸=%dx%d 配准模式=%s 统计量=%s 体积估算=%s (factor=%.2f)",
+            self.chm.shape[1], self.chm.shape[0], mode, self.stat, self.volume_method, self.cbh_factor
         )
 
     @property
@@ -252,6 +262,7 @@ class CHMSampler:
         将检测框在影像中的完整包围盒区域映射到 CHM 网格中，
         并在该包围盒切片内寻找树高估计（默认为 Max）并计算体积地学积分。
         """
+        wx_min = wx_max = wy_min = wy_max = 0.0
         if not self.coregistered:
             # 无仿射信息：假设 1:1 像素对齐
             h_h, h_w = self.chm.shape
@@ -299,19 +310,93 @@ class CHMSampler:
         if h_est < 0.0 or h_est > self.max_height:
             return None, None, "chm_outlier"
 
-        # 2. 树冠三维体积估算 (地学积分)
-        # 只累加高度大于 0.5 米的格网，滤除地面噪声
-        forest_h = valid_h[valid_h >= 0.5]
-        volume = 0.0
-        if forest_h.size > 0:
-            if self.coregistered:
-                pixel_area = abs(self.chm_transform.pixel_size_x() * self.chm_transform.pixel_size_y())
-            else:
-                # 若无地理参考，设定单像素面积为 1m2 作为占位
-                pixel_area = 1.0
-            volume = float(np.sum(forest_h) * pixel_area)
+        # 2. 树冠三维体积估算
+        if self.coregistered:
+            pixel_area = abs(self.chm_transform.pixel_size_x() * self.chm_transform.pixel_size_y())
+        else:
+            # 若无地理参考，设定单像素面积为 1m2 作为占位
+            pixel_area = 1.0
 
-        return h_est, volume, "chm"
+        # 计算树冠宽度和高度的地理单位长度
+        if self.coregistered:
+            wx1, wy1 = self.rgb_transform.pixel_to_world(det.x1, det.y1)
+            wx2, wy2 = self.rgb_transform.pixel_to_world(det.x2, det.y2)
+            w_geo = abs(wx2 - wx1)
+            h_geo = abs(wy2 - wy1)
+        else:
+            w_geo = det.width
+            h_geo = det.height
+        r = (w_geo + h_geo) / 4.0  # 树冠平均半径
+        
+        cbh = h_est * self.cbh_factor
+        h_crown = max(0.0, h_est - cbh)
+
+        actual_method = self.volume_method
+        if actual_method in ("convex_hull", "voxel") and self.raw_points is None:
+            log.warning(
+                "[fusion] 检测到体积估算方法为 {}, 但未提供点云数据，回退到 A-1 (cbh) 枝下高积分法",
+                actual_method
+            )
+            actual_method = "cbh"
+
+        volume = 0.0
+        if actual_method == "column":
+            forest_h = valid_h[valid_h >= 0.5]
+            if forest_h.size > 0:
+                volume = float(np.sum(forest_h) * pixel_area)
+        elif actual_method == "cbh":
+            crown_pixels = valid_h[valid_h >= cbh]
+            if crown_pixels.size > 0:
+                volume = float(np.sum(crown_pixels - cbh) * pixel_area)
+        elif actual_method == "paraboloid":
+            volume = float(0.5 * np.pi * (r ** 2) * h_crown)
+        elif actual_method == "cone":
+            volume = float((1.0 / 3.0) * np.pi * (r ** 2) * h_crown)
+        elif actual_method == "ellipsoid":
+            volume = float((2.0 / 3.0) * np.pi * (r ** 2) * h_crown)
+        elif actual_method == "convex_hull":
+            x_pts, y_pts, h_pts = self.raw_points
+            mask = (x_pts >= wx_min) & (x_pts <= wx_max) & (y_pts >= wy_min) & (y_pts <= wy_max)
+            tree_mask = mask & (h_pts >= cbh) & (h_pts <= self.max_height)
+            tx = x_pts[tree_mask]
+            ty = y_pts[tree_mask]
+            th = h_pts[tree_mask]
+            if len(tx) >= 4:
+                try:
+                    from scipy.spatial import ConvexHull
+                    pts_3d = np.column_stack((tx, ty, th))
+                    hull = ConvexHull(pts_3d)
+                    volume = float(hull.volume)
+                except Exception as e:
+                    log.warning("[fusion] 凸包体积计算失败(可能是点共面)，回退至 cbh 积分: {}", e)
+                    crown_pixels = valid_h[valid_h >= cbh]
+                    if crown_pixels.size > 0:
+                        volume = float(np.sum(crown_pixels - cbh) * pixel_area)
+            else:
+                log.warning("[fusion] 边界内有效点数少于4个(实际为 {})，回退至 cbh 积分", len(tx))
+                crown_pixels = valid_h[valid_h >= cbh]
+                if crown_pixels.size > 0:
+                    volume = float(np.sum(crown_pixels - cbh) * pixel_area)
+        elif actual_method == "voxel":
+            x_pts, y_pts, h_pts = self.raw_points
+            mask = (x_pts >= wx_min) & (x_pts <= wx_max) & (y_pts >= wy_min) & (y_pts <= wy_max)
+            tree_mask = mask & (h_pts >= cbh) & (h_pts <= self.max_height)
+            tx = x_pts[tree_mask]
+            ty = y_pts[tree_mask]
+            th = h_pts[tree_mask]
+            if len(tx) > 0:
+                vs = self.voxel_size
+                vx = (tx / vs).astype(np.int32)
+                vy = (ty / vs).astype(np.int32)
+                vh = (th / vs).astype(np.int32)
+                unique_voxels = set(zip(vx, vy, vh))
+                volume = float(len(unique_voxels) * (vs ** 3))
+            else:
+                crown_pixels = valid_h[valid_h >= cbh]
+                if crown_pixels.size > 0:
+                    volume = float(np.sum(crown_pixels - cbh) * pixel_area)
+
+        return h_est, volume, self.source_name
 
     def height_for_detection(self, det) -> tuple[Optional[float], str]:
         """保持原有 height 接口，向后兼容。"""
@@ -369,15 +454,21 @@ def build_chm_sampler(
     rgb_transform: Optional[Affine] = None,
     rgb_geo: Optional[GeoInfo] = None,
     stat: str = "max",
+    volume_method: str = "cbh",
+    cbh_factor: float = 0.3,
+    voxel_size: float = 0.2,
 ) -> Optional[CHMSampler]:
     """根据多渠道源输入（chm、dsm+dem、单独dsm、las点云）构建统一的 CHMSampler。"""
     chm: Optional[np.ndarray] = None
     chm_geo: Optional[GeoInfo] = None
+    raw_pts: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]] = None
     
     if chm_path:
         chm, chm_geo = load_single_band(chm_path)
+        source_name = "chm"
     elif las_path:
-        chm, chm_geo = chm_from_las(las_path, grid_size=las_grid_size, rgb_geo=rgb_geo)
+        chm, chm_geo, raw_pts = chm_from_las(las_path, grid_size=las_grid_size, rgb_geo=rgb_geo)
+        source_name = "las"
     elif dsm_path:
         dsm, dsm_geo = load_single_band(dsm_path)
         if dem_path:
@@ -390,15 +481,15 @@ def build_chm_sampler(
                     dem_resampled = np.full_like(dsm, np.nan, dtype="float32")
                     with rasterio.open(dsm_path) as src_dsm, rasterio.open(dem_path) as src_dem:
                         reproject(
-                            source=rasterio.band(src_dem, 1),
-                            destination=dem_resampled,
-                            src_transform=src_dem.transform,
-                            src_crs=src_dem.crs,
-                            dst_transform=src_dsm.transform,
-                            dst_crs=src_dsm.crs,
-                            resampling=Resampling.bilinear,
-                            src_nodata=src_dem.nodata,
-                            dst_nodata=np.nan,
+                             source=rasterio.band(src_dem, 1),
+                             destination=dem_resampled,
+                             src_transform=src_dem.transform,
+                             src_crs=src_dem.crs,
+                             dst_transform=src_dsm.transform,
+                             dst_crs=src_dsm.crs,
+                             resampling=Resampling.bilinear,
+                             src_nodata=src_dem.nodata,
+                             dst_nodata=np.nan,
                         )
                     dem = dem_resampled
                     dem_geo = dsm_geo
@@ -408,12 +499,14 @@ def build_chm_sampler(
                     return None
             chm = chm_from_dsm_dem(dsm, dem)
             chm_geo = dsm_geo or dem_geo
+            source_name = "dsm_dem"
         else:
             # 单独 DSM 渠道，使用常量 dem_default_value (默认 0.0m)
             log.info("[fusion] 单独 DSM 模式，使用背景 DEM 常数背景高程: {}m", dem_default_value)
             dem = np.full_like(dsm, dem_default_value, dtype="float32")
             chm = chm_from_dsm_dem(dsm, dem)
             chm_geo = dsm_geo
+            source_name = "dsm_only"
     else:
         return None
 
@@ -435,4 +528,10 @@ def build_chm_sampler(
         chm_transform=chm_transform,
         rgb_transform=rgb_transform or (rgb_geo.transform if rgb_geo else None),
         stat=stat,
+        source_name=source_name,
+        volume_method=volume_method,
+        cbh_factor=cbh_factor,
+        voxel_size=voxel_size,
+        raw_points=raw_pts,
+        las_grid_size=las_grid_size,
     )

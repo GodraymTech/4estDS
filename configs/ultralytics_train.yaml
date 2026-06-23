@@ -5,9 +5,9 @@
 task: detect         # 任务类型 (detect/segment/classify/pose/obb)
 mode: train          # 运行模式
 epochs: 200          # 训练轮数。林业场景下树冠分布复杂，200轮配合早停可获得较好的收敛
-patience: 30         # 多少轮无提升则触发早停 (EarlyStopping)
+patience: 40         # 多少轮无提升则触发早停 (EarlyStopping)
 batch: 16            # 批次大小。YOLO26l 在 24GB 显存下需要 batch≤16 以避免 backward 时 OOM segfault
-imgsz: 640           # 训练输入图像大小。若使用了较高分辨率的切片，可设为640或更大
+imgsz: 800           # 训练输入图像大小。若使用了较高分辨率的切片，可设为 640 或更大
 save: true           # 保存模型检查点和预测结果
 save_period: -1      # 多少个 epoch 保存一次模型 checkpoint (-1 表示禁用，只保存最新和最佳)
 cache: false         # 是否在 RAM/Disk 中缓存数据 (true/ram/disk/false)
@@ -15,19 +15,19 @@ device: null         # 运行设备，如 0 或 0,1,2,3 或 cpu。若为 null �
 
 # 2. 优化器与学习率
 optimizer: auto      # 优化器类型 (SGD, Adam, AdamW, RMSProp, auto)
-lr0: 0.01            # 初始学习率 (SGD=1E-2, Adam=1E-3)
+lr0: 0.001            # 初始学习率 (SGD=1E-2, Adam=1E-3)  0.01 -> 0.001
 lrf: 0.01            # 最终学习率比例 (lr0 * lrf)
 momentum: 0.937      # 动量系数
 weight_decay: 0.0005 # 权重衰减系数
-warmup_epochs: 3.0   # 热身轮数
+warmup_epochs: 1.0   # 热身轮数
 warmup_momentum: 0.8 # 热身动量系数
 warmup_bias_lr: 0.1  # 热身偏置项学习率
 cos_lr: true         # 启用余弦退火学习率调度算法，林木场景收敛更平滑
 
 # 3. 损失权重 (YOLOv8/v12 默认比例)
-box: 7.5             # 边界框损失权重
-cls: 0.5             # 分类损失权重
-dfl: 1.5             # 概率分布焦点损失权重
+box: 10.0            # 边界框损失权重。增大迫使预测框紧贴树冠外沿。 7.5 
+cls: 1.0             # 分类损失权重
+dfl: 2.0             # 概率分布焦点损失权重。增大对相互挨着、边界重叠的树木框线划分非常有帮助  1.5
 
 # 4. 数据增强参数 (林业与遥感正射影像优化版)
 # 针对遥感图像中林木的尺度和方向敏感性进行调整

@@ -14,8 +14,7 @@ from .schema import init_db, resolve_db_path
 
 def _connect(url: str | None) -> sqlite3.Connection:
     db_path: Path = resolve_db_path(url)
-    if not db_path.exists():
-        init_db(url)
+    init_db(url)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn

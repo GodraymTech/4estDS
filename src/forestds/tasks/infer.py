@@ -173,10 +173,13 @@ def run_infer_pipeline(
         rgb_geo = resolve_geo(image_path, transform=transform_obj, crs=crs_obj)
         sampler = build_chm_sampler(
             chm_path=chm, dsm_path=dsm, dem_path=dem, las_path=las,
-            las_grid_size=las_grid_size or float(settings.get("las_grid_size", 0.05)),
-            dem_default_value=dem_default if dem_default is not None else float(settings.get("dem_default", 0.0)),
+            las_grid_size=las_grid_size or float(settings.get("fusion.las_grid_size", settings.get("las_grid_size", 0.05))),
+            dem_default_value=dem_default if dem_default is not None else float(settings.get("fusion.dem_default", settings.get("dem_default", 0.0))),
             rgb_geo=rgb_geo,
-            stat=str(settings.get("height_stat", "max")),
+            stat=str(settings.get("fusion.height_stat", settings.get("height_stat", "max"))),
+            volume_method=str(settings.get("fusion.volume_method", settings.get("volume_method", "cbh"))),
+            cbh_factor=float(settings.get("fusion.cbh_factor", settings.get("cbh_factor", 0.3))),
+            voxel_size=float(settings.get("fusion.voxel_size", settings.get("voxel_size", 0.2))),
         )
         if sampler is not None:
             sampler.annotate(result.detections)

@@ -24,6 +24,11 @@ from . import paths
 # 当前 run_id
 _CURRENT_RUN_ID = "-"
 
+# 统一的启动时间戳，确保长时运行(如训练多小时)期间日志文件名固定，绝不因分钟变化发生分裂
+import datetime as _datetime
+_LAUNCH_TIME = _datetime.datetime.now().strftime("%Y%m%d_%H%M")
+
+
 
 # 允许放行的第三方依赖日志白名单及其对应的最低显示级别（默认只放行 forestds 和 __main__）
 # 未在此列表中的第三方依赖，仅在其日志级别 >= WARNING 时放行
@@ -89,7 +94,7 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
     _loguru_logger.configure(extra={"run_id": _CURRENT_RUN_ID})
     _loguru_logger.add(sys.stderr, level=level, format=_formatter, filter=_filter, enqueue=True)
     if to_file:
-        log_path = paths.logs_dir() / f"4estds_{_CURRENT_RUN_ID}.log"
+        log_path = paths.logs_dir() / f"{_LAUNCH_TIME}_{_CURRENT_RUN_ID}.log"
         _loguru_logger.add(
             str(log_path), level=level, format=_formatter,
             filter=_filter, rotation="20 MB", retention=5, enqueue=True,
@@ -125,7 +130,13 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
     # 全局重定向标准 library logging 到 loguru InterceptHandler
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
+    # 显式重置并打通 ultralytics 日志通道，使之能向上传播到根日志器，被 InterceptHandler 拦截并写入日志文件
+    ultra_log = logging.getLogger("ultralytics")
+    ultra_log.propagate = True
+    ultra_log.handlers = []
+
     # 显式限制第三方高噪声依赖的日志等级，避免其底层 C/C++ 库 (如 GDAL) 的 DEBUG 日志倾泻
+    # 注意：为了让 Ultralytics 的训练指标和进度打印能够输出到日志文件，这里将其从列表中移除，并在 DEPENDENCY_LOG_WHITELIST 中专门放行 INFO 级
     for noise_logger in ("rasterio", "gdal", "fiona", "shapely", "PIL", "matplotlib", "urllib3"):
         logging.getLogger(noise_logger).setLevel(logging.WARNING)
 

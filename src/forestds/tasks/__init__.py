@@ -6,6 +6,5 @@ CLI 层（cli.py）只负责"解析参数 → 调任务 → 打结果"三件事�
 """
 from .infer import run_infer_pipeline
 from .batch import run_batch_pipeline
-from .train import run_train
 
 

@@ -22,8 +22,7 @@ def _now() -> str:
 
 def _connect(url: str | None) -> sqlite3.Connection:
     db_path = resolve_db_path(url)
-    if not db_path.exists():
-        init_db(url)
+    init_db(url)
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
