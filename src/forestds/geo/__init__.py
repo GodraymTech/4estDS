@@ -353,6 +353,15 @@ def resolve_geo(
             return _GEO_CACHE[cache_key]
 
     info = _geo_from_rasterio(transform, crs)
+    if info is None and image_path and os.path.isfile(image_path):
+        # 尝试通过 rasterio 动态读取文件地理信息（安全、O(1) 内存，对超大影像无 DecompressionBomb 危险）
+        try:
+            import rasterio
+            with rasterio.open(image_path) as ds:
+                info = _geo_from_rasterio(ds.transform, ds.crs)
+        except Exception:
+            pass
+
     if info is None:
         if image_path and os.path.isfile(image_path):
             info = _geo_from_sidecar(image_path)

@@ -1,7 +1,7 @@
 """检测器后端注册表。
 
 通过 `@register("name")` 装饰器注册后端类;`get_detector(arch)` 延迟导入并实例化。
-内置后端:yolo12 / rtdetr。
+内置后端: ultralytics (通用 YOLO & RT-DETR)。
 """
 from __future__ import annotations
 
@@ -14,8 +14,7 @@ _REGISTRY: dict[str, type[BaseDetector]] = {}
 
 # 内置后端 -> 所在模块(延迟导入,避免未装重依赖时导入失败)
 _KNOWN: dict[str, str] = {
-    "yolo12": "forestds.detect.backends.yolo12",
-    "rtdetr": "forestds.detect.backends.rtdetr",
+    "ultralytics": "forestds.detect.backends.ultralytics",
 }
 
 

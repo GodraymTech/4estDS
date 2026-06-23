@@ -27,7 +27,9 @@ _CURRENT_RUN_ID = "-"
 
 # 允许放行的第三方依赖日志白名单及其对应的最低显示级别（默认只放行 forestds 和 __main__）
 # 未在此列表中的第三方依赖，仅在其日志级别 >= WARNING 时放行
-DEPENDENCY_LOG_WHITELIST = {}
+DEPENDENCY_LOG_WHITELIST = {
+    "ultralytics": "INFO"
+}
 
 
 def new_run_id() -> str:
@@ -124,7 +126,7 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
     # 显式限制第三方高噪声依赖的日志等级，避免其底层 C/C++ 库 (如 GDAL) 的 DEBUG 日志倾泻
-    for noise_logger in ("rasterio", "gdal", "fiona", "shapely", "PIL", "matplotlib", "urllib3", "ultralytics"):
+    for noise_logger in ("rasterio", "gdal", "fiona", "shapely", "PIL", "matplotlib", "urllib3"):
         logging.getLogger(noise_logger).setLevel(logging.WARNING)
 
     _loguru_logger.debug("loguru logging initialised")

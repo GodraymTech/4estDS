@@ -44,6 +44,9 @@ def cmd_infer(
     chm: Optional[str] = Option(None, "--chm", help="CHM 冠层高度模型栅格路径"),
     dsm: Optional[str] = Option(None, "--dsm", help="DSM 地表高程，与 --dem 配合算 CHM"),
     dem: Optional[str] = Option(None, "--dem", help="DEM 裸地高程，与 --dsm 配合算 CHM"),
+    las: Optional[str] = Option(None, "--las", help="激光点云 LAS/LAZ 路径"),
+    las_grid_size: Optional[float] = Option(None, "--las-grid-size", help="点云网格化分辨率(米)"),
+    dem_default: Optional[float] = Option(None, "--dem-default", help="单独 DSM 模式下默认常数 DEM 背景高程"),
     draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否绘制边界框"),
     export_format: Optional[str] = Option(
         None, "--export-format",
@@ -69,7 +72,7 @@ def cmd_infer(
 
     if not is_batch:
         image = images[0]
-        arch_val = arch or settings.get("detect.arch", "yolo12")
+        arch_val = arch or settings.get("detect.arch", "ultralytics")
 
         logger.info("[infer] run_id={} arch={} image={}", run_id, arch_val, image)
         writer.start_run_log(
@@ -83,6 +86,7 @@ def cmd_infer(
                 image, run_id=run_id, settings=settings,
                 arch=arch_val, acquisition_time=acquisition_time, location=location,
                 overlap_rate=overlap_rate, chm=chm, dsm=dsm, dem=dem,
+                las=las, las_grid_size=las_grid_size, dem_default=dem_default,
                 draw_box=draw_box, export_fmt=export_format,
             )
         except NotImplementedError as e:
@@ -122,6 +126,9 @@ def cmd_infer(
             chm=chm,
             dsm=dsm,
             dem=dem,
+            las=las,
+            las_grid_size=las_grid_size,
+            dem_default=dem_default,
             draw_box=draw_box,
             export_fmt=export_format,
         )
@@ -198,12 +205,44 @@ def cmd_preprocess(
         return 1
 
 
-@app.command("train", help="模型训练(feature-gated)")
-def cmd_train() -> int:
-    _, run_id = _bootstrap(task_type="train")
-    logger.info(f"[train] run_id={run_id} (feature-gated)")
-    logger.info("[train] TODO: 训练模块按功能授权解锁(阶段八)")
-    return 0
+@app.command("train", help="模型训练")
+def cmd_train(
+    data_dir: str = Argument(..., help="数据集目录路径 (VOC/COCO/YOLO)"),
+    model: str = Argument(..., help="模型路径 (.yaml 结构配置或 .pt 预训练权重)"),
+    cfg: str = Option(
+        "configs/ultralytics_train.yaml", "--cfg", "-c",
+        help="训练参数配置文件路径"
+    ),
+    format: str = Option(
+        "YOLO", "--format", "-f",
+        help="数据集类型 (YOLO / VOC / COCO)"
+    ),
+    log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
+) -> int:
+    """YOLO 模型训练命令，支持 VOC / COCO / YOLO 等多格式自适应转换与极简训练。"""
+    settings, run_id = _bootstrap(log_level, task_type="train")
+    from .tasks.train import run_train
+
+    try:
+        results = run_train(
+            data_dir=data_dir,
+            model_path=model,
+            cfg_path=cfg,
+            dataset_format=format,
+            run_id=run_id
+        )
+        logger.debug(f"[train] 训练已结束。成果保存目录: {results['run_dir']}")
+        return 0
+    except FileNotFoundError as e:
+        logger.error(f"[train] 运行所需文件未找到: {e}")
+        return 1
+    except ValueError as e:
+        logger.error(f"[train] 输入参数非法: {e}")
+        return 2
+    except Exception as e:
+        logger.exception(f"[train] 训练执行遭遇异常: {e}")
+        return 1
+
 
 
 @app.command("report", help="专业统计报告")

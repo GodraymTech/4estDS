@@ -13,7 +13,6 @@ from .chm import (
     build_chm_sampler,
     chm_from_dsm_dem,
     load_single_band,
-    sample_height,
     tree_height_from_chm,
 )
 
@@ -22,6 +21,5 @@ __all__ = [
     "build_chm_sampler",
     "chm_from_dsm_dem",
     "load_single_band",
-    "sample_height",
     "tree_height_from_chm",
 ]

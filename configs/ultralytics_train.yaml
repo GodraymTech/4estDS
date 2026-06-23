@@ -1,0 +1,52 @@
+# 4estDS YOLO 训练默认配置文件 (遥感/林木检测优化版)
+# 详细参数可参考 ultralytics/cfg/default.yaml
+
+# 1. 基础训练控制
+task: detect         # 任务类型 (detect/segment/classify/pose/obb)
+mode: train          # 运行模式
+epochs: 200          # 训练轮数。林业场景下树冠分布复杂，200轮配合早停可获得较好的收敛
+patience: 30         # 多少轮无提升则触发早停 (EarlyStopping)
+batch: 16            # 批次大小。YOLO26l 在 24GB 显存下需要 batch≤16 以避免 backward 时 OOM segfault
+imgsz: 640           # 训练输入图像大小。若使用了较高分辨率的切片，可设为640或更大
+save: true           # 保存模型检查点和预测结果
+save_period: -1      # 多少个 epoch 保存一次模型 checkpoint (-1 表示禁用，只保存最新和最佳)
+cache: false         # 是否在 RAM/Disk 中缓存数据 (true/ram/disk/false)
+device: null         # 运行设备，如 0 或 0,1,2,3 或 cpu。若为 null 则自动选择 GPU/CPU
+
+# 2. 优化器与学习率
+optimizer: auto      # 优化器类型 (SGD, Adam, AdamW, RMSProp, auto)
+lr0: 0.01            # 初始学习率 (SGD=1E-2, Adam=1E-3)
+lrf: 0.01            # 最终学习率比例 (lr0 * lrf)
+momentum: 0.937      # 动量系数
+weight_decay: 0.0005 # 权重衰减系数
+warmup_epochs: 3.0   # 热身轮数
+warmup_momentum: 0.8 # 热身动量系数
+warmup_bias_lr: 0.1  # 热身偏置项学习率
+cos_lr: true         # 启用余弦退火学习率调度算法，林木场景收敛更平滑
+
+# 3. 损失权重 (YOLOv8/v12 默认比例)
+box: 7.5             # 边界框损失权重
+cls: 0.5             # 分类损失权重
+dfl: 1.5             # 概率分布焦点损失权重
+
+# 4. 数据增强参数 (林业与遥感正射影像优化版)
+# 针对遥感图像中林木的尺度和方向敏感性进行调整
+hsv_h: 0.015         # 色调调节比例
+hsv_s: 0.7           # 饱和度调节比例
+hsv_v: 0.4           # 亮度调节比例
+degrees: 90.0        # 旋转角度范围 (-90 ~ 90 度)。遥感影像无固定方向，大幅旋转能极佳地增强泛化能力
+translate: 0.1       # 平移比例
+scale: 0.5           # 缩放比例
+shear: 0.0           # 剪切角度
+perspective: 0.0     # 透视畸变 (遥感影像通常是正射的，不需要透视变化)
+flipud: 0.5          # 上下翻转概率 (正射影像上下翻转很有意义)
+fliplr: 0.5          # 左右翻转概率
+bgr: 0.0             # RGB->BGR 概率
+mosaic: 1.0          # Mosaic 数据增强概率
+mixup: 0.1           # Mixup 数据增强概率。对密集排列的树木检测有较好的正则化作用
+copy_paste: 0.0      # Segment copy-paste 概率
+close_mosaic: 20     # 在最后 20 个 epochs 自动关闭 Mosaic 增强以提高边界框定位精度
+
+# 5. 其他
+amp: true            # 启用混合精度训练 (Automatic Mixed Precision)，显著加快训练速度且节省显存
+deterministic: false # 是否使用确定性模式 (若设为 true，由于部分算子原因，可能会降低训练速度)

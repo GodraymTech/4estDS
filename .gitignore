@@ -34,3 +34,6 @@ models/
 .idea/
 .vscode/
 .DS_Store
+
+
+yolo26n.pt

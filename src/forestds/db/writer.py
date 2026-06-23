@@ -181,6 +181,7 @@ def write_observations(
             extra = getattr(d, "extra", None) or {}
             height = extra.get("height")
             height_source = extra.get("height_source")
+            crown_volume_geo = extra.get("volume")
             box_px_sub = extra.get("box_px_sub")
             source_subimage_path = extra.get("source_subimage_path")
             
@@ -216,15 +217,15 @@ def write_observations(
                 "INSERT INTO tree_observations "
                 "(obs_id, tract_id, run_id, species, confidence, box_px_sub, box_px_full, box_geo, "
                 " crown_w_px, crown_h_px, crown_area_px, crown_w_geo, crown_h_geo, crown_area_geo, "
-                " height, height_source, center_geo, source_subimage_path, slice_size, geom_point, geom_crown) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " height, height_source, crown_volume_geo, center_geo, source_subimage_path, slice_size, geom_point, geom_crown) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (obs_id, tract_id, run_id, d.label, d.score,
                  json.dumps(box_px_sub) if box_px_sub else None,
                  json.dumps([d.x1, d.y1, d.x2, d.y2]),
                  box_geo,
                  d.width, d.height, d.width * d.height,
                  crown_w_geo, crown_h_geo, crown_area_geo,
-                 height, height_source,
+                 height, height_source, crown_volume_geo,
                  center_geo, source_subimage_path, slice_size,
                  f"POINT({cx} {cy})", geom_crown),
             )
@@ -323,12 +324,12 @@ def consolidate_tract_trees(
             conn.execute(
                 "INSERT INTO tract_trees "
                 "(canonical_id, tract_id, individual_id, species, confidence, "
-                " geom_point, geom_crown, height, crown, chosen_obs_id, active_run_id) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " geom_point, geom_crown, height, crown, crown_volume_geo, chosen_obs_id, active_run_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
                  o.get("geom_point"), o.get("geom_crown"),
                  o.get("height"), o.get("crown_area_px"),
-                 o.get("obs_id"), run_id),
+                 o.get("crown_volume_geo"), o.get("obs_id"), run_id),
             )
             n += 1
         conn.commit()

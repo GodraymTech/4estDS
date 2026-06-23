@@ -33,6 +33,9 @@ def run_infer_pipeline(
     chm: str | None = None,
     dsm: str | None = None,
     dem: str | None = None,
+    las: str | None = None,
+    las_grid_size: float | None = None,
+    dem_default: float | None = None,
     draw_box: bool | None = None,
     export_fmt: str | None = None,
     detector=None,
@@ -61,7 +64,7 @@ def run_infer_pipeline(
     from ..detect import get_detector
     from ..engine.infer import run_image_inference
 
-    arch_val = arch or settings.get("detect.arch", "yolo12")
+    arch_val = arch or settings.get("detect.arch", "ultralytics")
     db_url = settings.get("url", None)
 
     # 导出格式：显式参数 > 配置文件 default_format > None（不导出）
@@ -163,18 +166,21 @@ def run_infer_pipeline(
     )
 
     # ── 4. 高程融合树高（可选）────────────────────────────────────────────────
-    if chm or (dsm and dem):
+    # ── 4. 高程融合树高（可选）────────────────────────────────────────────────
+    if chm or dsm or las:
         from ..fusion import build_chm_sampler
         from ..geo import resolve_geo
         rgb_geo = resolve_geo(image_path, transform=transform_obj, crs=crs_obj)
         sampler = build_chm_sampler(
-            chm_path=chm, dsm_path=dsm, dem_path=dem,
-            rgb_transform=rgb_geo.transform if rgb_geo else None,
-            stat=str(settings.get("height_stat", "p95")),
+            chm_path=chm, dsm_path=dsm, dem_path=dem, las_path=las,
+            las_grid_size=las_grid_size or float(settings.get("las_grid_size", 0.05)),
+            dem_default_value=dem_default if dem_default is not None else float(settings.get("dem_default", 0.0)),
+            rgb_geo=rgb_geo,
+            stat=str(settings.get("height_stat", "max")),
         )
         if sampler is not None:
             sampler.annotate(result.detections)
-            for _stype, _path in (("chm", chm), ("dsm", dsm), ("dem", dem)):
+            for _stype, _path in (("chm", chm), ("dsm", dsm), ("dem", dem), ("las", las)):
                 if _path:
                     writer.register_source(tract_id, _stype, _path)
 

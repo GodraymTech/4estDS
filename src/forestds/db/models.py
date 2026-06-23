@@ -116,6 +116,7 @@ class TreeObservation(Base):
     crown_area_geo: Mapped[float | None] = mapped_column(Float)
     height: Mapped[float | None] = mapped_column(Float)
     height_source: Mapped[str | None] = mapped_column(String)
+    crown_volume_geo: Mapped[float | None] = mapped_column(Float)
     center_geo: Mapped[str | None] = mapped_column(Text)
     source_subimage_path: Mapped[str | None] = mapped_column(Text)
     slice_size: Mapped[int | None] = mapped_column(Integer)
@@ -137,6 +138,7 @@ class TractTree(Base):
     geom_crown: Mapped[str | None] = mapped_column(Text)
     height: Mapped[float | None] = mapped_column(Float)
     crown: Mapped[float | None] = mapped_column(Float)
+    crown_volume_geo: Mapped[float | None] = mapped_column(Float)
     chosen_obs_id: Mapped[str | None] = mapped_column(String)
     active_run_id: Mapped[str | None] = mapped_column(String)
 
