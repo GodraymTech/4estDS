@@ -24,14 +24,18 @@ app = typer.Typer(
 )
 
 
-def _bootstrap(level: str | None = None, task_type: str | None = None):
+def _bootstrap(level: str | None = None, task_type: str | None = None, to_file: bool = True):
     paths.ensure_home()
     settings = load_settings()
     _, run_id = setup_logging(
-        level=level or settings.get("level", "INFO")
+        level=level or settings.get("level", "INFO"),
+        task_type=task_type,
+        to_file=to_file,
     )
     paths.set_run_context(run_id, task_type)
     return settings, run_id
+
+
 
 
 @app.command("infer", help="图像推理")
@@ -157,7 +161,7 @@ def cmd_preprocess(
     action: Optional[str] = Option(None, "--action", help="切片行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)"),
     draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否在自标定样本图上绘制检测框（用于调试）"),
 ) -> int:
-    settings, run_id = _bootstrap()
+    settings, run_id = _bootstrap(task_type="preprocess")
     if draw_box is not None:
         settings.data["draw_box"] = draw_box
     logger.info(f"开始预处理输入文件: {image}")
@@ -261,7 +265,7 @@ def cmd_report(
         location=location, format=format, out=out, no_charts=no_charts, log_level=log_level
     )
 
-    settings, run_id = _bootstrap(args.log_level)
+    settings, run_id = _bootstrap(args.log_level, task_type="report")
     from .report import generate_report
 
     try:
@@ -298,7 +302,7 @@ def cmd_export(
         tract_id=tract_id, run_id=run_id, format=format, out=out, log_level=log_level
     )
 
-    settings, _ = _bootstrap(args.log_level)
+    settings, _ = _bootstrap(args.log_level, task_type="export")
     from .export import export_tract_to_file
 
     try:
@@ -332,7 +336,7 @@ def cmd_batch(
         input_dir=input_dir, glob=glob, arch=arch, acquisition_time=acquisition_time, log_level=log_level
     )
 
-    settings, run_id = _bootstrap(args.log_level)
+    settings, run_id = _bootstrap(args.log_level, task_type="batch")
     logger.warning("[batch] 仅支持 RGB;批量推理串行执行。")
     from .db import writer
     from .detect import get_detector
@@ -377,7 +381,7 @@ def cmd_db(
 ) -> int:
     args = SimpleNamespace(db_action=db_action)
 
-    settings, run_id = _bootstrap()
+    settings, run_id = _bootstrap(task_type="db")
     from .db import schema
 
     if args.db_action == "init":
@@ -402,7 +406,7 @@ def cmd_track(
         location=location, max_dist=max_dist, greedy=greedy, log_level=log_level
     )
 
-    settings, run_id = _bootstrap(args.log_level)
+    settings, run_id = _bootstrap(args.log_level, task_type="track")
     import json
 
     from .db import reader, writer
@@ -514,7 +518,38 @@ def cmd_clean(
     return 0
 
 
+tool_app = typer.Typer(help="辅助工具集")
+
+
+@tool_app.command("draw-bbox", help="给图像画标注框和推理框")
+def cmd_draw_bbox(
+    image: str = Argument(..., help="图像路径"),
+    label: Optional[str] = Option(None, "--label", "-l", help="标注文件路径(YOLO txt/VOC xml/GeoJSON)，若未指定则自动搜寻匹配"),
+    with_infer: bool = Option(False, "--with-infer", help="是否在画框中执行静默推理"),
+    log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
+) -> int:
+    settings, _ = _bootstrap(level=log_level, task_type="draw-bbox", to_file=False)
+    from .utils import draw_bbox_main
+    return draw_bbox_main(image, label, with_infer, settings)
+
+
+@tool_app.command("draw-dsm", help="基于 DSM 高程从影像中提取并画出冠幅轮廓线")
+def cmd_draw_dsm(
+    image: str = Argument(..., help="正射影像 DOM TIFF 路径"),
+    dsm: str = Argument(..., help="数字表面模型 DSM TIFF 路径"),
+    log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
+) -> int:
+    _, _ = _bootstrap(level=log_level, task_type="draw-dsm", to_file=False)
+    from .utils import draw_dsm_main
+    return draw_dsm_main(image, dsm)
+
+
+
+app.add_typer(tool_app, name="tool")
+
+
 def version_callback(value: bool):
+
     if value:
         print(f"{__codename__} {__version__}")
         raise typer.Exit()

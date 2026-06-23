@@ -32,8 +32,50 @@ def available_backends() -> list[str]:
     return sorted(set(_REGISTRY) | set(_KNOWN))
 
 
+def resolve_weights_path(weights: str) -> str:
+    """根据权重模糊特征字在 paths.models_dir() 中进行模糊搜索，返回物理全路径。"""
+    from pathlib import Path
+    path = Path(weights)
+    if path.exists():
+        return str(path.resolve())
+
+    # 从 paths.models_dir() 中检索
+    from .. import paths
+    try:
+        m_dir = paths.models_dir()
+    except Exception:
+        return weights
+
+    if m_dir.exists():
+        candidates = []
+        for p in m_dir.iterdir():
+            if p.is_file():
+                # 模糊匹配：忽略大小写，包含 weights
+                if weights.lower() in p.name.lower():
+                    candidates.append(p)
+        
+        if len(candidates) == 1:
+            from loguru import logger
+            logger.info("[detect] 模糊搜索权重 '{}' 匹配到唯一模型: {}", weights, candidates[0].name)
+            return str(candidates[0].resolve())
+        elif len(candidates) > 1:
+            from loguru import logger
+            candidates.sort(key=lambda x: x.name)
+            names = [c.name for c in candidates]
+            logger.warning(
+                "[detect] 权重特征 '{}' 模糊匹配到多个候选: {}, 默认使用第一个: {}",
+                weights, names, names[0]
+            )
+            return str(candidates[0].resolve())
+
+    return weights
+
+
 def get_detector(arch: str, **kwargs) -> BaseDetector:
     """按名获取检测器实例。未注册时尝试延迟导入其模块。"""
+    if "weights" in kwargs and kwargs["weights"]:
+        kwargs["weights"] = resolve_weights_path(kwargs["weights"])
+
     if arch not in _REGISTRY:
         module = _KNOWN.get(arch)
         if module is None:
@@ -44,3 +86,4 @@ def get_detector(arch: str, **kwargs) -> BaseDetector:
     if arch not in _REGISTRY:
         raise RuntimeError(f"后端 {arch!r} 导入后仍未注册(检查 @register 装饰器)")
     return _REGISTRY[arch](**kwargs)
+

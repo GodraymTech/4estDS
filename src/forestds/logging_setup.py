@@ -47,7 +47,7 @@ def current_run_id() -> str:
     return _CURRENT_RUN_ID
 
 
-def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool = True):
+def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool = True, task_type: str | None = None):
     """配置 loguru 日志，并拦截标准库日志。返回 (logger, run_id)。"""
     global _CURRENT_RUN_ID
     run_id = run_id or new_run_id()
@@ -94,11 +94,16 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
     _loguru_logger.configure(extra={"run_id": _CURRENT_RUN_ID})
     _loguru_logger.add(sys.stderr, level=level, format=_formatter, filter=_filter, enqueue=True)
     if to_file:
-        log_path = paths.logs_dir() / f"{_LAUNCH_TIME}_{_CURRENT_RUN_ID}.log"
+        if task_type in ("train", "infer"):
+            log_filename = f"{_LAUNCH_TIME}__{_CURRENT_RUN_ID}__{task_type}.log"
+        else:
+            log_filename = f"{_LAUNCH_TIME}__{_CURRENT_RUN_ID}.log"
+        log_path = paths.logs_dir() / log_filename
         _loguru_logger.add(
             str(log_path), level=level, format=_formatter,
             filter=_filter, rotation="20 MB", retention=5, enqueue=True,
         )
+
 
     class InterceptHandler(logging.Handler):
         """标准库 -> loguru 转发（loguru 官方推荐写法）。"""

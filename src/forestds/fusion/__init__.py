@@ -15,6 +15,11 @@ from .chm import (
     load_single_band,
     tree_height_from_chm,
 )
+from .crown import (
+    verify_overlap,
+    align_dsm_to_dom,
+    estimate_canopy_contours,
+)
 
 __all__ = [
     "CHMSampler",
@@ -22,4 +27,8 @@ __all__ = [
     "chm_from_dsm_dem",
     "load_single_band",
     "tree_height_from_chm",
+    "verify_overlap",
+    "align_dsm_to_dom",
+    "estimate_canopy_contours",
 ]
+

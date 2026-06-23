@@ -95,13 +95,15 @@ def run_dir() -> Path:
         _current_date_str = datetime.now().strftime("%Y%m%d_%H%M")
     run_id = _current_run_id or "default"
     task_type = _current_task_type
-    if task_type in ("train", "infer"):
+    if task_type:
         folder_name = f"{_current_date_str}_{run_id}_{task_type}"
     else:
         folder_name = f"{_current_date_str}_{run_id}"
     p = outputs_dir() / folder_name
+
     p.mkdir(parents=True, exist_ok=True)
     return p
+
 
 
 def outputs_preprocess_dir() -> Path:
