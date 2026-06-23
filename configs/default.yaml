@@ -19,7 +19,7 @@ db:
 preprocess:
   # COG (Cloud Optimized GeoTIFF) 检查与转换配置
   cog:
-    enable: false               # 🔴 
+    enable: true               # 🔴 
     out_suffix: "_cog.tif"      # 转换后的输出后缀
     block_size: 512             # COG 瓦片大小 (通常为 512 或 256)
     compress: "deflate"         # 压缩算法 (deflate / lzw)
@@ -29,9 +29,9 @@ preprocess:
   # 切片 (Slicing) 基础配置
   slice:
     enable: true                # 推理流水线里，必须为true
-    action: "slice"              # 🔴 切片执行行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)
-    default_tile: 640           # 默认切片大小【scope.enable=false时生效】
-    default_overlap: 0.2        # 默认重叠率 (0.0 - 0.5)【scope.enable=false时生效】
+    action: "none"              # 🔴 切片执行行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)
+    default_tile: 640           # 默认切片大小            【scope.enable=false时生效】
+    default_overlap: 0.2        # 默认重叠率 (0.0 - 0.5)  【scope.enable=false时生效】
     save_quality: 95            # 切片导出 JPEG 瓦片时的压缩质量
 
     # SCOPE 预推理自适应求解切片参数
@@ -60,7 +60,7 @@ detect:
   verbose: true           # 推理时是否输出 ultralytics 自身的详细推理日志
   models:
     ultralytics:
-      weights: "m04"
+      weights: "m03"
       # weights: "rtdetr-l.pt"
 
 postprocess:
@@ -68,10 +68,10 @@ postprocess:
   trunc_penalty: 0.5             # 局部碰边（被切断）框的置信度折扣系数
   conf_type: "max"               # 跨瓦片 WBF 融合时的置信度聚合方式
   center_merge_frac: 0.0         # 跨缝断裂拼合的中心距离门控
-  keep_tiles: true               # 🔴 是否清空切片目录
+  keep_tiles: false               # 🔴 保留切片目录
 
 export:
-  default_format: null          # 🔴 推理完成后导出 GIS 图层格式。可选值: geojson | shp | gpkg | csv | null（null 表示不自动导出，仅通过 `4estds export` 手动触发）
+  default_format: shp           # 🔴 推理完成后导出 GIS 图层格式。可选值: geojson | shp | gpkg | csv | null（null 表示不自动导出，仅通过 `4estds export` 手动触发）
   drop_pixel_columns: true
   drop_source_column: true
 
@@ -83,6 +83,13 @@ fusion:
   volume_method: "cbh"           # 树冠体积估算方法: cbh (枝下高积分) / paraboloid (抛物面拟合) / cone (圆锥体拟合) / ellipsoid (半椭球体拟合) / column (柱体积分) / convex_hull (点云凸包，仅在LAS模式生效) / voxel (点云体素化，仅在LAS模式生效)
   cbh_factor: 0.3                # 枝下高占树高比例 (0.0 - 1.0)
   voxel_size: 0.2                # 体素化估算方法中的三维网格单元大小 (米)
+
+
+# 报告生成与导出配置
+report:
+  format: "md"                   # 自动生成的报告默认格式 (md / pdf / csv)
+  with_charts: true              # 自动生成报告时是否渲染学术分析图表 (True/False)
+
 
 
 

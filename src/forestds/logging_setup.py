@@ -72,6 +72,14 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
 
     def _filter(record) -> bool:
         name = record["extra"].get("logger_name", record["name"])
+        # 0. 过滤 ultralytics 推理的每张图检测详情与空行
+        if name.startswith("ultralytics"):
+            msg = record["message"]
+            import re
+            if re.match(r"^\d+:\s+\d+x\d+", msg):
+                return False
+            if not msg.strip():
+                return False
         # 1. 本项目和主入口，全部放行
         if name.startswith("forestds") or name == "__main__":
             return True
@@ -94,10 +102,7 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
     _loguru_logger.configure(extra={"run_id": _CURRENT_RUN_ID})
     _loguru_logger.add(sys.stderr, level=level, format=_formatter, filter=_filter, enqueue=True)
     if to_file:
-        if task_type in ("train", "infer"):
-            log_filename = f"{_LAUNCH_TIME}__{_CURRENT_RUN_ID}__{task_type}.log"
-        else:
-            log_filename = f"{_LAUNCH_TIME}__{_CURRENT_RUN_ID}.log"
+        log_filename = f"{_LAUNCH_TIME}__{_CURRENT_RUN_ID}__{task_type}.log"
         log_path = paths.logs_dir() / log_filename
         _loguru_logger.add(
             str(log_path), level=level, format=_formatter,

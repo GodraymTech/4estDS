@@ -114,7 +114,7 @@ class GeoInfo:
         if self.crs_kind == "geographic":
             if self.origin_lat is not None:
                 if -90.0 <= self.origin_lat <= 90.0 and pixel_sz < 0.5:
-                    log.warning(
+                    log.debug(
                         "地理坐标系,在纬度 {:.4f}° 处用近似换算度->米(结果为近似值)。",
                         self.origin_lat,
                     )

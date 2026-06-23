@@ -487,7 +487,7 @@ def run_scope_calibration(
                     log.info(f"序贯检测收敛 (CI半宽 {int(round(ci_half))} < 2px)，提前结束探测。")
                     break
 
-        log.info(f"🎇 SCOPE探测结束: 种子窗口 {len(sampled_coords)} 个, 有效检测框 {len(detected_sizes)} 个。")
+        log.info(f"🎇 SCOPE探测结束: 种子窗口 {len(sampled_coords)} 个, 有效bbox {len(detected_sizes)} 个。")
 
         # 阶段 7: 最优几何求解
         T_star, r_star = solve_joint_optimization(

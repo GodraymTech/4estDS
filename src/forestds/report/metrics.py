@@ -79,8 +79,12 @@ class ReportData:
     crown_w_px: dict
     crown_h_px: dict
     crown_area_px: dict
+    crown_w_geo: dict
+    crown_h_geo: dict
+    crown_area_geo: dict
     confidence: dict
     height: dict
+    crown_volume_geo: dict
     scale_classes: dict[str, dict]
     meta: dict = field(default_factory=dict)
 
@@ -94,8 +98,12 @@ class ReportData:
             "crown_w_px": self.crown_w_px,
             "crown_h_px": self.crown_h_px,
             "crown_area_px": self.crown_area_px,
+            "crown_w_geo": self.crown_w_geo,
+            "crown_h_geo": self.crown_h_geo,
+            "crown_area_geo": self.crown_area_geo,
             "confidence": self.confidence,
             "height": self.height,
+            "crown_volume_geo": self.crown_volume_geo,
             "scale_classes": self.scale_classes,
             "meta": self.meta,
         }
@@ -106,6 +114,8 @@ def _collect(observations: list[dict], key: str) -> list[float]:
     for o in observations:
         v = _num(o.get(key))
         if v is not None:
+            if key == "height" and v > 5.0:
+                continue
             out.append(v)
     return out
 
@@ -121,6 +131,61 @@ def compute_report(
     area_m2 = _num(tract.get("geo_area"))
     species = species_composition(observations)
     n = len(observations)
+    
+    # 算林冠郁闭度所需的累加
+    all_crown_areas = [
+        _num(o.get("crown_area_geo")) 
+        for o in observations 
+        if _num(o.get("crown_area_geo")) is not None
+    ]
+    total_crown_area = sum(all_crown_areas) if all_crown_areas else 0.0
+    canopy_cover_rate = None
+    if area_m2 and area_m2 > 0 and total_crown_area > 0:
+        canopy_cover_rate = total_crown_area / area_m2
+
+    # 树种深度交叉统计分析
+    from collections import defaultdict
+    sp_obs = defaultdict(list)
+    for o in observations:
+        sp = (o.get("species") or "unknown").strip() or "unknown"
+        sp_obs[sp].append(o)
+        
+    species_analysis = {}
+    for sp, obs_list in sp_obs.items():
+        heights = [float(o["height"]) for o in obs_list if _num(o.get("height")) is not None]
+        volumes = [float(o["crown_volume_geo"]) for o in obs_list if _num(o.get("crown_volume_geo")) is not None]
+        crown_areas = [float(o["crown_area_geo"]) for o in obs_list if _num(o.get("crown_area_geo")) is not None]
+        
+        # 相对多度 (RA)
+        ra = len(obs_list) / n if n else 0.0
+        # 相对盖度 (RC)
+        sp_total_area = sum(crown_areas) if crown_areas else 0.0
+        rc = sp_total_area / total_crown_area if total_crown_area > 0 else 0.0
+        # 重要值 (IV)
+        iv = (ra + rc) / 2.0
+        
+        avg_h = sum(heights) / len(heights) if heights else None
+        avg_v = sum(volumes) / len(volumes) if volumes else None
+        avg_a = sum(crown_areas) / len(crown_areas) if crown_areas else None
+        
+        # 冠层饱满度因子 (FI)
+        fi = avg_v / avg_a if (avg_a and avg_v and avg_a > 0) else None
+
+        species_analysis[sp] = {
+            "count": len(obs_list),
+            "ratio": ra,
+            "ra": ra,
+            "rc": rc,
+            "iv": iv,
+            "fi": fi,
+            "total_volume": sum(volumes) if volumes else 0.0,
+            "avg_height": avg_h,
+            "max_height": max(heights) if heights else None,
+            "avg_volume": avg_v,
+            "max_volume": max(volumes) if volumes else None,
+            "avg_crown_area": avg_a,
+        }
+
     data = ReportData(
         tract_id=tract.get("tract_id"),
         run_id=run_id,
@@ -130,8 +195,12 @@ def compute_report(
         crown_w_px=summarize_distribution(_collect(observations, "crown_w_px")),
         crown_h_px=summarize_distribution(_collect(observations, "crown_h_px")),
         crown_area_px=summarize_distribution(_collect(observations, "crown_area_px")),
+        crown_w_geo=summarize_distribution(_collect(observations, "crown_w_geo")),
+        crown_h_geo=summarize_distribution(_collect(observations, "crown_h_geo")),
+        crown_area_geo=summarize_distribution(_collect(observations, "crown_area_geo")),
         confidence=summarize_distribution(_collect(observations, "confidence")),
         height=summarize_distribution(_collect(observations, "height")),
+        crown_volume_geo=summarize_distribution(_collect(observations, "crown_volume_geo")),
         scale_classes=scale_class_breakdown(observations),
         meta={
             "acquisition_time": tract.get("acquisition_time"),
@@ -140,6 +209,19 @@ def compute_report(
             "pixel_w": tract.get("pixel_w"),
             "pixel_h": tract.get("pixel_h"),
             "species_richness": len(species),
+            "species_analysis": species_analysis,
+            "canopy_cover_rate": canopy_cover_rate,
+            "total_crown_area": total_crown_area,
+            "raw_observations": [
+                {
+                    "species": (o.get("species") or "unknown").strip() or "unknown",
+                    "height": _num(o.get("height")),
+                    "volume": _num(o.get("crown_volume_geo")),
+                    "crown_area": _num(o.get("crown_area_geo")),
+                    "confidence": _num(o.get("confidence"))
+                }
+                for o in observations
+            ]
         },
     )
     return data

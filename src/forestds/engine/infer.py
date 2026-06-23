@@ -58,7 +58,7 @@ def run_inference(
 
     t0 = time.perf_counter()
     log.info(
-        "推理开始: 影像 {}x{} backend={} root_size={} overlap_rate={:.2%} conf_thr={:.2f} iou_thr={:.2f} conf_type={}",
+        "推理开始: 影像 {}x{} backend={} root_size={} overlap_rate={:.0%} conf_thr={:.2f} iou_thr={:.2f} conf_type={}",
         width, height, getattr(detector, "name", "?"), root_size, overlap_rate, conf_thr, iou_thr, conf_type,
     )
 

@@ -220,9 +220,12 @@ def run_infer_pipeline(
     report_path: str | None = None
     try:
         from ..report import generate_report
+        report_fmt = settings.get("report.format", "md")
+        with_charts = settings.get("report.with_charts", True)
         rep = generate_report(
-            tract_id=tract_id, run_id=run_id, fmt="md",
+            tract_id=tract_id, run_id=run_id, fmt=report_fmt,
             out_dir=paths.outputs_infer_dir(), db_url=db_url,
+            with_charts=with_charts,
         )
         report_path = rep["out_path"]
     except Exception as e:
@@ -240,7 +243,7 @@ def run_infer_pipeline(
             from ..export import export_tract_to_file
             exp = export_tract_to_file(
                 tract_id=tract_id, run_id=run_id, fmt=resolved_export_fmt,
-                out_path=paths.outputs_infer_dir(), db_url=db_url,
+                out_path=paths.outputs_infer_dir() / "vectors", db_url=db_url,
             )
             export_path = exp["out_path"]
             if exp.get("fallback"):

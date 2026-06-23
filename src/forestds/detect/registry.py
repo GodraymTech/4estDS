@@ -56,14 +56,14 @@ def resolve_weights_path(weights: str) -> str:
         
         if len(candidates) == 1:
             from loguru import logger
-            logger.info("[detect] 模糊搜索权重 '{}' 匹配到唯一模型: {}", weights, candidates[0].name)
+            logger.info("模糊搜索权重 '{}' 匹配到唯一模型: {}", weights, candidates[0].name)
             return str(candidates[0].resolve())
         elif len(candidates) > 1:
             from loguru import logger
             candidates.sort(key=lambda x: x.name)
             names = [c.name for c in candidates]
             logger.warning(
-                "[detect] 权重特征 '{}' 模糊匹配到多个候选: {}, 默认使用第一个: {}",
+                "权重特征 '{}' 模糊匹配到多个候选: {}, 默认使用第一个: {}",
                 weights, names, names[0]
             )
             return str(candidates[0].resolve())

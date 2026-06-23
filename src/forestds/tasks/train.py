@@ -565,7 +565,8 @@ def convert_yolo_dataset(
 def ensure_data_yaml(
     data_dir_str: str, 
     dataset_format: str, 
-    run_dir: Path
+    run_dir: Path,
+    dest_subdir: str = "dataset"
 ) -> Path:
     """数据集校验与自适应结构规整，并动态生成对应的 data.yaml。
     
@@ -577,7 +578,7 @@ def ensure_data_yaml(
         raise FileNotFoundError(f"数据集目录不存在: {data_dir}")
 
     # 规范化目标目录
-    dest_dir = run_dir / "dataset"
+    dest_dir = run_dir / dest_subdir
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     format_upper = dataset_format.upper()
@@ -613,17 +614,31 @@ def run_train(
     model_path: str,
     cfg_path: str,
     dataset_format: str = "YOLO",
-    run_id: str | None = None
+    run_id: str | None = None,
+    incremental: bool = False,
+    base_dataset: str | None = None,
+    base_format: str = "YOLO",
+    freeze_layers: int = 10,
+    epochs: int | None = None,
+    task_type: str = "train",
 ) -> Dict[str, Any]:
     """4estDS 模型训练入口。
     
     解析和规整数据集，装载配置文件参数，直接调用官方 Ultralytics YOLO 进行训练。
     """
+    # 强制打通并重置 ultralytics 日志通道，使之能向上传播并写入项目日志文件
+    import logging
+    ultra_log = logging.getLogger("ultralytics")
+    ultra_log.propagate = True
+    ultra_log.handlers = []
+
     logger.info("=" * 60)
     logger.info("4estDS 模型训练启动中...")
     logger.info(f"输入数据集: {data_dir} (格式: {dataset_format})")
     logger.info(f"基底模型: {model_path}")
     logger.info(f"参数配置: {cfg_path}")
+    if incremental:
+        logger.info(f"运行模式: 增量微调 (freeze_layers={freeze_layers}, base_dataset={base_dataset})")
     logger.info("=" * 60)
 
     # 1. 验证配置文件
@@ -645,10 +660,132 @@ def run_train(
     current_run_dir.mkdir(parents=True, exist_ok=True)
 
     # 2. 规整并校验数据集，生成对应的 data.yaml
-    data_yaml_path = ensure_data_yaml(data_dir, dataset_format, current_run_dir)
+    if incremental and base_dataset:
+        logger.info("开始混合新标注数据与基底主数据集，构建防灾难性遗忘的混合数据集...")
+        
+        # 规整新数据集到 new_structured 目录
+        new_structured_dir = current_run_dir / "new_structured"
+        ensure_data_yaml(data_dir, dataset_format, current_run_dir, dest_subdir="new_structured")
+        
+        # 规整基底数据集到 base_structured 目录
+        base_structured_dir = current_run_dir / "base_structured"
+        try:
+            ensure_data_yaml(base_dataset, base_format, current_run_dir, dest_subdir="base_structured")
+            base_ok = True
+        except Exception as e:
+            logger.warning(f"规整基底数据集失败 ({e})，将无法进行数据回放，仅使用新标数据集。")
+            base_ok = False
+
+        # 统计并打印新数据集与基底数据集的信息
+        new_counts = {}
+        for split in ["train", "val"]:
+            new_img_dir = new_structured_dir / "images" / split
+            new_lbl_dir = new_structured_dir / "labels" / split
+            img_count = len(list(new_img_dir.glob("*"))) if new_img_dir.exists() else 0
+            lbl_count = len(list(new_lbl_dir.glob("*"))) if new_lbl_dir.exists() else 0
+            new_counts[split] = (img_count, lbl_count)
+            
+        logger.info(f"👉 新标注微调数据集统计：")
+        logger.info(f"   - 训练集 (train): {new_counts['train'][0]} 对有效的图像-标注对")
+        logger.info(f"   - 验证集 (val): {new_counts['val'][0]} 对有效的图像-标注对")
+
+        base_counts = {}
+        if base_ok:
+            for split in ["train", "val"]:
+                base_img_dir = base_structured_dir / "images" / split
+                base_lbl_dir = base_structured_dir / "labels" / split
+                img_count = len(list(base_img_dir.glob("*"))) if base_img_dir.exists() else 0
+                lbl_count = len(list(base_lbl_dir.glob("*"))) if base_lbl_dir.exists() else 0
+                base_counts[split] = (img_count, lbl_count)
+            logger.info(f"👉 基底数据集统计：")
+            logger.info(f"   - 训练集 (train): {base_counts['train'][0]} 张图像，{base_counts['train'][1]} 个有效标注")
+            logger.info(f"   - 验证集 (val): {base_counts['val'][0]} 张图像，{base_counts['val'][1]} 个有效标注")
+
+        # 创建混合数据集的终极目录
+        final_dest_dir = current_run_dir / "dataset"
+        final_dest_dir.mkdir(parents=True, exist_ok=True)
+
+        new_names = {0: "tree"}
+        new_yaml_path = new_structured_dir / "data.yaml"
+        if new_yaml_path.exists():
+            try:
+                with open(new_yaml_path, "r", encoding="utf-8") as f:
+                    new_yaml_data = yaml.safe_load(f) or {}
+                    new_names = new_yaml_data.get("names", {0: "tree"})
+            except Exception:
+                pass
+
+        # 遍历划分集 images/labels 并混合链接
+        for split in ["train", "val"]:
+            final_img_dir = final_dest_dir / "images" / split
+            final_lbl_dir = final_dest_dir / "labels" / split
+            final_img_dir.mkdir(parents=True, exist_ok=True)
+            final_lbl_dir.mkdir(parents=True, exist_ok=True)
+
+            # 新数据集链接
+            new_img_src = new_structured_dir / "images" / split
+            new_lbl_src = new_structured_dir / "labels" / split
+            new_imgs = []
+            if new_img_src.exists():
+                new_imgs = [p for p in new_img_src.iterdir() if p.is_file() or p.is_symlink()]
+                for img_p in new_imgs:
+                    safe_link(img_p, final_img_dir / img_p.name)
+            if new_lbl_src.exists():
+                for lbl_p in new_lbl_src.iterdir():
+                    if lbl_p.is_file() or lbl_p.is_symlink():
+                        safe_link(lbl_p, final_lbl_dir / lbl_p.name)
+
+            # 基底数据集抽样并链接（数据回放）
+            if base_ok:
+                base_img_src = base_structured_dir / "images" / split
+                base_lbl_src = base_structured_dir / "labels" / split
+                
+                if base_img_src.exists():
+                    base_imgs = [p for p in base_img_src.iterdir() if p.is_file() or p.is_symlink()]
+                    if base_imgs and new_imgs:
+                        # 抽样新图数量的 3 倍
+                        sample_count = min(len(base_imgs), int(len(new_imgs) * 3))
+                        # 强行设置最低阈值
+                        min_samples = 30 if split == "train" else 10
+                        sample_count = max(sample_count, min(len(base_imgs), min_samples))
+                        
+                        sampled_imgs = random.sample(base_imgs, sample_count)
+                        logger.info(
+                            f"在 {split} 集中：新图共 {len(new_imgs)} 张，"
+                            f"计划从基底集中按 3.0 倍率（最低限制 {min_samples} 张）"
+                            f"随机抽取 {sample_count} 张基底旧图像进行数据回放融合（基底总数: {len(base_imgs)} 张）。"
+                        )
+                        
+                        for img_p in sampled_imgs:
+                            safe_link(img_p, final_img_dir / img_p.name)
+                            lbl_p = base_lbl_src / f"{img_p.stem}.txt"
+                            if lbl_p.exists():
+                                safe_link(lbl_p, final_lbl_dir / lbl_p.name)
+
+        # 写入最终的 data.yaml
+        data_yaml_content = {
+            "path": str(final_dest_dir),
+            "train": "images/train",
+            "val": "images/val",
+            "names": new_names
+        }
+        data_yaml_path = final_dest_dir / "data.yaml"
+        with open(data_yaml_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data_yaml_content, f, allow_unicode=True, default_flow_style=False)
+
+        # 清理临时转换目录
+        for temp_dir in [new_structured_dir, base_structured_dir]:
+            if temp_dir and temp_dir.exists():
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception as e:
+                    logger.debug(f"清理临时目录 {temp_dir} 失败: {e}")
+    else:
+        if incremental:
+            logger.warning("开启了增量训练模式，但未指定基底数据集路径或其不存在。数据回放防遗忘机制失效！")
+        data_yaml_path = ensure_data_yaml(data_dir, dataset_format, current_run_dir)
 
     # 3. 组装 Ultralytics YOLO 训练参数
-    # 我们利用 YOLO 官方支持的 `project` 与 `name` 参数，实现产物直降 run_dir 目录
     train_kwargs = train_config.copy()
     
     # 强制覆盖的关键路径参数，使用 4estDS 体系路径
@@ -656,6 +793,29 @@ def run_train(
     train_kwargs["project"] = str(paths.outputs_dir())
     train_kwargs["name"] = current_run_dir.name
     train_kwargs["exist_ok"] = True  # 避免 YOLO 添加数字后缀
+
+    if incremental:
+        # 增量模式下的超参重写与层冻结
+        train_kwargs["freeze"] = freeze_layers
+        
+        # 初始学习率下调为原预设的 0.5 倍 (除以 2)
+        orig_lr0 = train_kwargs.get("lr0", 0.01)
+        train_kwargs["lr0"] = orig_lr0 * 0.5
+        
+        # 极短 warmup
+        train_kwargs["warmup_epochs"] = 1
+        
+        # epochs 默认 20 轮，除非用户在 CLI 显式传递或配置文件中另有指定
+        if epochs is not None:
+            train_kwargs["epochs"] = epochs
+        elif "epochs" not in train_kwargs:
+            train_kwargs["epochs"] = 20
+            
+        logger.info(f"增量微调超参应用：freeze={freeze_layers}, lr0={train_kwargs['lr0']:.6f}, warmup_epochs=1, epochs={train_kwargs['epochs']}")
+    else:
+        # 普通训练模式，如果传入 epochs 则覆盖
+        if epochs is not None:
+            train_kwargs["epochs"] = epochs
 
     # 4. 加载基底模型并启动训练
     logger.info("载入模型权重并启动 YOLO 训练流程...")
@@ -666,7 +826,7 @@ def run_train(
         db_url = load_db_url()
         writer.start_run_log(
             run_id=run_id,
-            task_type="train",
+            task_type=task_type,
             model_arch=model_path,
             input_path=data_dir,
             params={
@@ -678,13 +838,11 @@ def run_train(
         )
         
         # 执行训练
-        # 这里的 **train_kwargs 已经包含了 yaml 配置里的全部林业推荐参数
         results = model.train(**train_kwargs)
         
         # 获取最终生成的模型路径
         best_pt_path = current_run_dir / "weights" / "best.pt"
         if not best_pt_path.exists():
-            # 有可能未生成，查找 runs 结构
             logger.warning("在预期位置未找到 weights/best.pt，将扫描输出目录。")
             all_pt_files = list(current_run_dir.rglob("*.pt"))
             if all_pt_files:

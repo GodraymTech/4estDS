@@ -33,6 +33,8 @@ def _bootstrap(level: str | None = None, task_type: str | None = None, to_file: 
         to_file=to_file,
     )
     paths.set_run_context(run_id, task_type)
+    import sys
+    logger.info("执行命令: " + " ".join(sys.argv))
     return settings, run_id
 
 
@@ -111,10 +113,10 @@ def cmd_infer(
             result["duration_s"], result["tiles_processed"], result["tiles_total"],
             result["fused_count"], result["observations_written"],
         )
-        if result.get("report_path"):
-            logger.info("[infer] 报告 → {}", result["report_path"])
-        if result.get("export_path"):
-            logger.info("[infer] 导出 → {}", result["export_path"])
+        # if result.get("report_path"):
+        #     logger.info("[infer] 报告 → {}", result["report_path"])
+        # if result.get("export_path"):
+        #     logger.info("[infer] 导出 → {}", result["export_path"])
         return 0
     else:
         # 批量预处理推理
@@ -221,10 +223,38 @@ def cmd_train(
         "YOLO", "--format", "-f",
         help="数据集类型 (YOLO / VOC / COCO)"
     ),
+    incremental: bool = Option(
+        False, "--incremental", "-i",
+        help="是否开启增量微调模式"
+    ),
+    base_dataset: Optional[str] = Option(
+        None, "--base-dataset", "-b",
+        help="基底主训练集目录路径（用于增量训练时的数据回放，防灾难性遗忘）"
+    ),
+    base_format: str = Option(
+        "YOLO", "--base-format",
+        help="基底数据集格式 (YOLO / VOC / COCO)"
+    ),
+    freeze_layers: int = Option(
+        10, "--freeze-layers",
+        help="增量微调时冻结的前 N 层骨干网络"
+    ),
+    epochs: Optional[int] = Option(
+        None, "--epochs", "-e",
+        help="训练/微调轮数"
+    ),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
-    """YOLO 模型训练命令，支持 VOC / COCO / YOLO 等多格式自适应转换与极简训练。"""
-    settings, run_id = _bootstrap(log_level, task_type="train")
+    """YOLO 模型训练命令，支持 VOC / COCO / YOLO 等多格式自适应转换与极简/增量微调训练。"""
+    # 如果指定了 base_dataset，自动激活 incremental 模式
+    if base_dataset and not incremental:
+        incremental = True
+        logger.info("检测到指定了 --base-dataset，自动开启增量微调训练模式。")
+
+    # 根据是否是增量模式，决定 task_type
+    current_task_type = "train-inc" if incremental else "train"
+    
+    settings, run_id = _bootstrap(log_level, task_type=current_task_type)
     from .tasks.train import run_train
 
     try:
@@ -233,18 +263,24 @@ def cmd_train(
             model_path=model,
             cfg_path=cfg,
             dataset_format=format,
-            run_id=run_id
+            run_id=run_id,
+            incremental=incremental,
+            base_dataset=base_dataset,
+            base_format=base_format,
+            freeze_layers=freeze_layers,
+            epochs=epochs,
+            task_type=current_task_type,
         )
-        logger.debug(f"[train] 训练已结束。成果保存目录: {results['run_dir']}")
+        logger.debug(f"[{current_task_type}] 训练已结束。成果保存目录: {results['run_dir']}")
         return 0
     except FileNotFoundError as e:
-        logger.error(f"[train] 运行所需文件未找到: {e}")
+        logger.error(f"[{current_task_type}] 运行所需文件未找到: {e}")
         return 1
     except ValueError as e:
-        logger.error(f"[train] 输入参数非法: {e}")
+        logger.error(f"[{current_task_type}] 输入参数非法: {e}")
         return 2
     except Exception as e:
-        logger.exception(f"[train] 训练执行遭遇异常: {e}")
+        logger.exception(f"[{current_task_type}] 训练执行遭遇异常: {e}")
         return 1
 
 

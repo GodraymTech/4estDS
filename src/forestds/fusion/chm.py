@@ -17,7 +17,7 @@ from loguru import logger as log
 from ..logging_setup import log_distribution
 
 # 树高合理上限(m)。
-_MAX_PLAUSIBLE_HEIGHT = 120.0
+_MAX_PLAUSIBLE_HEIGHT = 5.0
 _VALID_STATS = ("p95", "max", "median", "mean")
 _VALID_VOLUME_METHODS = ("cbh", "paraboloid", "cone", "ellipsoid", "column")
 
@@ -62,18 +62,18 @@ def load_single_band(path: str):
             if nod is not None:
                 arr = np.where(arr == np.float32(nod), np.nan, arr).astype("float32")
             geo = resolve_geo(path, transform=ds.transform, crs=ds.crs)
-        log.info("[fusion] rasterio 载入单波段: {} 尺寸={}", path, (arr.shape[1], arr.shape[0]))
+        log.info("rasterio 载入单波段: {} 尺寸={}", path, (arr.shape[1], arr.shape[0]))
         return arr, geo
     except ImportError:
         pass
     except Exception as e:  # 损坏/不支持 -> 回退 Pillow
-        log.warning("[fusion] rasterio 读取失败,回退 Pillow: {} ({})", path, e)
+        log.warning("rasterio 读取失败,回退 Pillow: {} ({})", path, e)
     from PIL import Image
 
     with Image.open(path) as im:
         arr = np.asarray(im.convert("F"), dtype="float32")
     log.warning(
-        "[fusion] 未装 rasterio,Pillow 整图载入单波段: {} 尺寸={}",
+        "未装 rasterio,Pillow 整图载入单波段: {} 尺寸={}",
         path, (arr.shape[1], arr.shape[0]),
     )
     geo = resolve_geo(path)
@@ -93,10 +93,10 @@ def chm_from_las(
         import laspy
         from scipy.spatial import cKDTree
     except ImportError as e:
-        log.error("[fusion] 缺少点云处理依赖库，请安装 (pip install laspy scipy): {}", e)
+        log.error("缺少点云处理依赖库，请安装 (pip install laspy scipy): {}", e)
         raise e
 
-    log.info("[fusion] 开始解析点云: {} 网格大小={:.3f}m", las_path, grid_size)
+    log.info("开始解析点云: {} 网格大小={:.3f}m", las_path, grid_size)
     with laspy.open(las_path) as fh:
         las = fh.read()
     
@@ -117,7 +117,7 @@ def chm_from_las(
 
     # 自动退级：如果地面点极少(比如未分类或分类缺失)，采用 5m 网格局部最小值估计地面
     if n_ground < n_total * 0.05 or n_ground < 100:
-        log.warning("[fusion] 地面点比例低({:.2f}%)或少于100个，启动形态学局部最低点地面拟合", 100.0 * n_ground / max(n_total, 1))
+        log.warning("地面点比例低({:.2f}%)或少于100个，启动形态学局部最低点地面拟合", 100.0 * n_ground / max(n_total, 1))
         # 5m 的格网尺寸来划分估算地面
         coarse_sz = 5.0
         x_min, x_max = np.min(x), np.max(x)
@@ -148,7 +148,7 @@ def chm_from_las(
         ground_z = z[ground_mask]
 
     # 2. 地面高程插值与归一化
-    log.info("[fusion] 构建地面点树以计算局部 DEM (地面点数={})", len(ground_z))
+    log.info("构建地面点树以计算局部 DEM (地面点数={})", len(ground_z))
     tree = cKDTree(ground_coords)
     # 每个点找最近 of 3 个地面点，以反距离权重插值计算基底高程
     dists, indices = tree.query(np.column_stack((x, y)), k=min(3, len(ground_z)))
@@ -218,7 +218,7 @@ def chm_from_las(
         origin_lat=origin_lat,
         source="las_mesh",
     )
-    log.info("[fusion] 点云网格化成功: CHM 尺寸=%dx%d 范围=[{:.2f}, {:.2f}]m", cols, rows, float(np.nanmin(chm)), float(np.nanmax(chm)))
+    log.info("点云网格化成功: CHM 尺寸=%dx%d 范围=[{:.2f}, {:.2f}]m", cols, rows, float(np.nanmin(chm)), float(np.nanmax(chm)))
     return chm, geo_info, (x, y, height_above_ground)
 
 
@@ -229,6 +229,8 @@ class CHMSampler:
     chm: np.ndarray
     chm_transform: Optional[Affine] = None
     rgb_transform: Optional[Affine] = None
+    chm_geo: Optional[GeoInfo] = None
+    rgb_geo: Optional[GeoInfo] = None
     stat: str = "max"
     max_height: float = _MAX_PLAUSIBLE_HEIGHT
     source_name: str = "chm"
@@ -237,19 +239,28 @@ class CHMSampler:
     voxel_size: float = 0.2
     raw_points: Optional[tuple[np.ndarray, np.ndarray, np.ndarray]] = None
     las_grid_size: float = 0.05
+    dsm: Optional[np.ndarray] = None
+    dem: Optional[np.ndarray] = None
+    dem_geo: Optional[GeoInfo] = None
     
     def __post_init__(self) -> None:
         if self.stat not in _VALID_STATS:
-            log.warning("[fusion] 未知统计量 {},回退 max", self.stat)
+            log.warning("未知统计量 {},回退 max", self.stat)
             self.stat = "max"
         if self.volume_method not in _VALID_VOLUME_METHODS:
-            log.warning("[fusion] 未知体积估算方法 {}, 回退 cbh", self.volume_method)
+            log.warning("未知体积估算方法 {}, 回退 cbh", self.volume_method)
             self.volume_method = "cbh"
+            
+        if self.source_name == "dsm_dem" and self.dsm is not None:
+            shape_h, shape_w = self.dsm.shape
+        else:
+            shape_h, shape_w = self.chm.shape
+            
         coreg = self.chm_transform is not None and self.rgb_transform is not None
         mode = "仿射配准" if coreg else "像素对齐"
         log.info(
-            "CHMSampler 初始化: CHM 尺寸=%dx%d 配准模式=%s 统计量=%s 体积估算=%s (factor=%.2f)",
-            self.chm.shape[1], self.chm.shape[0], mode, self.stat, self.volume_method, self.cbh_factor
+            "CHMSampler 初始化: CHM 尺寸={}x{} 配准模式={} 统计量={} 体积估算={} (factor={:.2f})",
+            shape_w, shape_h, mode, self.stat, self.volume_method, self.cbh_factor
         )
 
     @property
@@ -263,36 +274,106 @@ class CHMSampler:
         并在该包围盒切片内寻找树高估计（默认为 Max）并计算体积地学积分。
         """
         wx_min = wx_max = wy_min = wy_max = 0.0
-        if not self.coregistered:
-            # 无仿射信息：假设 1:1 像素对齐
-            h_h, h_w = self.chm.shape
-            c0 = max(0, int(round(det.x1)))
-            c1 = min(h_w, int(round(det.x2)) + 1)
-            r0 = max(0, int(round(det.y1)))
-            r1 = min(h_h, int(round(det.y2)) + 1)
+        
+        if self.source_name == "dsm_dem" and self.dsm is not None and self.dem is not None:
+            if not self.coregistered:
+                # 像素对齐
+                h_h, h_w = self.dsm.shape
+                c0 = max(0, int(round(det.x1)))
+                c1 = min(h_w, int(round(det.x2)) + 1)
+                r0 = max(0, int(round(det.y1)))
+                r1 = min(h_h, int(round(det.y2)) + 1)
+                
+                win_dsm = self.dsm[r0:r1, c0:c1]
+                if win_dsm.size == 0:
+                    return None, None, "chm_out_of_bounds"
+                win_dem = self.dem[r0:r1, c0:c1]
+                if win_dem.shape != win_dsm.shape:
+                    win_dem = win_dem[:win_dsm.shape[0], :win_dsm.shape[1]]
+            else:
+                # 仿射配准对齐
+                h_h, h_w = self.dsm.shape
+                wx1, wy1 = self.rgb_transform.pixel_to_world(det.x1, det.y1)
+                wx2, wy2 = self.rgb_transform.pixel_to_world(det.x2, det.y2)
+                wx_min, wx_max = min(wx1, wx2), max(wx1, wx2)
+                wy_min, wy_max = min(wy1, wy2), max(wy1, wy2)
+                
+                col1, row1 = self.chm_transform.world_to_pixel(wx_min, wy_max)
+                col2, row2 = self.chm_transform.world_to_pixel(wx_max, wy_min)
+                
+                c0 = max(0, int(round(min(col1, col2))))
+                c1 = min(h_w, int(round(max(col1, col2))) + 1)
+                r0 = max(0, int(round(min(row1, row2))))
+                r1 = min(h_h, int(round(max(row1, row2))) + 1)
+                
+                win_dsm = self.dsm[r0:r1, c0:c1]
+                if win_dsm.size == 0:
+                    return None, None, "chm_out_of_bounds"
+                
+                dem_transform = self.dem_geo.transform if self.dem_geo is not None else self.chm_transform
+                dem_h, dem_w = self.dem.shape
+                
+                d_col1, d_row1 = dem_transform.world_to_pixel(wx_min, wy_max)
+                d_col2, d_row2 = dem_transform.world_to_pixel(wx_max, wy_min)
+                
+                dc0 = max(0, int(round(min(d_col1, d_col2))))
+                dc1 = min(dem_w, int(round(max(d_col1, d_col2))) + 1)
+                dr0 = max(0, int(round(min(d_row1, d_row2))))
+                dr1 = min(dem_h, int(round(max(d_row1, d_row2))) + 1)
+                
+                win_dem_raw = self.dem[dr0:dr1, dc0:dc1]
+                if win_dem_raw.size == 0:
+                    return None, None, "chm_nodata"
+                
+                # 局部双线性缩放
+                try:
+                    from scipy.ndimage import zoom
+                    zoom_y = win_dsm.shape[0] / win_dem_raw.shape[0]
+                    zoom_x = win_dsm.shape[1] / win_dem_raw.shape[1]
+                    win_dem = zoom(win_dem_raw, (zoom_y, zoom_x), order=1)
+                    if win_dem.shape != win_dsm.shape:
+                        win_dem = win_dem[:win_dsm.shape[0], :win_dsm.shape[1]]
+                        if win_dem.shape != win_dsm.shape:
+                            tmp = np.full_like(win_dsm, np.nan)
+                            tmp[:win_dem.shape[0], :win_dem.shape[1]] = win_dem
+                            win_dem = tmp
+                except Exception:
+                    win_dem = np.full_like(win_dsm, np.nanmedian(win_dem_raw))
+            
+            win = win_dsm - win_dem
+            win = np.where(np.isnan(win), np.nan, np.maximum(win, 0.0))
         else:
-            h_h, h_w = self.chm.shape
-            # 投影检测框的 4 个地理边界点，取包围盒
-            wx1, wy1 = self.rgb_transform.pixel_to_world(det.x1, det.y1)
-            wx2, wy2 = self.rgb_transform.pixel_to_world(det.x2, det.y2)
-            
-            # 由于 Y 轴方向，做 min/max 鲁棒处理
-            wx_min, wx_max = min(wx1, wx2), max(wx1, wx2)
-            wy_min, wy_max = min(wy1, wy2), max(wy1, wy2)
-            
-            # 将地理包围盒转回 CHM 的像素格网坐标
-            col1, row1 = self.chm_transform.world_to_pixel(wx_min, wy_max)
-            col2, row2 = self.chm_transform.world_to_pixel(wx_max, wy_min)
-            
-            c0 = max(0, int(round(min(col1, col2))))
-            c1 = min(h_w, int(round(max(col1, col2))) + 1)
-            r0 = max(0, int(round(min(row1, row2))))
-            r1 = min(h_h, int(round(max(row1, row2))) + 1)
+            if not self.coregistered:
+                # 无仿射信息：假设 1:1 像素对齐
+                h_h, h_w = self.chm.shape
+                c0 = max(0, int(round(det.x1)))
+                c1 = min(h_w, int(round(det.x2)) + 1)
+                r0 = max(0, int(round(det.y1)))
+                r1 = min(h_h, int(round(det.y2)) + 1)
+            else:
+                h_h, h_w = self.chm.shape
+                # 投影检测框的 4 个地理边界点，取包围盒
+                wx1, wy1 = self.rgb_transform.pixel_to_world(det.x1, det.y1)
+                wx2, wy2 = self.rgb_transform.pixel_to_world(det.x2, det.y2)
+                
+                # 由于 Y 轴方向，做 min/max 鲁棒处理
+                wx_min, wx_max = min(wx1, wx2), max(wx1, wx2)
+                wy_min, wy_max = min(wy1, wy2), max(wy1, wy2)
+                
+                # 将地理包围盒转回 CHM 的像素格网坐标
+                col1, row1 = self.chm_transform.world_to_pixel(wx_min, wy_max)
+                col2, row2 = self.chm_transform.world_to_pixel(wx_max, wy_min)
+                
+                c0 = max(0, int(round(min(col1, col2))))
+                c1 = min(h_w, int(round(max(col1, col2))) + 1)
+                r0 = max(0, int(round(min(row1, row2))))
+                r1 = min(h_h, int(round(max(row1, row2))) + 1)
 
-        if c0 >= c1 or r0 >= r1:
-            return None, None, "chm_out_of_bounds"
+            if c0 >= c1 or r0 >= r1:
+                return None, None, "chm_out_of_bounds"
 
-        win = self.chm[r0:r1, c0:c1]
+            win = self.chm[r0:r1, c0:c1]
+
         valid_h = win[~np.isnan(win)]
         if valid_h.size == 0:
             return None, None, "chm_nodata"
@@ -311,11 +392,13 @@ class CHMSampler:
             return None, None, "chm_outlier"
 
         # 2. 树冠三维体积估算
-        if self.coregistered:
-            pixel_area = abs(self.chm_transform.pixel_size_x() * self.chm_transform.pixel_size_y())
+        if self.chm_geo is not None:
+            pixel_area = self.chm_geo.pixel_area_m2() or 1.0
         else:
-            # 若无地理参考，设定单像素面积为 1m2 作为占位
-            pixel_area = 1.0
+            if self.coregistered:
+                pixel_area = abs(self.chm_transform.pixel_size_x() * self.chm_transform.pixel_size_y())
+            else:
+                pixel_area = 1.0
 
         # 计算树冠宽度和高度的地理单位长度
         if self.coregistered:
@@ -323,6 +406,15 @@ class CHMSampler:
             wx2, wy2 = self.rgb_transform.pixel_to_world(det.x2, det.y2)
             w_geo = abs(wx2 - wx1)
             h_geo = abs(wy2 - wy1)
+            
+            # 如果是地理坐标系，将经纬度跨度换算为米制单位
+            if self.rgb_geo is not None and self.rgb_geo.crs_kind == "geographic":
+                lat = self.rgb_geo.origin_lat or 0.0
+                from ..geo import _M_PER_DEG_LAT
+                import math
+                m_per_deg_lon = _M_PER_DEG_LAT * math.cos(math.radians(lat))
+                w_geo = w_geo * m_per_deg_lon
+                h_geo = h_geo * _M_PER_DEG_LAT
         else:
             w_geo = det.width
             h_geo = det.height
@@ -334,7 +426,7 @@ class CHMSampler:
         actual_method = self.volume_method
         if actual_method in ("convex_hull", "voxel") and self.raw_points is None:
             log.warning(
-                "[fusion] 检测到体积估算方法为 {}, 但未提供点云数据，回退到 A-1 (cbh) 枝下高积分法",
+                "检测到体积估算方法为 {}, 但未提供点云数据，回退到 A-1 (cbh) 枝下高积分法",
                 actual_method
             )
             actual_method = "cbh"
@@ -368,12 +460,12 @@ class CHMSampler:
                     hull = ConvexHull(pts_3d)
                     volume = float(hull.volume)
                 except Exception as e:
-                    log.warning("[fusion] 凸包体积计算失败(可能是点共面)，回退至 cbh 积分: {}", e)
+                    log.warning("凸包体积计算失败(可能是点共面)，回退至 cbh 积分: {}", e)
                     crown_pixels = valid_h[valid_h >= cbh]
                     if crown_pixels.size > 0:
                         volume = float(np.sum(crown_pixels - cbh) * pixel_area)
             else:
-                log.warning("[fusion] 边界内有效点数少于4个(实际为 {})，回退至 cbh 积分", len(tx))
+                log.warning("边界内有效点数少于4个(实际为 {})，回退至 cbh 积分", len(tx))
                 crown_pixels = valid_h[valid_h >= cbh]
                 if crown_pixels.size > 0:
                     volume = float(np.sum(crown_pixels - cbh) * pixel_area)
@@ -415,20 +507,20 @@ class CHMSampler:
             d.extra["height"] = h
             d.extra["height_source"] = src
             d.extra["volume"] = vol
-            if src == "chm":
+            if src == "chm_nodata":
+                n_nod += 1
+            elif src == "chm_outlier":
+                n_out += 1
+            elif src == "chm_out_of_bounds":
+                n_unreg += 1
+            else:
                 n_h += 1
                 if h is not None:
                     heights.append(h)
                 if vol is not None:
                     volumes.append(vol)
-            elif src == "chm_nodata":
-                n_nod += 1
-            elif src == "chm_outlier":
-                n_out += 1
-            else:
-                n_unreg += 1
         log.info(
-            "[fusion] 树高与体积标注: 成功={} nodata={} 超限={} 未配准={}",
+            "树高与体积标注: 成功={} nodata={} 超限={} 未配准={}",
             n_h, n_nod, n_out, n_unreg,
         )
         if heights:
@@ -473,36 +565,12 @@ def build_chm_sampler(
         dsm, dsm_geo = load_single_band(dsm_path)
         if dem_path:
             dem, dem_geo = load_single_band(dem_path)
-            if dsm.shape != dem.shape:
-                log.info("[fusion] DSM/DEM 尺寸不一致 ({} vs {})，正在尝试重采样对齐...", dsm.shape, dem.shape)
-                try:
-                    import rasterio
-                    from rasterio.warp import reproject, Resampling
-                    dem_resampled = np.full_like(dsm, np.nan, dtype="float32")
-                    with rasterio.open(dsm_path) as src_dsm, rasterio.open(dem_path) as src_dem:
-                        reproject(
-                             source=rasterio.band(src_dem, 1),
-                             destination=dem_resampled,
-                             src_transform=src_dem.transform,
-                             src_crs=src_dem.crs,
-                             dst_transform=src_dsm.transform,
-                             dst_crs=src_dsm.crs,
-                             resampling=Resampling.bilinear,
-                             src_nodata=src_dem.nodata,
-                             dst_nodata=np.nan,
-                        )
-                    dem = dem_resampled
-                    dem_geo = dsm_geo
-                    log.info("[fusion] DSM/DEM 成功通过重投影对齐。")
-                except Exception as e:
-                    log.warning("[fusion] 尝试重采样 DEM 对齐 DSM 失败: {}", e)
-                    return None
-            chm = chm_from_dsm_dem(dsm, dem)
-            chm_geo = dsm_geo or dem_geo
+            chm = np.array([])
+            chm_geo = dsm_geo
             source_name = "dsm_dem"
         else:
             # 单独 DSM 渠道，使用常量 dem_default_value (默认 0.0m)
-            log.info("[fusion] 单独 DSM 模式，使用背景 DEM 常数背景高程: {}m", dem_default_value)
+            log.info("单独 DSM 模式，使用背景 DEM 常数背景高程: {}m", dem_default_value)
             dem = np.full_like(dsm, dem_default_value, dtype="float32")
             chm = chm_from_dsm_dem(dsm, dem)
             chm_geo = dsm_geo
@@ -510,7 +578,31 @@ def build_chm_sampler(
     else:
         return None
 
-    if chm is None:
+    if source_name == "dsm_dem" and dsm_path and dem_path:
+        log.info(
+            "CHM 模式: 延迟局部计算。DSM 尺寸={}x{} DEM 尺寸={}x{}",
+            dsm.shape[1], dsm.shape[0], dem.shape[1], dem.shape[0]
+        )
+        chm_transform = chm_geo.transform if chm_geo is not None else None
+        return CHMSampler(
+            chm=chm,
+            chm_transform=chm_transform,
+            rgb_transform=rgb_transform or (rgb_geo.transform if rgb_geo else None),
+            chm_geo=chm_geo,
+            rgb_geo=rgb_geo,
+            stat=stat,
+            source_name=source_name,
+            volume_method=volume_method,
+            cbh_factor=cbh_factor,
+            voxel_size=voxel_size,
+            raw_points=raw_pts,
+            las_grid_size=las_grid_size,
+            dsm=dsm,
+            dem=dem,
+            dem_geo=dem_geo,
+        )
+
+    if chm is None or chm.size == 0:
         return None
 
     finite = chm[~np.isnan(chm)]
@@ -527,6 +619,8 @@ def build_chm_sampler(
         chm=chm,
         chm_transform=chm_transform,
         rgb_transform=rgb_transform or (rgb_geo.transform if rgb_geo else None),
+        chm_geo=chm_geo,
+        rgb_geo=rgb_geo,
         stat=stat,
         source_name=source_name,
         volume_method=volume_method,

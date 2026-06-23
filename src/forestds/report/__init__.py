@@ -73,7 +73,7 @@ def generate_report(
     observations = reader.fetch_observations(run_id=used_run, tract_id=rid, url=db_url) \
         if used_run else reader.fetch_observations(tract_id=rid, url=db_url)
     log.info(
-        "报告数据: tract_id={} run_id={} 观测={} 条",
+        "所报告目标快照: tract_id={} run_id={} 已观测单木数={}",
         rid, used_run, len(observations),
     )
 
@@ -84,8 +84,8 @@ def generate_report(
     stem = f"report_{rid}"
 
     charts: list[Path] = []
-    if with_charts and fmt in ("pdf",):
-        charts = render_charts(data, out_dir_p / f"{stem}_charts")
+    if with_charts and fmt != "csv":
+        charts = render_charts(data, out_dir_p / "reports/assets")
 
     result: dict = {"data": data, "charts": [str(c) for c in charts]}
 
@@ -94,16 +94,17 @@ def generate_report(
         out_path.write_text(to_csv(data), encoding="utf-8")
         result.update(format="csv", out_path=str(out_path))
     elif fmt == "pdf":
-        out_path = to_pdf(data, out_dir_p / f"{stem}.pdf", charts=charts)
+        md_text = to_markdown(data, charts=charts)
+        out_path = to_pdf(data, out_dir_p / f"{stem}.pdf", charts=charts, md_content=md_text)
         if out_path is None:  # 优雅降级
             md_path = out_dir_p / f"{stem}.md"
-            md_path.write_text(to_markdown(data), encoding="utf-8")
+            md_path.write_text(to_markdown(data, charts=charts), encoding="utf-8")
             result.update(format="md", out_path=str(md_path), fallback="pdf->md (reportlab 缺失)")
         else:
             result.update(format="pdf", out_path=str(out_path))
     else:  # md 默认
         out_path = out_dir_p / f"{stem}.md"
-        out_path.write_text(to_markdown(data), encoding="utf-8")
+        out_path.write_text(to_markdown(data, charts=charts), encoding="utf-8")
         result.update(format="md", out_path=str(out_path))
 
     log.info("报告已生成[{}] -> {}", result["format"], result["out_path"])
