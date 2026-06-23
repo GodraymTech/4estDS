@@ -98,9 +98,13 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
             return True
         return False
 
+    from tqdm import tqdm
     _loguru_logger.remove()
     _loguru_logger.configure(extra={"run_id": _CURRENT_RUN_ID})
-    _loguru_logger.add(sys.stderr, level=level, format=_formatter, filter=_filter, enqueue=True)
+    _loguru_logger.add(
+        lambda msg: tqdm.write(msg, end=""),
+        level=level, format=_formatter, filter=_filter, enqueue=True, colorize=True
+    )
     if to_file:
         log_filename = f"{_LAUNCH_TIME}__{_CURRENT_RUN_ID}__{task_type}.log"
         log_path = paths.logs_dir() / log_filename

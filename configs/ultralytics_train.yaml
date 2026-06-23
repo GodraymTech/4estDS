@@ -7,7 +7,7 @@ mode: train          # 运行模式
 epochs: 200          # 训练轮数。林业场景下树冠分布复杂，200轮配合早停可获得较好的收敛
 patience: 40         # 多少轮无提升则触发早停 (EarlyStopping)
 batch: 16            # 批次大小。YOLO26l 在 24GB 显存下需要 batch≤16 以避免 backward 时 OOM segfault
-imgsz: 800           # 训练输入图像大小。若使用了较高分辨率的切片，可设为 640 或更大
+imgsz: 640           # 训练输入图像大小。若使用了较高分辨率的切片，可设为 640 或更大
 save: true           # 保存模型检查点和预测结果
 save_period: -1      # 多少个 epoch 保存一次模型 checkpoint (-1 表示禁用，只保存最新和最佳)
 cache: false         # 是否在 RAM/Disk 中缓存数据 (true/ram/disk/false)

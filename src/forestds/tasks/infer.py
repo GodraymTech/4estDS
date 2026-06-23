@@ -62,7 +62,6 @@ def run_infer_pipeline(
     """
     from ..db import writer
     from ..detect import get_detector
-    from ..engine.infer import run_image_inference
 
     arch_val = arch or settings.get("detect.arch", "ultralytics")
     db_url = settings.get("url", None)
@@ -90,15 +89,63 @@ def run_infer_pipeline(
 
     # ── 2. 核心推理 ────────────────────────────────────────────────────────────
     t0 = time.time()
-    result = run_image_inference(
+    from ..preprocess import prepare_inference_image
+    from ..engine import InferenceConfig, run_inference
+    from ..engine.sources import RasterImageSource, InMemorySource, TiledDirectorySource
+    from PIL import Image
+    import numpy as np
+
+    # 2.1 委托预处理模块执行所有前置逻辑 (读尺寸、检查COG、自适应寻优、静态切片落盘)
+    slice_action = settings.get("preprocess.slice.action", "slice")
+    seed_window_size = int(settings.get("preprocess.slice.scope.seed_window_size", 2560))
+    prep = prepare_inference_image(
         image_path=image_path,
-        detector=detector,
-        slice_action=settings.get("preprocess.slice.action", "slice"),
-        seed_window_size=int(settings.get("preprocess.slice.scope.seed_window_size", 2560)),
+        slice_action=slice_action,
+        seed_window_size=seed_window_size,
         overlap_rate=overlap_rate,
         settings=settings,
         run_id=run_id,
+        detector=detector,
     )
+    
+    width = prep["width"]
+    height = prep["height"]
+    mode = prep["mode"]
+    tiles_dir = prep["tiles_dir"]
+    image_path = prep["image_path"]
+
+    # 2.2 构造显式 InferenceConfig 超参数配置，注入自标定（SCOPE）的最优参数
+    config = InferenceConfig.from_settings(
+        settings,
+        tile_size=prep["tile_size"],
+        overlap_rate=prep["overlap_rate"],
+    )
+
+    # 2.3 路由并初始化对应的影像源适配器 (ImageSource)
+    if mode == "physical_slice":
+        log.info("【模式路由】-->「静态切片落盘推理模式」，切片目录为: {}", tiles_dir)
+        source = TiledDirectorySource(tiles_dir, width, height)
+    elif mode == "on_the_fly":
+        log.info("【模式路由】-->「COG 动态滑窗推理模式」，影像为: {}", image_path)
+        source = RasterImageSource(image_path)
+    else:
+        log.info("【模式路由】-->「整图直接推理模式」，影像为: {}", image_path)
+        with Image.open(image_path) as img:
+            pixels = np.asarray(img.convert("RGB"))
+        source = InMemorySource(pixels)
+
+    try:
+        result = run_inference(source, detector, config)
+    finally:
+        source.close()
+
+    # 2.4 为了跟以前的返回值元数据兼容，将 tiles_dir 相对于 home_dir() 记录到 meta 中
+    if mode == "physical_slice" and tiles_dir:
+        try:
+            rel_tiles_dir = str(Path(tiles_dir).relative_to(paths.home_dir()))
+        except Exception:
+            rel_tiles_dir = str(tiles_dir)
+        result.meta["tiles_dir"] = rel_tiles_dir
 
     # ── 3. GIS 投影 & 地块登记 ─────────────────────────────────────────────────
     from ..geo import compute_tract_geometry
@@ -166,7 +213,6 @@ def run_infer_pipeline(
     )
 
     # ── 4. 高程融合树高（可选）────────────────────────────────────────────────
-    # ── 4. 高程融合树高（可选）────────────────────────────────────────────────
     if chm or dsm or las:
         from ..fusion import build_chm_sampler
         from ..geo import resolve_geo
@@ -202,7 +248,7 @@ def run_infer_pipeline(
         vis_out = paths.outputs_infer_dir() / f"{Path(image_path).stem}_detected.jpg"
         if draw_detections_on_image(image_path, result.detections, output_path=vis_out, max_draw_size=5000):
             vis_path = str(vis_out)
-            log.info("检测框结果图已保存至: {}", vis_path)
+            log.info("给原图绘制检测框: {}", vis_path)
 
     # ── 7. 运行指标 & run_log 终态 ─────────────────────────────────────────────
     dur = time.time() - t0
@@ -226,6 +272,7 @@ def run_infer_pipeline(
             tract_id=tract_id, run_id=run_id, fmt=report_fmt,
             out_dir=paths.outputs_infer_dir(), db_url=db_url,
             with_charts=with_charts,
+            vis_path=vis_path,
         )
         report_path = rep["out_path"]
     except Exception as e:

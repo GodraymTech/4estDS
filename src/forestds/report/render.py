@@ -40,7 +40,7 @@ def _format_table_row(label: str, d: dict, unit: str = "") -> str:
     )
 
 
-def to_markdown(data: ReportData, charts: list[str | Path] | None = None) -> str:
+def to_markdown(data: ReportData, charts: list[str | Path] | None = None, vis_chart: Path | None = None) -> str:
     """将报告数据渲染为高标准排版的 Markdown 文本。"""
     m = data.meta
     lines: list[str] = []
@@ -52,10 +52,10 @@ def to_markdown(data: ReportData, charts: list[str | Path] | None = None) -> str
         for c in charts:
             p = Path(c)
             if p.name == filename:
-                return f"\n![{caption}](./reports/assets/{p.name})\n"
+                return f"\n![{caption}](./assets/{p.name})\n"
         return ""
 
-    lines.append("# 红树林单木检出统计报告")
+    lines.append("# 红树林AI检测统计报告")
     lines.append("")
     lines.append("---")
     lines.append(f"- **地块 (Tract)**: `{data.tract_id or '-'}`  **位置 (Location)**: {m.get('location') or '-'}  "
@@ -168,7 +168,7 @@ def to_markdown(data: ReportData, charts: list[str | Path] | None = None) -> str
         
     lines.append("")
     lines.append("### 3.2 树冠面积与体积的异速比例生长规律")
-    lines.append("异速生长理论（Allometric Scaling）指出，单木的水平投影面积 ($A$) 与三维立体体积 ($V$) 通常服从非线性的幂律异速生长方程：$V = a \\cdot A^b$。我们利用双对数线性变换拟合该生态学指数，以揭示红树林在空间维度上的扩展速率机制。拟合曲线如下：")
+    lines.append("异速生长理论（Allometric Scaling）指出，单木的水平投影面积 (A) 与三维立体体积 (V) 通常服从非线性的幂律异速生长方程：V = a * A^b。我们利用双对数线性变换拟合该生态学指数，以揭示红树林在空间维度上的扩展速率机制。拟合曲线如下：")
     lines.append("")
     
     # 穿插异速生长回归拟合图
@@ -178,7 +178,7 @@ def to_markdown(data: ReportData, charts: list[str | Path] | None = None) -> str
         
     lines.append("")
     lines.append("> [!NOTE]")
-    lines.append("> **生态异速指数 $b$ 的物理解读**：拟合判定系数 $R^2$ 越高，表明单木的物理外形生长一致性越强。回归方程中的幂指数 $b$ 若接近 1.5，说明红树林的生长呈标准的各项同性空间膨胀；若 $b < 1.0$，表明生长更加倾向于水平冠幅的横向扩张以抢夺阳光；若 $b > 1.5$，则反映测区在垂直方向的树高生长极具优势。")
+    lines.append("> **生态异速指数 b 的物理解读**：拟合判定系数 R^2 越高，表明单木的物理外形生长一致性越强。回归方程中的幂指数 b 若接近 1.5，说明红树林的生长呈标准的各项同性空间膨胀；若 b < 1.0，表明生长更加倾向于水平冠幅的横向扩张以抢夺阳光；若 b > 1.5，则反映测区在垂直方向的树高生长极具优势。")
     lines.append("")
 
     # ------------------ 四、 树种空间生长异质性对比 (Species Heterogeneity) ------------------
@@ -245,6 +245,15 @@ def to_markdown(data: ReportData, charts: list[str | Path] | None = None) -> str
         lines.append("- (未获取多尺度切片统计)")
     lines.append("")
     
+    # ------------------ 六、 测区树木检测空间分布可视化图 ------------------
+    if vis_chart:
+        lines.append("## 六、 测区树木检测空间分布可视化图 (Canopy Detection Visualization)")
+        lines.append("")
+        lines.append("为了直观呈现林木的密集程度与个体形态差异，系统将最终去重去偏后的单木空间定位与检测框绘制渲染回原正射影像。下图为该测区去重合并后的核心检出分布图（已进行大图无损压缩以优化排版）：")
+        lines.append("")
+        lines.append(f"\n![单木空间分布检出可视化图](./assets/{vis_chart.name})\n")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -581,7 +590,7 @@ def render_charts(data: ReportData, out_dir: Path) -> list[Path]:
             plt.close(fig)
             produced.append(p)
 
-    log.info("生成图表 {} 张 -> {}", len(produced), out_dir)
+    log.info("生成报告图表 {} 张 -> {}", len(produced), out_dir)
     return produced
 
 
@@ -594,12 +603,42 @@ def to_pdf(data: ReportData, out_path: Path, *, charts: list[Path] | None = None
     try:
         from markdown_pdf import MarkdownPdf, Section
         import re
+        import base64
         
-        # 将相对路径图片换算为绝对路径，确保 PyMuPDF 可靠读图并渲染
+        # 将 Markdown 图片替换为 Base64 嵌入的 HTML img 标签，100% 解决绝对/相对路径渲染故障及跨目录安全加载限制
+        def get_image_base64(p: Path) -> str:
+            with open(p, "rb") as f:
+                content = f.read()
+            ext = p.suffix.lower().replace(".", "")
+            mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+            b64_data = base64.b64encode(content).decode("utf-8")
+            return f"data:{mime};base64,{b64_data}"
+
         absolute_md = md_content
-        for c in (charts or []):
-            rel_pattern = rf"\./reports/assets/{c.name}"
-            absolute_md = re.sub(rel_pattern, str(c.absolute()), absolute_md)
+        # 正则匹配 Markdown 中的图片：![caption](path)
+        pattern = r"!\[([^\]]*)\]\(([^)]+)\)"
+        
+        def repl(match):
+            caption = match.group(1)
+            path_str = match.group(2)
+            # 通过图片文件名从 charts 列表中匹配物理图片
+            filename = Path(path_str).name
+            target_chart = None
+            for c in (charts or []):
+                if c.name == filename:
+                    target_chart = c
+                    break
+            
+            if target_chart and target_chart.exists():
+                try:
+                    b64_uri = get_image_base64(target_chart)
+                    # 替换为居中、最大宽度适配的 HTML img 标签
+                    return f'<div style="text-align: center; margin: 15px 0;"><img src="{b64_uri}" alt="{caption}" style="max-width: 90%; height: auto; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" /><p style="font-size: 9pt; color: #666; margin-top: 5px;">{caption}</p></div>'
+                except Exception as ex:
+                    log.warning("转换图片 {} 为 Base64 失败: {}", filename, ex)
+            return match.group(0)
+
+        absolute_md = re.sub(pattern, repl, absolute_md)
             
         pdf = MarkdownPdf(toc_level=2)
         pdf.add_section(Section(absolute_md))

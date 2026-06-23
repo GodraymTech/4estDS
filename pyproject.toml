@@ -11,12 +11,13 @@ dependencies = [
   "PyYAML>=6.0",
   "alembic>=1.18.4",
   "loguru>=0.7.3",
+  "markdown-pdf>=1.13.2",
   "plotly>=6.8.0",
   "pydantic>=2.13.4",
   "pydantic-settings>=2.14.1",
   "sqlalchemy>=2.0.51",
   "tqdm>=4.68.3",
-  "typer>=0.26.7"
+  "typer>=0.26.7",
 ]
 
 [project.scripts]

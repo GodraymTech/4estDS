@@ -243,5 +243,5 @@ def export_tract_to_file(
         driver = "ESRI Shapefile" if fmt == "shp" else "GPKG"
         gdf.to_file(final_path, driver=driver)
 
-    log.info(f"空间图层成功导出[{result_info['format']}]，条数={result_info['count']} -> {result_info['out_path']}")
+    log.info(f"空间图层成功导出[{result_info['format']}]，检测数={result_info['count']} -> {result_info['out_path']}")
     return result_info

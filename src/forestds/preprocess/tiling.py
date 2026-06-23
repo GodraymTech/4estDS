@@ -92,8 +92,8 @@ def execute_slicing(
     saved_count = 0
 
     try:
-        from tqdm import tqdm
-        for (wx, wy, w, h) in tqdm(windows, desc="切片落盘中", ncols=80, leave=False):
+        from ..utils.progress import track_progress
+        for (wx, wy, w, h) in track_progress(windows, desc="切片落盘中"):
 
                 # 3. 获取局部像素
                 pixels = None

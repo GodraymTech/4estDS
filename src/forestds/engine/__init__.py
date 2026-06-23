@@ -17,24 +17,19 @@
                      ← engine/batch.py（批量 use-case，例外：含 DB 写入）
 """
 
-from .batch import (
-    BatchItemResult,
-    BatchResult,
-    discover_inputs,
-    run_batch,
-)
 from .infer import (
+    InferenceConfig,
     InferenceResult,
     run_inference,
 )
-from .sources import RasterImageSource
+from .sources import ImageSource, RasterImageSource, InMemorySource, TiledDirectorySource
 
 __all__ = [
-    "BatchItemResult",
-    "BatchResult",
+    "InferenceConfig",
     "InferenceResult",
+    "ImageSource",
     "RasterImageSource",
-    "discover_inputs",
-    "run_batch",
+    "InMemorySource",
+    "TiledDirectorySource",
     "run_inference",
 ]

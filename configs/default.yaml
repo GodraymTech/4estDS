@@ -6,7 +6,7 @@ app:
   codename: forestds
 
 logging:
-  level: INFO             # DEBUG
+  level: DEBUG             # DEBUG  INFO
   rotation_mb: 20        # 单个日志文件滚动大小(MB)
   backups: 5
   to_db: true            # 是否把 run 记录写入 run_logs 表
@@ -56,7 +56,7 @@ detect:
   conf_threshold: 0.25
   iou_threshold: 0.6
   model_input: 640        # 模型输入边长(像素)
-  batch_size: 96          # 🔴 
+  batch_size: 80          # 🔴 
   verbose: true           # 推理时是否输出 ultralytics 自身的详细推理日志
   models:
     ultralytics:
@@ -67,9 +67,12 @@ postprocess:
   draw_box: true                 # 🔴 是否在原图(或原图中心5000*5000的子图）上绘制检测框, 并保存
   trunc_penalty: 0.5             # 局部碰边（被切断）框的置信度折扣系数
   conf_type: "max"               # 跨瓦片 WBF 融合时的置信度聚合方式
-  center_merge_frac: 0.0         # 跨缝断裂拼合的中心距离门控
-  keep_tiles: false               # 🔴 保留切片目录
+  center_merge_frac: 0.15         # 跨缝断裂拼合的中心距离门控
+  keep_tiles: true               # 🔴 保留切片目录
 
+report:
+  format: "pdf"                   # 自动生成的报告默认格式 (md / pdf / csv)
+  with_charts: true              # 自动生成报告时是否渲染学术分析图表 (True/False)
 export:
   default_format: shp           # 🔴 推理完成后导出 GIS 图层格式。可选值: geojson | shp | gpkg | csv | null（null 表示不自动导出，仅通过 `4estds export` 手动触发）
   drop_pixel_columns: true
@@ -85,10 +88,6 @@ fusion:
   voxel_size: 0.2                # 体素化估算方法中的三维网格单元大小 (米)
 
 
-# 报告生成与导出配置
-report:
-  format: "md"                   # 自动生成的报告默认格式 (md / pdf / csv)
-  with_charts: true              # 自动生成报告时是否渲染学术分析图表 (True/False)
 
 
 

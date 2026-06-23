@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from loguru import logger as log
-from tqdm import tqdm
+from ..utils.progress import track_progress
 
 try:
     import rasterio
@@ -119,16 +119,9 @@ def convert_to_cog(
                     for _, window in src.block_windows(i):
                         all_tasks.append((i, window))
                 
-                with tqdm(
-                    total=len(all_tasks),
-                    desc="转换 COG 进度",
-                    ncols=80,
-                    leave=False
-                ) as pbar:
-                    for i, window in all_tasks:
-                        data = src.read(i, window=window)
-                        dst.write(data, indexes=i, window=window)
-                        pbar.update(1)
+                for i, window in track_progress(all_tasks, desc="转换 COG 进度"):
+                    data = src.read(i, window=window)
+                    dst.write(data, indexes=i, window=window)
                     
         # 2. 以读写模式重新打开，构建多层金字塔 Overviews
         with rasterio.open(out_p, "r+") as dst:

@@ -52,6 +52,7 @@ def generate_report(
     out_dir: str | Path | None = None,
     with_charts: bool = True,
     db_url: str | None = None,
+    vis_path: str | Path | None = None,
 ) -> dict:
     """端到端生成一份报告。
 
@@ -73,7 +74,7 @@ def generate_report(
     observations = reader.fetch_observations(run_id=used_run, tract_id=rid, url=db_url) \
         if used_run else reader.fetch_observations(tract_id=rid, url=db_url)
     log.info(
-        "所报告目标快照: tract_id={} run_id={} 已观测单木数={}",
+        "报告对象的信息: tract_id={} run_id={} 已观测单木数={}",
         rid, used_run, len(observations),
     )
 
@@ -89,23 +90,53 @@ def generate_report(
 
     result: dict = {"data": data, "charts": [str(c) for c in charts]}
 
+    reports_dir = out_dir_p / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # 优雅压缩并将可视化检测大图放进 reports/assets 目录下，避免 PDF 文件过大
+    vis_chart_p: Path | None = None
+    if vis_path and Path(vis_path).exists():
+        vis_dest = reports_dir / "assets/detected_visual.jpg"
+        vis_dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            from PIL import Image
+            with Image.open(vis_path) as img:
+                w, h = img.size
+                max_width = 1200
+                if w > max_width:
+                    h_new = int(h * (max_width / w))
+                    img_resized = img.resize((max_width, h_new), Image.Resampling.LANCZOS)
+                else:
+                    img_resized = img
+                img_resized.convert("RGB").save(str(vis_dest), "JPEG", quality=65, optimize=True)
+            vis_chart_p = vis_dest
+            log.info("检测框可视化大图已成功优雅压缩 -> {}", vis_dest)
+        except Exception as e:
+            log.warning("压缩检测可视化图失败: {}", e)
+
     if fmt == "csv":
-        out_path = out_dir_p / f"{stem}.csv"
+        out_path = reports_dir / f"{stem}.csv"
         out_path.write_text(to_csv(data), encoding="utf-8")
         result.update(format="csv", out_path=str(out_path))
     elif fmt == "pdf":
-        md_text = to_markdown(data, charts=charts)
-        out_path = to_pdf(data, out_dir_p / f"{stem}.pdf", charts=charts, md_content=md_text)
+        md_text = to_markdown(data, charts=charts, vis_chart=vis_chart_p)
+        # 保存并保留 Markdown 原始报告
+        md_path = reports_dir / f"{stem}.md"
+        md_path.write_text(md_text, encoding="utf-8")
+        
+        pdf_path = reports_dir / f"{stem}.pdf"
+        # 记得将 vis_chart_p 加入到 PDF 转换的图片列表，使其自动绝对化
+        pdf_charts = (charts or []) + ([vis_chart_p] if vis_chart_p else [])
+        out_path = to_pdf(data, pdf_path, charts=pdf_charts, md_content=md_text)
         if out_path is None:  # 优雅降级
-            md_path = out_dir_p / f"{stem}.md"
-            md_path.write_text(to_markdown(data, charts=charts), encoding="utf-8")
             result.update(format="md", out_path=str(md_path), fallback="pdf->md (reportlab 缺失)")
         else:
             result.update(format="pdf", out_path=str(out_path))
     else:  # md 默认
-        out_path = out_dir_p / f"{stem}.md"
-        out_path.write_text(to_markdown(data, charts=charts), encoding="utf-8")
-        result.update(format="md", out_path=str(out_path))
+        md_text = to_markdown(data, charts=charts, vis_chart=vis_chart_p)
+        md_path = reports_dir / f"{stem}.md"
+        md_path.write_text(md_text, encoding="utf-8")
+        result.update(format="md", out_path=str(md_path))
 
     log.info("报告已生成[{}] -> {}", result["format"], result["out_path"])
     return result

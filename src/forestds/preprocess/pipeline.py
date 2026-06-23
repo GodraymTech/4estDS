@@ -152,22 +152,26 @@ def prepare_inference_image(
             if (resolved_tile_size is None or resolved_overlap_rate is None) and is_tiff and settings.get("preprocess.slice.scope.enable", True):
                 log.info("触发 SCOPE: 自动寻优切割尺寸...")
                 
-                # 使用 scope 临时专用的 detector 实例，确保参数与 model_input 吻合
-                from ..detect import get_detector
-                arch_val = settings.get("arch", "yolo12")
-                weights_val = settings.get(f"detect.models.{arch_val}.weights")
-                conf_thr = float(settings.get("detect.conf_threshold", 0.25))
-                iou_thr = float(settings.get("detect.iou_threshold", 0.6))
-                
-                scope_detector = get_detector(
-                    arch_val,
-                    weights=weights_val,
-                    conf=conf_thr,
-                    iou=iou_thr,
-                    imgsz=int(settings.get("model_input", 1024)),
-                    device=detector.kwargs.get("device") if detector else None,
-                    verbose=settings.get("detect.verbose", True),
-                )
+                # 如果传入了检测器，直接复用以节约内存和显存，避免模型被重复加载两次
+                if detector is not None:
+                    scope_detector = detector
+                else:
+                    # 使用 scope 临时专用的 detector 实例，确保参数与 model_input 吻合
+                    from ..detect import get_detector
+                    arch_val = settings.get("arch", "ultralytics")
+                    weights_val = settings.get(f"detect.models.{arch_val}.weights")
+                    conf_thr = float(settings.get("detect.conf_threshold", 0.25))
+                    iou_thr = float(settings.get("detect.iou_threshold", 0.6))
+                    
+                    scope_detector = get_detector(
+                        arch_val,
+                        weights=weights_val,
+                        conf=conf_thr,
+                        iou=iou_thr,
+                        imgsz=int(settings.get("model_input", 1024)),
+                        device=None,
+                        verbose=settings.get("detect.verbose", True),
+                    )
                 scope_tile, scope_overlap = run_scope_calibration(
                     image_path, scope_detector, settings, run_id=run_id
                 )

@@ -19,7 +19,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from loguru import logger as log
-from ..detect.base import Window
+from ..detect.base import Window, Detection
+from ..postprocess.wbf import iou as compute_iou
 
 try:
     import numpy as np
@@ -29,47 +30,6 @@ except ImportError:
     np = None
     rasterio = None
     Image = None
-
-
-@dataclass
-class Detection:
-    x1: float
-    y1: float
-    x2: float
-    y2: float
-    score: float
-    label: str
-
-    @property
-    def width(self) -> float:
-        return self.x2 - self.x1
-
-    @property
-    def height(self) -> float:
-        return self.y2 - self.y1
-
-    @property
-    def center(self) -> tuple[float, float]:
-        return (self.x1 + self.x2) / 2.0, (self.y1 + self.y2) / 2.0
-
-
-def compute_iou(box1: tuple[float, float, float, float], box2: tuple[float, float, float, float]) -> float:
-    x1_max = max(box1[0], box2[0])
-    y1_max = max(box1[1], box2[1])
-    x2_min = min(box1[2], box2[2])
-    y2_min = min(box1[3], box2[3])
-
-    inter_width = max(0.0, x2_min - x1_max)
-    inter_height = max(0.0, y2_min - y1_max)
-    inter_area = inter_width * inter_height
-
-    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
-    union_area = area1 + area2 - inter_area
-
-    if union_area <= 0:
-        return 0.0
-    return inter_area / union_area
 
 
 def detector_recall_curve(a: float) -> float:
@@ -466,8 +426,9 @@ def run_scope_calibration(
 
             # 评估序贯停止条件
             if len(detected_sizes) > 10:
-                # 采用加权分位数算法，在线评估大冠幅参考尺寸估计量 theta
+                # 采用加权分位数算法，在线评估大冠幅/最小冠幅参考尺寸估计量
                 d_q95 = weighted_quantile(detected_sizes, detected_weights, large_quantile)
+                d_q05 = weighted_quantile(detected_sizes, detected_weights, 0.05)
                 sum_w = sum(detected_weights)
 
                 # 采用加权自助重采样 (Weighted Bootstrap Resampling) 估算不确定性置信区间半宽
@@ -481,7 +442,7 @@ def run_scope_calibration(
                 theta_samples.sort()
                 ci_half = (theta_samples[int(50 * 0.95)] - theta_samples[int(50 * 0.05)]) / 2.0
                 
-                log.debug(f"采样进度: 激活窗口={len(sampled_coords)}/{actual_sample_budget}, 样本数={len(detected_sizes)} (+{len(keep_boxes)}), 加权总体={sum_w:.1f}, 大冠幅估计d_q95={int(round(d_q95))}px, CI半宽={int(round(ci_half))}px")
+                log.info(f"采样进度: 激活窗口={len(sampled_coords)}/{actual_sample_budget}, 样本数={len(detected_sizes)} (+{len(keep_boxes)}), 加权总体={sum_w:.1f}, 最小冠幅估计d_q05={int(round(d_q05))}px, 大冠幅估计d_q95={int(round(d_q95))}px, CI半宽={int(round(ci_half))}px")
                 
                 if ci_half < 2.0 and len(sampled_coords) >= actual_sample_delta * 2:
                     log.info(f"序贯检测收敛 (CI半宽 {int(round(ci_half))} < 2px)，提前结束探测。")

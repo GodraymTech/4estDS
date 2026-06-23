@@ -233,7 +233,7 @@ def write_observations(
     finally:
         conn.close()
     log.info(
-        "本轮最终单木集合写入「tree_observations」表: {} 株 -> run_id={} slice_size={}",
+        "写「tree_observations」表: 本轮最终单木 {} 株 -> run_id={} slice_size={}",
         n, run_id, slice_size,
     )
     return n

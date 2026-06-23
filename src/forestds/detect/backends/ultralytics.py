@@ -61,11 +61,27 @@ class UltralyticsDetector(BaseDetector):
         self._is_rtdetr = is_rtdetr
 
     def _predict_arrays(self, arrays):  # pragma: no cover
+        device = self.kwargs.get("device")
+        if device is None:
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    device = "cuda"
+                else:
+                    device = "cpu"
+            except ImportError:
+                device = "cpu"
+
+        # 如果是 GPU 推理，且配置中未指定 half，则默认启用半精度加速
+        half_val = bool(self.kwargs.get("half", False))
+        if device == "cuda" and "half" not in self.kwargs:
+            half_val = True
+
         predict_kwargs = {
             "conf": float(self.kwargs.get("conf", 0.25)),
             "imgsz": int(self.kwargs.get("imgsz", 1024)),
-            "device": self.kwargs.get("device"),
-            "half": bool(self.kwargs.get("half", False)),
+            "device": device,
+            "half": half_val,
             "verbose": bool(self.kwargs.get("verbose", False)),
         }
         # RT-DETR 末端无 NMS，不传 iou

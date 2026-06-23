@@ -97,7 +97,7 @@ def run_batch_pipeline(
         log.warning("批量推理未找到任何有效的影像文件。")
         return summary
 
-    arch_val = arch or settings.get("detect.arch", "yolo12")
+    arch_val = arch or settings.get("detect.arch", "ultralytics")
     
     # 在外层统一初始化 Detector，实现权重仅加载一次
     detector = get_detector(
@@ -112,7 +112,9 @@ def run_batch_pipeline(
 
     log.info("批量预处理推理启动：共 {} 张影像，使用模型：{}", len(valid_paths), arch_val)
 
-    for idx, path in enumerate(valid_paths, 1):
+    from ..utils.progress import track_progress
+
+    for idx, path in track_progress(list(enumerate(valid_paths, 1)), desc="批量影像推理"):
         image_str = str(path)
         # 若用户指定地块，则使用之；否则默认以影像名称（stem）为地块 location
         curr_location = location or path.stem
@@ -134,7 +136,7 @@ def run_batch_pipeline(
         item = BatchItemSummary(path=image_str, location=curr_location, status="failed", run_id=run_id)
 
         try:
-            log.info("[{}/{}] 正在推理影像: {}", idx, len(valid_paths), image_str)
+            log.info("【批量调度】[{}/{}] 开始推理影像: {}", idx, len(valid_paths), image_str)
             res = run_infer_pipeline(
                 image_str,
                 run_id=run_id,
@@ -163,20 +165,16 @@ def run_batch_pipeline(
 
             summary.succeeded += 1
             summary.total_trees += item.tree_count
-            log.info("[{}/{}] 推理成功: {} (单图单木数={})", idx, len(valid_paths), image_str, item.tree_count)
+            log.info("【批量调度】[{}/{}] 推理成功: {} (单图检出单木数={})", idx, len(valid_paths), image_str, item.tree_count)
         except Exception as e:
             item.error = str(e)
             summary.failed += 1
-            log.exception("[{}/{}] 推理失败: {}，原因: {}", idx, len(valid_paths), image_str, e)
-        # 计算并显示静态字符进度条与运行指标统计
-        pct = int(idx / len(valid_paths) * 100)
-        bar_len = 20
-        filled_len = int(bar_len * idx // len(valid_paths))
-        bar = "#" * filled_len + "-" * (bar_len - filled_len)
+            log.exception("【批量调度】[{}/{}] 推理失败: {}，原因: {}", idx, len(valid_paths), image_str, e)
+        
         elapsed = time.time() - t0
         log.info(
-            "[{}/{}] 进度: [{}] {}% | 累计耗时: {:.1f}s | 成功: {} | 失败: {}\n\n",
-            idx, len(valid_paths), bar, pct, elapsed, summary.succeeded, summary.failed
+            "【批量进度】[{}/{}] 累计耗时: {:.1f}s | 已成功: {} | 已失败: {}\n",
+            idx, len(valid_paths), elapsed, summary.succeeded, summary.failed
         )
         summary.items.append(item)
 

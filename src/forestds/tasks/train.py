@@ -500,14 +500,14 @@ def convert_yolo_dataset(
     train_samples = valid_samples[:split_idx]
     val_samples = valid_samples[split_idx:]
 
-    from tqdm import tqdm
+    from ..utils.progress import track_progress
     for split_name, samples in [("train", train_samples), ("val", val_samples)]:
         img_out = dest_dir / "images" / split_name
         lbl_out = dest_dir / "labels" / split_name
         img_out.mkdir(parents=True, exist_ok=True)
         lbl_out.mkdir(parents=True, exist_ok=True)
 
-        for img_path, txt_path in tqdm(samples, desc=f"构建 {split_name} 数据集链接", ncols=80, leave=False):
+        for img_path, txt_path in track_progress(samples, desc=f"构建 {split_name} 数据集链接"):
             process_and_link_image(img_path, img_out / img_path.name)
             safe_link(txt_path, lbl_out / txt_path.name)
 

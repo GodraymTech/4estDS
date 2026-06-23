@@ -43,7 +43,7 @@ def _bootstrap(level: str | None = None, task_type: str | None = None, to_file: 
 @app.command("infer", help="图像推理")
 def cmd_infer(
     images: list[str] = Argument(..., help="输入影像/图像路径(支持 TIFF/PNG/JPG 等)或目录"),
-    arch: Optional[str] = Option(None, "--arch", help="模型架构 (yolo12 / rtdetr)"),
+    arch: Optional[str] = Option(None, "--arch", help="模型架构 (默认 ultralytics)"),
     acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYmmdd"),
     location: Optional[str] = Option(None, "--location", help="地块位置标识"),
     overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="重叠率 (0.0~1.0)"),
@@ -364,7 +364,7 @@ def cmd_export(
 def cmd_batch(
     input_dir: str = Option(..., "--input-dir", help="输入目录"),
     glob: str = Option("*.tif", "--glob", help="文件匹配模式(默认 *.tif)"),
-    arch: Optional[str] = Option(None, "--arch", help="模型架构 (yolo12 / rtdetr)"),
+    arch: Optional[str] = Option(None, "--arch", help="模型架构 (默认 ultralytics)"),
     acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYmmdd"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
@@ -374,36 +374,30 @@ def cmd_batch(
 
     settings, run_id = _bootstrap(args.log_level, task_type="batch")
     logger.warning("[batch] 仅支持 RGB;批量推理串行执行。")
-    from .db import writer
-    from .detect import get_detector
-    from .engine import RasterImageSource, discover_inputs, run_batch
+    from pathlib import Path
+    from .tasks.batch import run_batch_pipeline
 
-    arch_val = args.arch or settings.get("arch", "yolo12")
-    try:
-        inputs = discover_inputs(args.input_dir, args.glob)
-    except FileNotFoundError as e:
-        logger.error(f"[batch] {e}")
+    arch_val = args.arch or settings.get("arch", "ultralytics")
+    base = Path(args.input_dir)
+    if not base.exists():
+        logger.error(f"[batch] 输入目录不存在: {base}")
         return 2
+
+    # 提取支持的有效影像格式
+    valid_suffixes = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+    inputs = sorted(
+        str(p.resolve()) for p in base.glob(args.glob)
+        if p.is_file() and p.suffix.lower() in valid_suffixes
+    )
     if not inputs:
         logger.warning(f"[batch] 未匹配到输入文件: {args.input_dir} ({args.glob})")
         return 0
 
-    detector = get_detector(
-        arch_val,
-        weights=settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights")),
-        conf=float(settings.get("conf_threshold", 0.25)),
-        iou=float(settings.get("detect.iou_threshold", 0.55)),
-        imgsz=int(settings.get("model_input", 1024)),
-    )
-    res = run_batch(
-        inputs, detector,
-        acquisition_time=args.acquisition_time or "000000",
-        source_factory=lambda p: RasterImageSource(str(p)),
-        writer=writer,
-        run_kwargs={
-            "root_size": int(settings.get("root_size", 1024)),
-            "min_size": int(settings.get("min_size", 256)),
-        },
+    res = run_batch_pipeline(
+        inputs,
+        settings=settings,
+        arch=arch_val,
+        acquisition_time=args.acquisition_time,
     )
     logger.info(
         f"[batch] 完成: 成功={res.succeeded} 失败={res.failed} 总株数={res.total_trees} 耗时={res.elapsed_s:.2f}s"
