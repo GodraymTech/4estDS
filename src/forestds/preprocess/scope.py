@@ -85,7 +85,15 @@ def solve_joint_optimization(
     d_q95 = weighted_quantile(sizes_px, weights, large_quantile)
     sum_w = sum(weights)
 
-    log.debug(f"经验冠幅尺寸无偏估计: 样本数={len(sizes_px)}, 加权总体={sum_w:.1f}, 95分位数(大冠幅)={int(round(d_q95))}px")
+    mean_sz = float(np.mean(sizes_px))
+    median_sz = float(np.median(sizes_px))
+    min_sz = float(np.min(sizes_px))
+    max_sz = float(np.max(sizes_px))
+    std_sz = float(np.std(sizes_px))
+
+    log.info(f"采样冠幅统计量(px): 样本数={len(sizes_px)}, 最小值={min_sz:.1f}, 最大值={max_sz:.1f}, "
+        f"均值={mean_sz:.1f}, 中位数={median_sz:.1f}, 标准差={std_sz:.1f}, "
+        f"加权总体={sum_w:.1f}")
 
     area_full = width_full * height_full
     if tile_grid is None:
@@ -385,7 +393,7 @@ def run_scope_calibration(
             except (FileNotFoundError, ImportError) as e:
                 raise e
             except Exception as e:
-                log.exception("预推理异常")
+                log.opt(exception=False).error("预推理异常: {} — {}", type(e).__name__, e)
                 raise e
 
             # 阶段 5: 坐标回贴与跨尺度去重
@@ -403,17 +411,43 @@ def run_scope_calibration(
                 det_w = max(det.x2 - det.x1, det.y2 - det.y1)
                 global_boxes.append((gx1, gy1, gx2, gy2, det.score, d, det_w))
 
-            # 简单去重 (NMS-like)
+            # 简单去重 (NMS-like) 空间网格加速
             global_boxes.sort(key=lambda x: x[4], reverse=True)
+            
+            # 计算最大对角线并设计单元网格大小
+            diags = [((b[2] - b[0]) ** 2 + (b[3] - b[1]) ** 2) ** 0.5 for b in global_boxes]
+            max_diag = max(diags) if diags else 100.0
+            cell_size = max(max_diag * 1.5, 100.0)
+            
             keep_boxes = []
+            keep_grid = {}
+            
             for box in global_boxes:
+                cx = (box[0] + box[2]) / 2.0
+                cy = (box[1] + box[3]) / 2.0
+                gx = int(cx // cell_size)
+                gy = int(cy // cell_size)
+                
                 overlap = False
-                for kbox in keep_boxes:
-                    if compute_iou(box[:4], kbox[:4]) > iou_threshold:
-                        overlap = True
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        neighbor_key = (gx + dx, gy + dy)
+                        if neighbor_key in keep_grid:
+                            for kbox in keep_grid[neighbor_key]:
+                                if compute_iou(box[:4], kbox[:4]) > iou_threshold:
+                                    overlap = True
+                                    break
+                        if overlap:
+                            break
+                    if overlap:
                         break
+                
                 if not overlap:
                     keep_boxes.append(box)
+                    key = (gx, gy)
+                    if key not in keep_grid:
+                        keep_grid[key] = []
+                    keep_grid[key].append(box)
 
             # 阶段 6: 计算召回反卷积无偏统计权重
             for box in keep_boxes:

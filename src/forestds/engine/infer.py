@@ -126,7 +126,7 @@ def run_inference(
         for win, dets in zip(windows, detector.predict_batch(windows)):
             total_raw_predicts += len(dets)
             filtered_dets = dets.filter_score(config.conf_thr).items
-            log.debug("滑窗 (x={}, y={}, w={}, h={}) 模型原始预测数: {}, 置信度过滤数: {}", win.x, win.y, win.w, win.h, len(dets), len(filtered_dets))
+            # log.debug("滑窗 (x={}, y={}, w={}, h={}) 模型原始预测数: {}, 置信度过滤数: {}", win.x, win.y, win.w, win.h, len(dets), len(filtered_dets))
             for d in filtered_dets:
                 # 判断是否触及“内部边界”(非图像边缘)->可能被切断，作截断标记以备后处理降权
                 trunc = (

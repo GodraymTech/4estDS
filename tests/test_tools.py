@@ -267,6 +267,126 @@ def test_standardize_dataset_voc():
         assert lines2_sorted[1].strip() == "1 0.200000 0.300000 0.200000 0.200000"
 
 
+def test_prepare_inference_image_routing():
+    import rasterio
+    from forestds.preprocess.pipeline import prepare_inference_image
+    from forestds.config import load_settings
+
+    settings = load_settings()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+
+        # 1. 测试超大 JPG：应当直接路由至 physical_slice (静态切片)
+        large_jpg = tmp_path / "large.jpg"
+        # 尺寸大于 seed_window_size (2560)，我们建一个 3000x3000px 图像
+        Image.new("RGB", (3000, 3000)).save(large_jpg)
+        
+        res = prepare_inference_image(
+            str(large_jpg),
+            seed_window_size=2560,
+            settings=settings,
+            slice_action="none",
+            out_dir=tmp_path
+        )
+        assert res["mode"] == "physical_slice"
+        assert res["tiles_dir"] is not None
+        assert res["saved_count"] > 0
+
+        # 2. 测试 Tiled TIFF：由于天生 tiled，跳过 COG 转换，且默认动态路由至 on_the_fly
+        tiled_tiff = tmp_path / "tiled.tif"
+        with rasterio.open(
+            tiled_tiff,
+            'w',
+            driver='GTiff',
+            width=3000,
+            height=3000,
+            count=3,
+            dtype='uint8',
+            tiled=True,
+            blockxsize=256,
+            blockysize=256
+        ) as dst:
+            dst.write(np.zeros((3, 3000, 3000), dtype=np.uint8))
+            
+        res_tiled = prepare_inference_image(
+            str(tiled_tiff),
+            seed_window_size=2560,
+            settings=settings,
+            out_dir=tmp_path
+        )
+        # 必须是 on_the_fly 且跳过了 cog 后缀转换，直接使用原图路径
+        assert res_tiled["mode"] == "on_the_fly"
+        assert Path(res_tiled["image_path"]).name == "tiled.tif"
+
+        # 3. 测试 Normal (Striped) TIFF：在动态模式下必须自动强制执行 convert_to_cog，随后由于转换成功变为了 Tiled/COG，自动路由至 on_the_fly
+        normal_tiff = tmp_path / "normal.tif"
+        with rasterio.open(
+            normal_tiff,
+            'w',
+            driver='GTiff',
+            width=3000,
+            height=3000,
+            count=3,
+            dtype='uint8'
+        ) as dst:
+            dst.write(np.zeros((3, 3000, 3000), dtype=np.uint8))
+            
+        res_normal = prepare_inference_image(
+            str(normal_tiff),
+            seed_window_size=2560,
+            settings=settings,
+            out_dir=tmp_path
+        )
+        # 必须触发了自动强制 COG 转换，新路径应该带有 _cog.tif 后缀，模式路由至 on_the_fly
+        assert res_normal["mode"] == "on_the_fly"
+        assert Path(res_normal["image_path"]).name == "normal_cog.tif"
+
+
+def test_solve_joint_optimization_stats():
+    from forestds.preprocess.scope import solve_joint_optimization
+    # 模拟非空样本输入
+    sizes = [10.0, 20.0, 30.0, 40.0, 50.0]
+    weights = [1.0, 1.0, 1.0, 1.0, 1.0]
+    best_T, best_r = solve_joint_optimization(
+        sizes,
+        weights,
+        width_full=10000,
+        height_full=10000,
+        tile_grid=[512, 1024],
+        overlap_ratios=[0.1, 0.2]
+    )
+    assert best_T in (512, 1024)
+    assert 0.0 < best_r < 0.5
+
+def test_spatial_grid_wbf_and_nms():
+    import time
+    from forestds.postprocess.wbf import fuse
+    
+    # 产生 2000 个随机框，中心分布在 50000x50000 区域内
+    np.random.seed(42)
+    boxes = []
+    scores = []
+    labels = []
+    
+    for _ in range(2000):
+        cx = np.random.uniform(0.0, 50000.0)
+        cy = np.random.uniform(0.0, 50000.0)
+        w = np.random.uniform(20.0, 100.0)
+        h = np.random.uniform(20.0, 100.0)
+        boxes.append((cx - w/2, cy - h/2, cx + w/2, cy + h/2))
+        scores.append(float(np.random.uniform(0.3, 0.95)))
+        labels.append("tree")
+        
+    t0 = time.perf_counter()
+    fused_boxes = fuse(boxes, scores, labels=labels, weights=scores, iou_thr=0.55)
+    t_fused = time.perf_counter() - t0
+    
+    print(f"\n[WBF Benchmark] 融合 2000 个大图物理框耗时: {t_fused:.4f}秒，得到融合框: {len(fused_boxes)}个")
+    assert t_fused < 0.1, f"WBF performance test failed: {t_fused}s >= 0.1s"
+    assert len(fused_boxes) > 0
+
+
 if __name__ == "__main__":
     print("Running test_find_label_file...")
     test_find_label_file()
@@ -282,6 +402,11 @@ if __name__ == "__main__":
     test_resolve_weights_path()
     print("Running test_standardize_dataset_voc...")
     test_standardize_dataset_voc()
+    print("Running test_prepare_inference_image_routing...")
+    test_prepare_inference_image_routing()
+    print("Running test_solve_joint_optimization_stats...")
+    test_solve_joint_optimization_stats()
+    test_spatial_grid_wbf_and_nms()
     print("All tests passed successfully!")
 
 

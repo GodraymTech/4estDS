@@ -84,10 +84,10 @@ def export_tract_to_file(
     if not target_run_id:
         target_run_id = reader.latest_run_for_tract(target_tract_id, url=db_url)
 
-    # 3. 拉取观测记录
-    observations = reader.fetch_observations(
+    # 3. 拉取观测记录，强制转为 list 防止 generator 被多次消费
+    observations: list[dict] = list(reader.fetch_observations(
         tract_id=target_tract_id, run_id=target_run_id, url=db_url
-    )
+    ))
     if not observations:
         log.warning(f"地块 {target_tract_id} (run_id={target_run_id}) 暂无观测树木记录。将导出空数据集。")
 

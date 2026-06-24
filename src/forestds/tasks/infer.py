@@ -292,6 +292,8 @@ def run_infer_pipeline(
                 tract_id=tract_id, run_id=run_id, fmt=resolved_export_fmt,
                 out_path=paths.outputs_infer_dir() / "vectors", db_url=db_url,
             )
+            if not isinstance(exp, dict):
+                raise TypeError(f"export_tract_to_file 返回了非预期类型 {type(exp).__name__}，期望 dict")
             export_path = exp["out_path"]
             if exp.get("fallback"):
                 log.warning("导出降级: {}", exp["fallback"])

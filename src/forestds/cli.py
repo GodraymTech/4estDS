@@ -105,7 +105,9 @@ def cmd_infer(
             return 1
         except Exception as e:
             writer.finish_run_log(run_id, "failed", error=str(e), url=settings.get("url", None))
-            logger.exception("[infer] 失败: {}", e)
+            # 使用 opt(exception=False) 避免 loguru _better_exceptions 尝试 repr 推理帧中的
+            # 大型 numpy 数组（如 71k 检测框），该操作会导致 C 层段错误。
+            logger.opt(exception=False).error("[infer] 失败: {} — {}", type(e).__name__, e)
             return 1
 
         logger.info(
@@ -157,11 +159,11 @@ def cmd_preprocess(
     out_dir: Optional[str] = Option(None, "--out-dir", "--out", help="切片输出目录 (默认 outputs/YYYYmmdd_HHMM__run_id__taskType/preprocess )"),
     tile_size: Optional[int] = Option(None, "--tile-size", help="手动指定切片边长(不指定则自适应)"),
     overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="手动指定重叠率(0.0~0.5，不指定则自适应)"),
+    action: Optional[str] = Option(None, "--action", help="切片行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)"),
+    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否在自标定样本图上绘制检测框（用于调试）"),
     slice: Optional[bool] = Option(None, "--slice/--no-slice", help="是否激活切片功能"),
     cog: Optional[bool] = Option(None, "--cog/--no-cog", help="是否激活 COG 转换功能"),
     cog_out: Optional[str] = Option(None, "--cog-out", help="COG 转换输出影像路径(默认同级 *_cog.tif)"),
-    action: Optional[str] = Option(None, "--action", help="切片行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)"),
-    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否在自标定样本图上绘制检测框（用于调试）"),
 ) -> int:
     settings, run_id = _bootstrap(task_type="preprocess")
     if draw_box is not None:
@@ -599,11 +601,11 @@ def cmd_standardize_dataset(
         return 1
 
 
-@tool_app.command("crop-tiff", help="在 TIFF 影像中进行中心裁剪或随机无重叠且控制 nodata 占比的裁剪")
+@tool_app.command("crop-tiff", help="从 TIFF 影像手动抠图 【若为训练/推理准备大批量裁剪图, 请使用「preprocess」子命令】")
 def cmd_crop_tiff(
     image: str = Argument(..., help="输入的 TIFF 影像路径"),
     dest: Optional[str] = Option(None, "--dest", "-d", help="输出目标目录，若不指定，默认设为源图像同级 _crops 目录"),
-    num_crops: int = Option(3, "--num-crops", "-n", help="裁剪张数。0 表示只从中心抠一张，大于 0 表示以随机方式抠 n 张无重叠图像"),
+    num_crops: int = Option(3, "--num-crops", "-n", help="裁剪张数。⚠️: 0 表示只从大图中心裁一张"),
     size: int = Option(5000, "--size", "-s", help="裁剪边长大小 (像素)"),
     nodata_tolerance: float = Option(0.05, "--nodata-tolerance", "-t", help="允许的 nodata 占比上限 (0.0 - 1.0)"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),

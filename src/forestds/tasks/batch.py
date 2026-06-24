@@ -169,7 +169,7 @@ def run_batch_pipeline(
         except Exception as e:
             item.error = str(e)
             summary.failed += 1
-            log.exception("【批量调度】[{}/{}] 推理失败: {}，原因: {}", idx, len(valid_paths), image_str, e)
+            log.opt(exception=False).error("【批量调度】[{}/{}] 推理失败: {}，原因: {} — {}", idx, len(valid_paths), image_str, type(e).__name__, e)
         
         elapsed = time.time() - t0
         log.info(

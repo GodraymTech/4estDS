@@ -19,7 +19,7 @@ db:
 preprocess:
   # COG (Cloud Optimized GeoTIFF) 检查与转换配置
   cog:
-    enable: true               # 🔴 
+    enable: true                # 是否允许 COG 自动转换（注意：对于普通非分块 TIFF 大图在动态切片下会自动强制启用转换，以确保随机读性能）
     out_suffix: "_cog.tif"      # 转换后的输出后缀
     block_size: 512             # COG 瓦片大小 (通常为 512 或 256)
     compress: "deflate"         # 压缩算法 (deflate / lzw)
@@ -30,13 +30,13 @@ preprocess:
   slice:
     enable: true                # 推理流水线里，必须为true
     action: "none"              # 🔴 切片执行行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)
-    default_tile: 640           # 默认切片大小            【scope.enable=false时生效】
-    default_overlap: 0.2        # 默认重叠率 (0.0 - 0.5)  【scope.enable=false时生效】
+    default_tile: 1024           # 默认切片大小            
+    default_overlap: 0.1        # 默认重叠率 (0.0 - 0.5)
     save_quality: 95            # 切片导出 JPEG 瓦片时的压缩质量
 
     # SCOPE 预推理自适应求解切片参数
     scope:
-      enable: true              # 对 TIFF 影像是否启用 SCOPE 自标定，False 则用默认/先验参数
+      enable: false              # 对 TIFF 影像是否启用 SCOPE 自标定，False 则用默认/先验参数
       seed_window_size: 2560    # 采样种子窗口边长
       sample_delta: 2           # 每一轮采样追加的种子窗口数
       sample_budget: 8          # 采样种子窗口上限数目
@@ -49,20 +49,20 @@ preprocess:
       incomplete_border_px: 2     # 非完整树贴边判定边界距离（像素）
       tile_grid: [512, 640, 768, 896, 1024, 1280, 1536, 2048] # 寻优边长候选集
       overlap_grid: [0.1, 0.15, 0.2, 0.25, 0.3]              # 寻优重叠率候选集
-      draw_box: false           # (调试)查看预推理的效果
+      draw_box: true           # (调试)查看预推理的效果
 
 detect:
   arch: ultralytics       # 默认使用通用 ultralytics 后端 (自动支持 YOLO 和 RT-DETR 权重)
   conf_threshold: 0.25
   iou_threshold: 0.6
   model_input: 640        # 模型输入边长(像素)
-  batch_size: 80          # 🔴 
+  batch_size: 128          # 🔴 
   verbose: true           # 推理时是否输出 ultralytics 自身的详细推理日志
   models:
     ultralytics:
-      # weights: "m03"
+      weights: "m03"
       # weights: "rtdetr-l.pt"
-      weights: ".4estDS/outputs/20260624_1318_290e5_train/weights/last.pt"
+      # weights: ".4estDS/outputs/20260624_1318_290e5_train/weights/last.pt"
 
 postprocess:
   draw_box: true                 # 🔴 是否在原图(或原图中心5000*5000的子图）上绘制检测框, 并保存

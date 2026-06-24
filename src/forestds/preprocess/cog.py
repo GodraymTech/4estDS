@@ -149,7 +149,7 @@ def convert_to_cog(
         log.info(f"COG 转换完成: {out_p.name}")
         return True
     except Exception as e:
-        log.exception(f"转换 COG 失败: {e}")
+        log.opt(exception=False).error(f"转换 COG 失败: {type(e).__name__} — {e}")
         if out_p.exists():
             try:
                 os.remove(out_p)

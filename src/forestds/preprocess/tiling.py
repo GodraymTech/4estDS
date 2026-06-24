@@ -116,7 +116,7 @@ def execute_slicing(
                 saved_count += 1
 
     except Exception as e:
-        log.exception(f"静态切片落盘时发生异常: {e}")
+        log.opt(exception=False).error(f"静态切片落盘时发生异常: {type(e).__name__} — {e}")
     finally:
         if source is not None:
             try:
