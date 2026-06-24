@@ -154,7 +154,7 @@ def cmd_infer(
 @app.command("preprocess", help="影像预处理(自适应切片与 COG 转换)")
 def cmd_preprocess(
     image: str = Argument(..., help="输入影像/图像路径(支持 TIFF/PNG/JPG 等)"),
-    out_dir: Optional[str] = Option(None, "--out-dir", "--out", help="切片输出目录 (默认 <home>/outputs/<YYmmdd_HHMM>_<run_id>/preprocess/tiles__xxx/)"),
+    out_dir: Optional[str] = Option(None, "--out-dir", "--out", help="切片输出目录 (默认 outputs/YYYYmmdd_HHMM__run_id__taskType/preprocess )"),
     tile_size: Optional[int] = Option(None, "--tile-size", help="手动指定切片边长(不指定则自适应)"),
     overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="手动指定重叠率(0.0~0.5，不指定则自适应)"),
     slice: Optional[bool] = Option(None, "--slice/--no-slice", help="是否激活切片功能"),
@@ -573,6 +573,54 @@ def cmd_draw_dsm(
     from .utils import draw_dsm_main
     return draw_dsm_main(image, dsm)
 
+
+@tool_app.command("standardize-ds", help="将数据集目录改造成适合 Ultralytics YOLO 训练的新目录结构")
+def cmd_standardize_dataset(
+    source: str = Argument(..., help="输入的数据集源目录"),
+    dest: Optional[str] = Option(None, "--dest", "-d", help="规整规范化后的输出目标目录，若不指定，默认设为源目录附加 _standard 后缀"),
+    format: str = Option("auto", "--format", "-f", help="数据集原始格式 (auto/YOLO/VOC/COCO)"),
+    split_ratio: float = Option(0.8, "--split-ratio", "-r", help="无预先划分的数据集 train 占比，默认 0.8 (即 8:2)"),
+    workers: Optional[int] = Option(None, "--workers", "-w", help="并行工作进程数，默认自动匹配 CPU 核心数"),
+    log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
+) -> int:
+    settings, _ = _bootstrap(level=log_level, task_type="standardize-ds", to_file=False)
+    from .utils import standardize_ds
+    try:
+        standardize_ds(
+            source_dir=source,
+            dest_dir=dest,
+            dataset_format=format,
+            split_ratio=split_ratio,
+            num_workers=workers
+        )
+        return 0
+    except Exception as e:
+        logger.exception(f"执行 standardize-ds 失败: {e}")
+        return 1
+
+
+@tool_app.command("crop-tiff", help="在 TIFF 影像中进行中心裁剪或随机无重叠且控制 nodata 占比的裁剪")
+def cmd_crop_tiff(
+    image: str = Argument(..., help="输入的 TIFF 影像路径"),
+    dest: Optional[str] = Option(None, "--dest", "-d", help="输出目标目录，若不指定，默认设为源图像同级 _crops 目录"),
+    num_crops: int = Option(3, "--num-crops", "-n", help="裁剪张数。0 表示只从中心抠一张，大于 0 表示以随机方式抠 n 张无重叠图像"),
+    size: int = Option(5000, "--size", "-s", help="裁剪边长大小 (像素)"),
+    nodata_tolerance: float = Option(0.05, "--nodata-tolerance", "-t", help="允许的 nodata 占比上限 (0.0 - 1.0)"),
+    log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
+) -> int:
+    settings, _ = _bootstrap(level=log_level, task_type="crop-tiff", to_file=False)
+    from .utils import crop_tiff_main
+    try:
+        return crop_tiff_main(
+            input_path=image,
+            output_dir=dest,
+            num_crops=num_crops,
+            size=size,
+            nodata_tolerance=nodata_tolerance
+        )
+    except Exception as e:
+        logger.exception(f"执行 crop-tiff 失败: {e}")
+        return 1
 
 
 app.add_typer(tool_app, name="tool")

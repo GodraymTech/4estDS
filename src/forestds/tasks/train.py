@@ -22,6 +22,8 @@ from ultralytics import YOLO
 from ultralytics.data.converter import convert_coco
 from forestds import paths
 from forestds.db import writer
+from forestds.utils.annotations import parse_voc_file
+from ultralytics.utils.ops import xyxy2xywhn
 
 # 启用 faulthandler 以在 segfault 时输出 Python traceback
 import faulthandler as _faulthandler
@@ -81,9 +83,6 @@ def patch_torch_save():
     except Exception as e:
         logger.warning(f"应用序列化兼容性补丁失败: {e}")
 
-# 执行补丁
-patch_torch_save()
-
 # 支持的图片格式后缀
 SUPPORTED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
@@ -128,35 +127,7 @@ def process_and_link_image(src: Path, dst: Path) -> None:
             pass
 
 
-def parse_voc_xml(xml_path: Path) -> Tuple[int, int, List[Tuple[str, float, float, float, float]]]:
-    """解析 VOC 格式的 XML 标注文件。
-    
-    返回:
-        width, height, list of (class_name, x_center, y_center, bbox_w, bbox_h)
-    """
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
 
-    size_node = root.find("size")
-    if size_node is not None:
-        width = int(size_node.findtext("width", "0"))
-        height = int(size_node.findtext("height", "0"))
-    else:
-        width, height = 0, 0
-
-    objects = []
-    for obj in root.findall("object"):
-        name = obj.findtext("name")
-        bndbox = obj.find("bndbox")
-        if not name or bndbox is None:
-            continue
-        xmin = float(bndbox.findtext("xmin"))
-        ymin = float(bndbox.findtext("ymin"))
-        xmax = float(bndbox.findtext("xmax"))
-        ymax = float(bndbox.findtext("ymax"))
-        objects.append((name, xmin, ymin, xmax, ymax))
-
-    return width, height, objects
 
 
 def find_image_for_xml(xml_path: Path, search_dirs: List[Path]) -> Path | None:
@@ -222,7 +193,7 @@ def convert_voc_dataset(
         
         # 预先扫描以确定所有的 class names
         try:
-            _, _, objects = parse_voc_xml(xml_path)
+            _, _, objects = parse_voc_file(xml_path)
             for obj in objects:
                 classes_set.add(obj[0])
         except Exception as e:
@@ -252,7 +223,8 @@ def convert_voc_dataset(
 
             # 解析 XML 并写入 YOLO 格式的 txt
             try:
-                width, height, objects = parse_voc_xml(xml_path)
+                import numpy as np
+                width, height, objects = parse_voc_file(xml_path)
                 # 如果 XML 中长宽缺失，从图像中读取
                 if width <= 0 or height <= 0:
                     from PIL import Image
@@ -260,28 +232,20 @@ def convert_voc_dataset(
                         width, height = pil_img.size
 
                 txt_path = lbl_out / f"{xml_path.stem}.txt"
+                
+                # 过滤出有效的 bounding boxes
+                valid_objects = []
+                for class_name, xmin, ymin, xmax, ymax in objects:
+                    if class_name in class_to_id:
+                        valid_objects.append((class_to_id[class_name], xmin, ymin, xmax, ymax))
+                
                 with open(txt_path, "w", encoding="utf-8") as f:
-                    for class_name, xmin, ymin, xmax, ymax in objects:
-                        class_id = class_to_id[class_name]
-                        # 转换坐标到 0-1 范围
-                        w_box = xmax - xmin
-                        h_box = ymax - ymin
-                        x_center = xmin + w_box / 2.0
-                        y_center = ymin + h_box / 2.0
-
-                        # 归一化
-                        x_center /= width
-                        y_center /= height
-                        w_box /= width
-                        h_box /= height
-
-                        # 边界裁剪防溢出
-                        x_center = max(0.0, min(1.0, x_center))
-                        y_center = max(0.0, min(1.0, y_center))
-                        w_box = max(0.0, min(1.0, w_box))
-                        h_box = max(0.0, min(1.0, h_box))
-
-                        f.write(f"{class_id} {x_center:.6f} {y_center:.6f} {w_box:.6f} {h_box:.6f}\n")
+                    if valid_objects:
+                        xyxy = np.array([[obj[1], obj[2], obj[3], obj[4]] for obj in valid_objects], dtype=np.float64)
+                        # 使用 xyxy2xywhn 矢量化转换并裁剪防溢出
+                        xywhn = xyxy2xywhn(xyxy, w=width, h=height, clip=True)
+                        for (class_id, _, _, _, _), box in zip(valid_objects, xywhn):
+                            f.write(f"{class_id} {box[0]:.6f} {box[1]:.6f} {box[2]:.6f} {box[3]:.6f}\n")
             except Exception as e:
                 logger.error(f"处理 VOC 数据样本失败 {xml_path.name}: {e}")
 
@@ -626,6 +590,9 @@ def run_train(
     
     解析和规整数据集，装载配置文件参数，直接调用官方 Ultralytics YOLO 进行训练。
     """
+    # 动态应用 CPython 3.12 序列化补丁以支持 YOLO 模型保存
+    patch_torch_save()
+
     # 强制打通并重置 ultralytics 日志通道，使之能向上传播并写入项目日志文件
     import logging
     ultra_log = logging.getLogger("ultralytics")

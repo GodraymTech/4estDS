@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 from loguru import logger as log
 
 from ..geo import resolve_geo
+from .annotations import parse_voc_file, parse_yolo_file, parse_geojson_file
 
 
 @contextlib.contextmanager
@@ -50,34 +51,38 @@ def silence_inference_env():
 
 
 def find_label_file(image_path: str) -> str:
-    """自动匹配搜索图像对应的标注文件（同目录或 YOLO 结构）。"""
-    img_path = Path(image_path)
-    if not img_path.exists():
-        raise FileNotFoundError(f"输入图像文件不存在: {image_path}")
+    """给定图像路径，寻找同级目录下或同名 labels 目录下的同名标注文件。
 
-    stem = img_path.stem
-    parent = img_path.parent
+    按照同级 -> 对应 labels/ 的顺序，以及 .txt -> .xml -> .geojson -> .json 的优先级搜索。
+    如果没找到，则抛出 FileNotFoundError。
+    """
+    path = Path(image_path)
+    stem = path.stem
+    parent = path.parent
 
-    # 1. 尝试同目录下同名文件
-    for ext in [".txt", ".xml", ".geojson", ".json"]:
-        lbl = parent / f"{stem}{ext}"
-        if lbl.exists():
-            log.info("同目录自动匹配到标注文件: {}", lbl)
-            return str(lbl)
+    # 构造待查目录列表
+    search_dirs = [parent]
+    
+    # 如果当前路径在 images/ 目录下，寻找对应的 labels/ 目录
+    # 比如: /path/to/images/train/1.jpg -> /path/to/labels/train/
+    if "images" in parent.parts:
+        parts = list(parent.parts)
+        idx = parts.index("images")
+        parts[idx] = "labels"
+        label_dir = Path(*parts)
+        search_dirs.append(label_dir)
 
-    # 2. 尝试 YOLO 经典数据集结构：.../images/<split>/<stem>.<ext> -> .../labels/<split>/<stem>.txt
-    try:
-        parts = list(img_path.parts)
-        if "images" in parts:
-            idx = len(parts) - 1 - parts[::-1].index("images")
-            parts[idx] = "labels"
-            parts[-1] = f"{stem}.txt"
-            lbl = Path(*parts)
-            if lbl.exists():
-                log.info("自动匹配到标注文件: {}", lbl)
-                return str(lbl)
-    except Exception:
-        pass
+    for d in search_dirs:
+        if not d.exists():
+            continue
+        for ext in [".txt", ".xml", ".geojson", ".json"]:
+            lbl_file = d / f"{stem}{ext}"
+            if lbl_file.exists():
+                return str(lbl_file)
+            # 兼容大写后缀
+            lbl_file_upper = d / f"{stem}{ext.upper()}"
+            if lbl_file_upper.exists():
+                return str(lbl_file_upper)
 
     raise FileNotFoundError(
         f"未能在同级目录或对应 labels/ 下找到与图像 {image_path} stem 为 '{stem}' 的匹配标注文件（支持 .txt, .xml, .geojson, .json）。"
@@ -96,88 +101,24 @@ def load_annotations(lbl_path: str, img_w: int, img_h: int, image_path: str) -> 
     name_to_id = {}
 
     if suffix == ".txt":
-        # YOLO 格式
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) < 5:
-                    continue
-                try:
-                    cls_id = int(parts[0])
-                    xc, yc, w, h = map(float, parts[1:5])
-                    x1 = (xc - w / 2.0) * img_w
-                    y1 = (yc - h / 2.0) * img_h
-                    x2 = (xc + w / 2.0) * img_w
-                    y2 = (yc + h / 2.0) * img_h
-                    boxes.append((cls_id, x1, y1, x2, y2))
-                except Exception:
-                    pass
+        boxes = parse_yolo_file(path, img_w, img_h)
     elif suffix == ".xml":
-        # VOC 格式
         try:
-            tree = ET.parse(path)
-            root = tree.getroot()
-            for obj in root.findall("object"):
-                name = obj.findtext("name", "0")
+            _, _, objects = parse_voc_file(path)
+            for name, xmin, ymin, xmax, ymax in objects:
                 cls_id = int(name) if name.isdigit() else name_to_id.setdefault(name, len(name_to_id))
-                bndbox = obj.find("bndbox")
-                if bndbox is None:
-                    continue
-                xmin = float(bndbox.findtext("xmin"))
-                ymin = float(bndbox.findtext("ymin"))
-                xmax = float(bndbox.findtext("xmax"))
-                ymax = float(bndbox.findtext("ymax"))
                 boxes.append((cls_id, xmin, ymin, xmax, ymax))
         except Exception as e:
             log.error("解析 VOC XML 标注失败 {}: {}", lbl_path, e)
     elif suffix in (".geojson", ".json"):
-        # GeoJSON 格式
         try:
-            # 尝试获取仿射变换信息
             transform = None
             try:
                 geo = resolve_geo(image_path)
                 transform = geo.transform
             except Exception:
                 pass
-
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            features = data.get("features", [])
-            for feat in features:
-                geom = feat.get("geometry", {})
-                props = feat.get("properties", {})
-                
-                # 类别处理，只取数字
-                cls_name = str(props.get("class_id", props.get("label", props.get("class", "0"))))
-                cls_id = int(cls_name) if cls_name.isdigit() else name_to_id.setdefault(cls_name, len(name_to_id))
-
-                gtype = geom.get("type")
-                coords = geom.get("coordinates", [])
-                
-                polys = []
-                if gtype == "Polygon" and coords:
-                    polys.append(coords[0])
-                elif gtype == "MultiPolygon":
-                    for poly in coords:
-                        if poly:
-                            polys.append(poly[0])
-
-                for poly in polys:
-                    pts = np.array(poly) # (N, 2)
-                    if transform:
-                        px_pts = []
-                        for pt in pts:
-                            col, row = transform.world_to_pixel(pt[0], pt[1])
-                            px_pts.append([col, row])
-                        px_pts = np.array(px_pts)
-                    else:
-                        px_pts = pts
-                    
-                    x1, y1 = np.min(px_pts, axis=0)
-                    x2, y2 = np.max(px_pts, axis=0)
-                    boxes.append((cls_id, x1, y1, x2, y2))
+            boxes = parse_geojson_file(path, transform=transform, name_to_id=name_to_id)
         except Exception as e:
             log.error("解析 GeoJSON 标注失败 {}: {}", lbl_path, e)
     else:

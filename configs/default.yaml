@@ -60,8 +60,9 @@ detect:
   verbose: true           # 推理时是否输出 ultralytics 自身的详细推理日志
   models:
     ultralytics:
-      weights: "m03"
+      # weights: "m03"
       # weights: "rtdetr-l.pt"
+      weights: ".4estDS/outputs/20260624_1318_290e5_train/weights/last.pt"
 
 postprocess:
   draw_box: true                 # 🔴 是否在原图(或原图中心5000*5000的子图）上绘制检测框, 并保存

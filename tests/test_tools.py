@@ -195,6 +195,77 @@ def test_resolve_weights_path():
             dummy_model.unlink()
 
 
+def test_standardize_dataset_voc():
+    import shutil
+    from forestds.utils.standardize_dataset import standardize_ds
+    from forestds.tasks.train import convert_voc_dataset
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        src_dir = tmp_path / "src_voc"
+        src_dir.mkdir()
+        
+        # 1. 创建假的 VOC 数据集
+        # 图片
+        img_p = src_dir / "img1.jpg"
+        Image.new("RGB", (100, 100)).save(img_p)
+        
+        # XML 标注
+        xml_p = src_dir / "img1.xml"
+        root = ET.Element("annotation")
+        size = ET.SubElement(root, "size")
+        ET.SubElement(size, "width").text = "100"
+        ET.SubElement(size, "height").text = "100"
+        
+        obj1 = ET.SubElement(root, "object")
+        ET.SubElement(obj1, "name").text = "tree"
+        bnd1 = ET.SubElement(obj1, "bndbox")
+        ET.SubElement(bnd1, "xmin").text = "10"
+        ET.SubElement(bnd1, "ymin").text = "20"
+        ET.SubElement(bnd1, "xmax").text = "30"
+        ET.SubElement(bnd1, "ymax").text = "40"
+        
+        obj2 = ET.SubElement(root, "object")
+        ET.SubElement(obj2, "name").text = "building"
+        bnd2 = ET.SubElement(obj2, "bndbox")
+        ET.SubElement(bnd2, "xmin").text = "50"
+        ET.SubElement(bnd2, "ymin").text = "50"
+        ET.SubElement(bnd2, "xmax").text = "70"
+        ET.SubElement(bnd2, "ymax").text = "70"
+        
+        ET.ElementTree(root).write(xml_p)
+        
+        # 2. 测试 standardize_ds
+        dest_dir = tmp_path / "dst_yolo_std"
+        standardize_ds(source_dir=src_dir, dest_dir=dest_dir, dataset_format="VOC", split_ratio=1.0)
+        
+        # 验证输出结构和内容
+        # 因为 split_ratio=1.0，全部为 train
+        txt_out = dest_dir / "labels" / "train" / "img1.txt"
+        assert txt_out.exists()
+        
+        with open(txt_out, "r") as f:
+            lines = f.readlines()
+        assert len(lines) == 2
+        
+        lines_sorted = sorted(lines)
+        assert lines_sorted[0].strip() == "0 0.600000 0.600000 0.200000 0.200000"
+        assert lines_sorted[1].strip() == "1 0.200000 0.300000 0.200000 0.200000"
+        
+        # 3. 测试 tasks/train.py 中的 convert_voc_dataset
+        dest_dir2 = tmp_path / "dst_yolo_train"
+        id_to_class = convert_voc_dataset(data_dir=src_dir, dest_dir=dest_dir2, split_ratio=1.0)
+        
+        assert id_to_class == {0: "building", 1: "tree"}
+        txt_out2 = dest_dir2 / "labels" / "train" / "img1.txt"
+        assert txt_out2.exists()
+        with open(txt_out2, "r") as f:
+            lines2 = f.readlines()
+        assert len(lines2) == 2
+        lines2_sorted = sorted(lines2)
+        assert lines2_sorted[0].strip() == "0 0.600000 0.600000 0.200000 0.200000"
+        assert lines2_sorted[1].strip() == "1 0.200000 0.300000 0.200000 0.200000"
+
 
 if __name__ == "__main__":
     print("Running test_find_label_file...")
@@ -209,6 +280,8 @@ if __name__ == "__main__":
     test_estimate_canopy_contours()
     print("Running test_resolve_weights_path...")
     test_resolve_weights_path()
+    print("Running test_standardize_dataset_voc...")
+    test_standardize_dataset_voc()
     print("All tests passed successfully!")
 
 
