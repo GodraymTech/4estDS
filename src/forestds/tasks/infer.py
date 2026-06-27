@@ -29,6 +29,7 @@ def run_infer_pipeline(
     arch: str | None = None,
     acquisition_time: str | None = None,
     location: str | None = None,
+    tile_size: int | None = None,
     overlap_rate: float | None = None,
     chm: str | None = None,
     dsm: str | None = None,
@@ -96,12 +97,13 @@ def run_infer_pipeline(
     import numpy as np
 
     # 2.1 委托预处理模块执行所有前置逻辑 (读尺寸、检查COG、自适应寻优、静态切片落盘)
-    slice_action = settings.get("preprocess.slice.action", "slice")
-    seed_window_size = int(settings.get("preprocess.slice.scope.seed_window_size", 2560))
+    slice_action = settings.get("preprocess.action", "dynamic")
+    seed_window_size = int(settings.get("preprocess.scope.seed_window_size", 2560))
     prep = prepare_inference_image(
         image_path=image_path,
         slice_action=slice_action,
         seed_window_size=seed_window_size,
+        tile_size=tile_size,
         overlap_rate=overlap_rate,
         settings=settings,
         run_id=run_id,

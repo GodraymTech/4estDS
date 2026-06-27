@@ -11,6 +11,7 @@ import random
 from pathlib import Path
 import numpy as np
 import rasterio
+from PIL import Image
 from rasterio.windows import Window, transform as w_transform
 from loguru import logger
 
@@ -37,12 +38,37 @@ def get_nodata_ratio(src: rasterio.DatasetReader, window: Window, nodata_val: fl
         return float(np.mean(data == 0))
 
 
+def numpy_to_rgb_image(data: np.ndarray) -> Image.Image:
+    """将多通道或单通道的 numpy array 转换为 uint8 的 PIL RGB Image，保留原始色彩与数值。"""
+    # 期望输入为 (channels, height, width)
+    if data.ndim == 3:
+        if data.shape[0] >= 3:
+            # 取前三个通道，假设为 RGB
+            rgb = data[:3, :, :]
+        else:
+            # 复制单通道
+            rgb = np.repeat(data[0:1, :, :], 3, axis=0)
+    elif data.ndim == 2:
+        rgb = np.repeat(data[np.newaxis, :, :], 3, axis=0)
+    else:
+        raise ValueError(f"不支持的数据维度: {data.ndim}")
+        
+    # 转为 (height, width, channels)
+    rgb = np.transpose(rgb, (1, 2, 0))
+    
+    # 仅填充 NaN 值，直接转换为 uint8
+    rgb = np.nan_to_num(rgb, nan=0.0)
+    rgb_uint8 = rgb.astype(np.uint8)
+    return Image.fromarray(rgb_uint8)
+
+
 def crop_tiff_main(
     input_path: str | Path,
     output_dir: str | Path | None = None,
     num_crops: int = 3,
     size: int = 5000,
     nodata_tolerance: float = 0.05,
+    vector_path: str | Path | None = None,
 ) -> int:
     """TIFF 影像裁剪主入口函数。"""
     input_path = Path(input_path).resolve()
@@ -55,7 +81,10 @@ def crop_tiff_main(
         return 1
 
     if output_dir is None:
-        output_dir = input_path.parent / f"{input_path.stem}_crops"
+        if vector_path is not None:
+            output_dir = input_path.parent / f"{input_path.stem}_vector_crops"
+        else:
+            output_dir = input_path.parent / f"{input_path.stem}_crops"
     else:
         output_dir = Path(output_dir).resolve()
         
@@ -69,6 +98,83 @@ def crop_tiff_main(
             nodata_val = src.nodata
             logger.info(f"源图像规格: {width}x{height}, 波段数: {src.count}, Nodata值: {nodata_val}")
             
+            # 模式 C: 按图索骥 (通过矢量文件裁剪)
+            if vector_path is not None:
+                vector_path = Path(vector_path).resolve()
+                if not vector_path.exists():
+                    logger.error(f"矢量文件不存在: {vector_path}")
+                    return 1
+                
+                try:
+                    import geopandas as gpd
+                    from shapely.geometry import box
+                    from rasterio.windows import from_bounds
+                except ImportError as e:
+                    logger.error(f"缺失必要依赖以运行矢量裁剪模式: {e}. 请确保安装了 geo 扩展。")
+                    return 1
+                    
+                try:
+                    gdf = gpd.read_file(vector_path)
+                except Exception as e:
+                    logger.error(f"读取矢量文件失败: {e}")
+                    return 1
+                    
+                if gdf.empty:
+                    logger.error("矢量文件没有包含有效的几何要素。")
+                    return 1
+                    
+                # 校验坐标系一致性
+                if gdf.crs != src.crs:
+                    logger.error(f"坐标系不一致！矢量文件 CRS 为 {gdf.crs}，而 TIFF 影像 CRS 为 {src.crs}。")
+                    return 1
+                    
+                # 校验至少有交集
+                img_box = box(*src.bounds)
+                intersects_mask = gdf.intersects(img_box)
+                gdf_matched = gdf[intersects_mask]
+                
+                if gdf_matched.empty:
+                    logger.error("矢量要素与影像范围没有任何交集，匹配失败。")
+                    return 1
+                    
+                logger.info(f"矢量文件与影像匹配成功。共发现 {len(gdf)} 个要素，其中有 {len(gdf_matched)} 个与图像相交。")
+                
+                success_count = 0
+                for idx, row in gdf_matched.iterrows():
+                    geom = row.geometry
+                    if geom.is_empty:
+                        continue
+                        
+                    minx, miny, maxx, maxy = geom.bounds
+                    win = from_bounds(minx, miny, maxx, maxy, transform=src.transform)
+                    win_round = win.round_lengths().round_offsets()
+                    img_win = Window(0, 0, width, height)
+                    final_win = img_win.intersection(win_round)
+                    
+                    if final_win.width <= 0 or final_win.height <= 0:
+                        logger.warning(f"要素 {idx} 的裁剪窗口无效或在图像范围外，跳过。")
+                        continue
+                        
+                    try:
+                        data = src.read(window=final_win)
+                        img = numpy_to_rgb_image(data)
+                        
+                        out_filename = f"{input_path.stem}_crop_{idx}_{final_win.width}x{final_win.height}.jpg"
+                        output_path = output_dir / out_filename
+                        
+                        img.save(output_path, format="JPEG", quality=100)
+                        logger.info(f"导出序号 {success_count+1} , 尺寸px: {final_win.width}x{final_win.height}")
+                        success_count += 1
+                    except Exception as e:
+                        logger.error(f"导出要素 {idx} 的裁剪图失败: {e}")
+                        
+                if success_count == 0:
+                    logger.error("未能成功导出任何矢量裁剪样本。")
+                    return 1
+                logger.info(f"✨ 成功导出 {success_count} 个矢量裁剪样本，保存在: {output_dir}")
+                return 0
+
+            # 模式 A & B (原中心裁剪或随机无重叠裁剪)
             if width < size or height < size:
                 logger.error(f"图像尺寸 ({width}x{height}) 小于所要求的裁剪大小 ({size}x{size})")
                 return 1

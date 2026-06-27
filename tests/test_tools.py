@@ -286,7 +286,7 @@ def test_prepare_inference_image_routing():
             str(large_jpg),
             seed_window_size=2560,
             settings=settings,
-            slice_action="none",
+            slice_action="dynamic",
             out_dir=tmp_path
         )
         assert res["mode"] == "physical_slice"
@@ -341,6 +341,24 @@ def test_prepare_inference_image_routing():
         # 必须触发了自动强制 COG 转换，新路径应该带有 _cog.tif 后缀，模式路由至 on_the_fly
         assert res_normal["mode"] == "on_the_fly"
         assert Path(res_normal["image_path"]).name == "normal_cog.tif"
+
+        # 4. 测试优先级覆盖与显式短路：启用 scope.enable，但如果外部显式指定了 tile_size，应当直接跳过自标定（不依赖 detector 并且采用指定的参数值）
+        settings.data["preprocess"] = {
+            "scope": {
+                "enable": True
+            }
+        }
+        res_override = prepare_inference_image(
+            str(tiled_tiff),
+            seed_window_size=2560,
+            settings=settings,
+            tile_size=800,
+            overlap_rate=0.15,
+            out_dir=tmp_path
+        )
+        assert res_override["tile_size"] == 800
+        assert res_override["overlap_rate"] == 0.15
+        assert res_override["mode"] == "on_the_fly"
 
 
 def test_solve_joint_optimization_stats():

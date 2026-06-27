@@ -21,6 +21,7 @@ from pathlib import Path
 from loguru import logger as log
 from ..detect.base import Window, Detection
 from ..postprocess.wbf import iou as compute_iou
+from ..logging_setup import log_distribution
 
 try:
     import numpy as np
@@ -85,15 +86,8 @@ def solve_joint_optimization(
     d_q95 = weighted_quantile(sizes_px, weights, large_quantile)
     sum_w = sum(weights)
 
-    mean_sz = float(np.mean(sizes_px))
-    median_sz = float(np.median(sizes_px))
-    min_sz = float(np.min(sizes_px))
-    max_sz = float(np.max(sizes_px))
-    std_sz = float(np.std(sizes_px))
-
-    log.info(f"采样冠幅统计量(px): 样本数={len(sizes_px)}, 最小值={min_sz:.1f}, 最大值={max_sz:.1f}, "
-        f"均值={mean_sz:.1f}, 中位数={median_sz:.1f}, 标准差={std_sz:.1f}, "
-        f"加权总体={sum_w:.1f}")
+    log_distribution(log, "采样冠幅", sizes_px, unit="px")
+    log.info(f"采样冠幅加权修正后的总量估计 (HT 加权总体): {sum_w:.1f}")
 
     area_full = width_full * height_full
     if tile_grid is None:
@@ -162,28 +156,28 @@ def run_scope_calibration(
     # 临时禁用自标定推理时的 verbose 输出，避免日志污染
     orig_verbose = detector.kwargs.get("verbose", True)
     detector.kwargs["verbose"] = False
-
-    seed_window_size = int(settings.get("seed_window_size", 2560))
+    # 扁平化属性检索
+    seed_window_size = int(settings.get("preprocess.scope.seed_window_size", settings.get("seed_window_size", 2560)))
     probe_size = int(settings.get("detect.model_input", 640))
+    max_level = int(settings.get("preprocess.scope.max_level", 3))
 
-    sample_budget = int(settings.get("sample_budget", 16))
-    sample_delta = int(settings.get("sample_delta", 4))
-    nodata_tolerance = float(settings.get("nodata_tolerance", 0.05))
+    sample_budget = int(settings.get("preprocess.scope.sample_budget", 16))
+    sample_delta = int(settings.get("preprocess.scope.sample_delta", 4))
+    nodata_tolerance = float(settings.get("preprocess.scope.nodata_tolerance", 0.05))
     
-    iou_threshold = float(settings.get("preprocess.slice.scope.iou_threshold", 0.45))
+    # 学术/算法内部超参数固化为默认常量，免去配置文件冗余
+    iou_threshold = 0.45
+    large_quantile = 0.95
+    lambda_cost = 0.15
+    incomplete_area_ratio = 0.9
+    incomplete_border_px = 2
     
-    large_quantile = float(settings.get("large_quantile", 0.95))
-    lambda_cost = float(settings.get("lambda_cost", 0.15))
-    incomplete_area_ratio = float(settings.get("incomplete_area_ratio", 0.9))
-    incomplete_border_px = int(settings.get("incomplete_border_px", 2))
+    scope_batch_size = int(settings.get("detect.batch_size", 16))
+    save_quality = 95
+    draw_box = bool(settings.get("preprocess.scope.draw_box", False))
     
-    scope_batch_size = int(settings.get("batch_size", 16))
-    save_quality = int(settings.get("save_quality", 95))
-    draw_box = bool(settings.get("preprocess.slice.scope.draw_box", False))
-    
-    tile_grid = settings.get("tile_grid", [512, 640, 768, 896, 1024, 1280, 1536, 2048])
-    overlap_grid = settings.get("overlap_grid", [0.1, 0.15, 0.2, 0.25, 0.3])
-
+    tile_grid = settings.get("preprocess.scope.tile_grid", [512, 640, 768, 896, 1024, 1280, 1536, 2048])
+    overlap_grid = settings.get("preprocess.scope.overlap_grid", [0.1, 0.15, 0.2, 0.25, 0.3])
     path = Path(image_path)
     if not path.exists():
         log.error(f"输入影像不存在: {path}")
@@ -253,28 +247,25 @@ def run_scope_calibration(
 
                     # 记录成功窗口
                     sampled_coords.append((gx, gy))
-
-                    # 阶段 2: 自相似四叉多尺度探针 (L0 ~ L3)
-                    sz0 = seed_window_size
-                    sz1 = seed_window_size // 2
-                    sz2 = seed_window_size // 4
-                    sz3 = seed_window_size // 8
-
-                    levels = {
-                        0: [(0, 0, sz0)],
-                        1: [(dx, dy, sz1) for dx in (0, sz1) for dy in (0, sz1)],
-                        2: [(dx, dy, sz2) for dx in range(0, sz0, sz2) for dy in range(0, sz0, sz2)],
-                    }
-                    
-                    # 生成 L3 (sz3) 并剪枝
-                    l3_tiles = []
-                    for dx in range(0, sz0, sz2):
-                        for dy in range(0, sz0, sz2):
-                            # 每个 sz2 节点下有 4 个 sz3 节点，随机挑 1 个
-                            cx = dx + random.choice([0, sz3])
-                            cy = dy + random.choice([0, sz3])
-                            l3_tiles.append((cx, cy, sz3))
-                    levels[3] = l3_tiles
+                    # 阶段 2: 自相似四叉多尺度探针，基于规则泛化四叉分裂
+                    levels = {0: [(0, 0, seed_window_size)]}
+                    for L_idx in range(1, max_level + 1):
+                        parent_tiles = levels[L_idx - 1]
+                        child_tiles = []
+                        for px, py, ps in parent_tiles:
+                            cs = ps // 2
+                            # 判定分裂子节点的尺寸是否小于 640px
+                            if cs < 640:
+                                # 随机挑选 1 个象限
+                                dx = random.choice([0, cs])
+                                dy = random.choice([0, cs])
+                                child_tiles.append((px + dx, py + dy, cs))
+                            else:
+                                # 4个象限全保留
+                                for dx in (0, cs):
+                                    for dy in (0, cs):
+                                        child_tiles.append((px + dx, py + dy, cs))
+                        levels[L_idx] = child_tiles
 
                     # 静态切片落盘
                     for L, tiles in levels.items():
@@ -327,10 +318,14 @@ def run_scope_calibration(
                     sub_res = detector.predict_batch([item[0] for item in sub_batch])
                     res_list.extend(sub_res)
                 
+                from .. import paths
+                from ..export.visualize import draw_detections_on_image
+                debug_dir = paths.outputs_preprocess_dir() / f"scopedebug__{path.stem}"
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                log.info(f"[调试] 带检测框的采样图将绘制在: {debug_dir}")
                 for (win, fx, fy, t_sz, img_p), detections in zip(windows_to_infer, res_list):
                     if draw_box:
                         try:
-                            from .. import paths
                             # 重新裁剪原生 resize 前尺寸的切片图以保留高清细节与像素物理尺度
                             with rasterio.open(path) as r_src:
                                 window = rasterio.windows.Window(fx, fy, t_sz, t_sz)
@@ -354,18 +349,19 @@ def run_scope_calibration(
                                     "y2": d.y2 * scale,
                                 })
                             
-                            debug_dir = paths.outputs_preprocess_dir() / f"scopedebug__{path.stem}"
-                            debug_dir.mkdir(parents=True, exist_ok=True)
-                            raw_vis_out = debug_dir / f"o{fx}_{fy}__s{t_sz}_detected.jpg"
+                            # 1. 保存高清无检测框的原窗口 (无后缀)
+                            raw_vis_out_clean = debug_dir / f"o{fx}_{fy}__s{t_sz}.jpg"
+                            raw_im.save(raw_vis_out_clean, "JPEG", quality=95)
+                            # 2. 保存有检测框的可视化图 (后缀 _draw)
+                            raw_vis_out_draw = debug_dir / f"o{fx}_{fy}__s{t_sz}_draw.jpg"
                             
-                            from ..export.visualize import draw_detections_on_image
                             draw_detections_on_image(
                                 raw_im,
                                 scaled_dets,
-                                output_path=raw_vis_out,
+                                output_path=raw_vis_out_draw,
                                 outline_color="red",
                                 width=max(2, int(round(scale * 1.5))),
-                                save_quality=save_quality,
+                                save_quality=95,
                             )
                         except Exception as e:
                             log.warning(f"绘制原生自标定图像检测框失败: {e}")
@@ -476,7 +472,7 @@ def run_scope_calibration(
                 theta_samples.sort()
                 ci_half = (theta_samples[int(50 * 0.95)] - theta_samples[int(50 * 0.05)]) / 2.0
                 
-                log.info(f"采样进度: 激活窗口={len(sampled_coords)}/{actual_sample_budget}, 样本数={len(detected_sizes)} (+{len(keep_boxes)}), 加权总体={sum_w:.1f}, 最小冠幅估计d_q05={int(round(d_q05))}px, 大冠幅估计d_q95={int(round(d_q95))}px, CI半宽={int(round(ci_half))}px")
+                log.info(f"采样进度: 激活窗口={len(sampled_coords)}/{actual_sample_budget}, 样本数={len(detected_sizes)} (+{len(keep_boxes)}), 加权总体={sum_w:.1f}, 单木尺寸(px): d_q05={int(round(d_q05))}, d_q95={int(round(d_q95))}, CI半宽(px): {int(round(ci_half))}")
                 
                 if ci_half < 2.0 and len(sampled_coords) >= actual_sample_delta * 2:
                     log.info(f"序贯检测收敛 (CI半宽 {int(round(ci_half))} < 2px)，提前结束探测。")

@@ -17,39 +17,23 @@ db:
   echo: false
 
 preprocess:
-  # COG (Cloud Optimized GeoTIFF) 检查与转换配置
-  cog:
-    enable: true                # 是否允许 COG 自动转换（注意：对于普通非分块 TIFF 大图在动态切片下会自动强制启用转换，以确保随机读性能）
-    out_suffix: "_cog.tif"      # 转换后的输出后缀
-    block_size: 512             # COG 瓦片大小 (通常为 512 或 256)
-    compress: "deflate"         # 压缩算法 (deflate / lzw)
-    resampling: "nearest"       # 金字塔重采样方法 (nearest/bilinear/cubic/average)
-    min_overview_dim: 256       # 金字塔构建停止的最小尺寸维度
-
-  # 切片 (Slicing) 基础配置
-  slice:
-    enable: true                # 推理流水线里，必须为true
-    action: "none"              # 🔴 切片执行行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)
-    default_tile: 1024           # 默认切片大小            
-    default_overlap: 0.1        # 默认重叠率 (0.0 - 0.5)
-    save_quality: 95            # 切片导出 JPEG 瓦片时的压缩质量
-
-    # SCOPE 预推理自适应求解切片参数
-    scope:
-      enable: false              # 对 TIFF 影像是否启用 SCOPE 自标定，False 则用默认/先验参数
-      seed_window_size: 2560    # 采样种子窗口边长
-      sample_delta: 2           # 每一轮采样追加的种子窗口数
-      sample_budget: 8          # 采样种子窗口上限数目
-      nodata_tolerance: 0.10    # 每个种子窗口允许的 nodata 占比上限
-      iou_threshold: 0.45       # 跨尺度合并去重的 IoU 阈值
-      large_quantile: 0.95      # 用于完整性约束的大冠幅分位数
-      lambda_cost: 0.15         # 算力代价在联合优化目标中的权重
-      d_min_px: 24              # 最小冠幅在模型输入下的最小可检测像素 (常数，用于约束求解)
-      incomplete_area_ratio: 0.9  # 非完整树过滤面积占比阈值
-      incomplete_border_px: 2     # 非完整树贴边判定边界距离（像素）
-      tile_grid: [512, 640, 768, 896, 1024, 1280, 1536, 2048] # 寻优边长候选集
-      overlap_grid: [0.1, 0.15, 0.2, 0.25, 0.3]              # 寻优重叠率候选集
-      draw_box: true           # (调试)查看预推理的效果
+  # 预处理行为: dynamic (动态切片：不落盘，内存推理) | static (静态切片：先落盘后推理)
+  action: "dynamic"
+  # 默认降级/兜底参数（当不启用 SCOPE，或者非 TIFF/超大图像退级时）
+  default_tile_size: 1024
+  default_overlap_rate: 0.1
+  
+  # SCOPE 预推理自标定配置
+  scope:
+    enable: true              # 对大图是否启用自标定以自适应计算最优几何 (True/False)
+    seed_window_size: 2560     # 采样种子窗口边长，也是判断是否为大图的阈值
+    max_level: 1               # 四叉树探针分裂的最大次数
+    sample_delta: 2            # 每一轮采样追加的种子窗口数
+    sample_budget: 8           # 采样种子窗口上限数目
+    nodata_tolerance: 0.10     # 每个种子窗口允许的 nodata 占比上限
+    tile_grid: [512, 640, 768, 896, 1024, 1280, 1536, 2048] # 寻优边长候选集
+    overlap_grid: [0.1, 0.15, 0.2, 0.25, 0.3]              # 寻优重叠率候选集
+    draw_box: true             # 仅调试用：是否在采样图上绘制检测框并双图落盘
 
 detect:
   arch: ultralytics       # 默认使用通用 ultralytics 后端 (自动支持 YOLO 和 RT-DETR 权重)

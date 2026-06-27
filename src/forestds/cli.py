@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import sys
+import faulthandler
+faulthandler.enable()
 from types import SimpleNamespace
 from typing import Optional
 
@@ -43,21 +45,19 @@ def _bootstrap(level: str | None = None, task_type: str | None = None, to_file: 
 @app.command("infer", help="图像推理")
 def cmd_infer(
     images: list[str] = Argument(..., help="输入影像/图像路径(支持 TIFF/PNG/JPG 等)或目录"),
-    arch: Optional[str] = Option(None, "--arch", help="模型架构 (默认 ultralytics)"),
-    acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYmmdd"),
-    location: Optional[str] = Option(None, "--location", help="地块位置标识"),
-    overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="重叠率 (0.0~1.0)"),
+    arch: Optional[str] = Option(None, "--arch", "-a", help="模型架构 (默认 ultralytics)"),
+    acquisition_time: Optional[str] = Option(None, "--acquisition-time", "-t", help="地块时相 YYYYmmdd"),
+    location: Optional[str] = Option(None, "--location", "-l", help="地块位置标识"),
+    tile_size: Optional[int] = Option(None, "--tile-size", "-s", help="手动指定切片边长(不指定则自适应)"),
+    overlap_rate: Optional[float] = Option(None, "--overlap-rate", "-r", help="手动指定重叠率(0.0~0.5，不指定则自适应)"),
     chm: Optional[str] = Option(None, "--chm", help="CHM 冠层高度模型栅格路径"),
     dsm: Optional[str] = Option(None, "--dsm", help="DSM 地表高程，与 --dem 配合算 CHM"),
     dem: Optional[str] = Option(None, "--dem", help="DEM 裸地高程，与 --dsm 配合算 CHM"),
     las: Optional[str] = Option(None, "--las", help="激光点云 LAS/LAZ 路径"),
     las_grid_size: Optional[float] = Option(None, "--las-grid-size", help="点云网格化分辨率(米)"),
     dem_default: Optional[float] = Option(None, "--dem-default", help="单独 DSM 模式下默认常数 DEM 背景高程"),
-    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否绘制边界框"),
-    export_format: Optional[str] = Option(
-        None, "--export-format",
-        help="推理完成后自动导出 GIS 图层格式 (geojson / shp / gpkg / csv)，不指定则不导出",
-    ),
+    no_draw_box: bool = Option(False, "--no-draw-box", help="不绘制边界框(默认绘制)"),
+    export_format: Optional[str] = Option(None, "--export-format", "-f", help="推理完成后自动导出 GIS 图层格式 (geojson / shp / gpkg / csv)，不指定则不导出"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
     from pathlib import Path
@@ -72,6 +72,8 @@ def cmd_infer(
 
     settings, run_id = _bootstrap(log_level, task_type="infer") 
     logger.info("[infer] settings snapshot: {}", settings)
+
+    draw_box = not no_draw_box
 
     # 路由分支：如果大于 1 个输入路径，或者单个路径是目录，则走批量流程
     is_batch = len(images) > 1 or (len(images) == 1 and Path(images[0]).is_dir())
@@ -91,7 +93,7 @@ def cmd_infer(
             result = run_infer_pipeline(
                 image, run_id=run_id, settings=settings,
                 arch=arch_val, acquisition_time=acquisition_time, location=location,
-                overlap_rate=overlap_rate, chm=chm, dsm=dsm, dem=dem,
+                tile_size=tile_size, overlap_rate=overlap_rate, chm=chm, dsm=dsm, dem=dem,
                 las=las, las_grid_size=las_grid_size, dem_default=dem_default,
                 draw_box=draw_box, export_fmt=export_format,
             )
@@ -130,6 +132,7 @@ def cmd_infer(
             arch=arch,
             acquisition_time=acquisition_time,
             location=location,
+            tile_size=tile_size,
             overlap_rate=overlap_rate,
             chm=chm,
             dsm=dsm,
@@ -156,18 +159,18 @@ def cmd_infer(
 @app.command("preprocess", help="影像预处理(自适应切片与 COG 转换)")
 def cmd_preprocess(
     image: str = Argument(..., help="输入影像/图像路径(支持 TIFF/PNG/JPG 等)"),
-    out_dir: Optional[str] = Option(None, "--out-dir", "--out", help="切片输出目录 (默认 outputs/YYYYmmdd_HHMM__run_id__taskType/preprocess )"),
-    tile_size: Optional[int] = Option(None, "--tile-size", help="手动指定切片边长(不指定则自适应)"),
-    overlap_rate: Optional[float] = Option(None, "--overlap-rate", help="手动指定重叠率(0.0~0.5，不指定则自适应)"),
-    action: Optional[str] = Option(None, "--action", help="切片行为: slice (执行静态切片：先落盘后推理) | none (执行动态切片：仅计算参数，不落盘，边切边推理)"),
-    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否在自标定样本图上绘制检测框（用于调试）"),
-    slice: Optional[bool] = Option(None, "--slice/--no-slice", help="是否激活切片功能"),
-    cog: Optional[bool] = Option(None, "--cog/--no-cog", help="是否激活 COG 转换功能"),
-    cog_out: Optional[str] = Option(None, "--cog-out", help="COG 转换输出影像路径(默认同级 *_cog.tif)"),
+    tile_size: Optional[int] = Option(None, "--tile-size", "-s", help="手动指定切片边长(不指定则自适应)"),
+    overlap_rate: Optional[float] = Option(None, "--overlap-rate", "-r", help="手动指定重叠率(0.0~0.5，不指定则自适应)"),
+    action: Optional[str] = Option("dynamic", "--action", "-a", help="切片行为: dynamic (边切边推理) | static (静态切片：先落盘后推理)"),
+    draw_box: bool = Option(False, "--draw-box", "-d", help="自标定样本图上绘制检测框（默认不绘制）"),
+    out_dir: Optional[str] = Option(None, "--out-dir", "-o", help="切片输出目录 (默认 `run_dir()`)"),
 ) -> int:
     settings, run_id = _bootstrap(task_type="preprocess")
-    if draw_box is not None:
-        settings.data["draw_box"] = draw_box
+    if "preprocess" not in settings.data:
+        settings.data["preprocess"] = {}
+    if "scope" not in settings.data["preprocess"]:
+        settings.data["preprocess"]["scope"] = {}
+    settings.data["preprocess"]["scope"]["draw_box"] = draw_box
     logger.info(f"开始预处理输入文件: {image}")
 
     import os
@@ -184,19 +187,15 @@ def cmd_preprocess(
         res = prepare_inference_image(
             image_path=image,
             slice_action=action,
-            slice_enable=slice,
-            cog_enable=cog,
-            cog_out=cog_out,
             tile_size=tile_size,
             overlap_rate=overlap_rate,
             settings=settings,
             run_id=run_id,
             out_dir=out_dir
         )
-        
         logger.info("完成预处理: ")
         logger.info(f"运行模式: {res['mode']}")
-        logger.info(f"处理后原图路径: {res['image_path']}")
+        logger.info(f"原图路径: {res['image_path']}")
         logger.info(f"切片参数: tile_size={res['tile_size']}px, overlap_rate={res['overlap_rate']:.0%}")
         if res["tiles_dir"]:
             logger.info(f"切片输出目录: {res['tiles_dir']}")
@@ -225,38 +224,10 @@ def cmd_train(
         "YOLO", "--format", "-f",
         help="数据集类型 (YOLO / VOC / COCO)"
     ),
-    incremental: bool = Option(
-        False, "--incremental", "-i",
-        help="是否开启增量微调模式"
-    ),
-    base_dataset: Optional[str] = Option(
-        None, "--base-dataset", "-b",
-        help="基底主训练集目录路径（用于增量训练时的数据回放，防灾难性遗忘）"
-    ),
-    base_format: str = Option(
-        "YOLO", "--base-format",
-        help="基底数据集格式 (YOLO / VOC / COCO)"
-    ),
-    freeze_layers: int = Option(
-        10, "--freeze-layers",
-        help="增量微调时冻结的前 N 层骨干网络"
-    ),
-    epochs: Optional[int] = Option(
-        None, "--epochs", "-e",
-        help="训练/微调轮数"
-    ),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
-    """YOLO 模型训练命令，支持 VOC / COCO / YOLO 等多格式自适应转换与极简/增量微调训练。"""
-    # 如果指定了 base_dataset，自动激活 incremental 模式
-    if base_dataset and not incremental:
-        incremental = True
-        logger.info("检测到指定了 --base-dataset，自动开启增量微调训练模式。")
-
-    # 根据是否是增量模式，决定 task_type
-    current_task_type = "train-inc" if incremental else "train"
-    
-    settings, run_id = _bootstrap(log_level, task_type=current_task_type)
+    """YOLO 模型训练命令，支持 VOC / COCO / YOLO 等多格式自适应转换与极简训练。"""
+    settings, run_id = _bootstrap(log_level, task_type="train")
     from .tasks.train import run_train
 
     try:
@@ -265,24 +236,18 @@ def cmd_train(
             model_path=model,
             cfg_path=cfg,
             dataset_format=format,
-            run_id=run_id,
-            incremental=incremental,
-            base_dataset=base_dataset,
-            base_format=base_format,
-            freeze_layers=freeze_layers,
-            epochs=epochs,
-            task_type=current_task_type,
+            run_id=run_id
         )
-        logger.debug(f"[{current_task_type}] 训练已结束。成果保存目录: {results['run_dir']}")
+        logger.debug(f"[train] 训练已结束。成果保存目录: {results['run_dir']}")
         return 0
     except FileNotFoundError as e:
-        logger.error(f"[{current_task_type}] 运行所需文件未找到: {e}")
+        logger.error(f"[train] 运行所需文件未找到: {e}")
         return 1
     except ValueError as e:
-        logger.error(f"[{current_task_type}] 输入参数非法: {e}")
+        logger.error(f"[train] 输入参数非法: {e}")
         return 2
     except Exception as e:
-        logger.exception(f"[{current_task_type}] 训练执行遭遇异常: {e}")
+        logger.exception(f"[train] 训练执行遭遇异常: {e}")
         return 1
 
 
@@ -364,11 +329,11 @@ def cmd_export(
 
 @app.command("batch", help="批量处理(仅 RGB,串行)")
 def cmd_batch(
-    input_dir: str = Option(..., "--input-dir", help="输入目录"),
-    glob: str = Option("*.tif", "--glob", help="文件匹配模式(默认 *.tif)"),
-    arch: Optional[str] = Option(None, "--arch", help="模型架构 (默认 ultralytics)"),
-    acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYmmdd"),
-    log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
+    input_dir: str = Option(..., "--input-dir", "-i", help="输入目录"),
+    glob: str = Option("*.tif", "--glob", "-g", help="文件匹配模式(默认 *.tif)"),
+    arch: Optional[str] = Option(None, "--arch", "-a", help="模型架构 (默认 ultralytics)"),
+    acquisition_time: Optional[str] = Option(None, "--acquisition-time", "-t", help="地块时相 YYYYmmdd"),
+    log_level: Optional[str] = Option(None, "--log-level", "-l", help="日志级别(默认读配置)"),
 ) -> int:
     args = SimpleNamespace(
         input_dir=input_dir, glob=glob, arch=arch, acquisition_time=acquisition_time, log_level=log_level
@@ -557,8 +522,8 @@ tool_app = typer.Typer(help="辅助工具集")
 def cmd_draw_bbox(
     image: str = Argument(..., help="图像路径"),
     label: Optional[str] = Option(None, "--label", "-l", help="标注文件路径(YOLO txt/VOC xml/GeoJSON)，若未指定则自动搜寻匹配"),
-    with_infer: bool = Option(False, "--with-infer", help="是否在画框中执行静默推理"),
-    log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
+    with_infer: bool = Option(False, "--with-infer", "-i", help="是否在画框中执行静默推理"),
+    log_level: Optional[str] = Option(None, "--log-level", "-l", help="日志级别"),
 ) -> int:
     settings, _ = _bootstrap(level=log_level, task_type="draw-bbox", to_file=False)
     from .utils import draw_bbox_main
@@ -605,12 +570,13 @@ def cmd_standardize_dataset(
 def cmd_crop_tiff(
     image: str = Argument(..., help="输入的 TIFF 影像路径"),
     dest: Optional[str] = Option(None, "--dest", "-d", help="输出目标目录，若不指定，默认设为源图像同级 _crops 目录"),
-    num_crops: int = Option(3, "--num-crops", "-n", help="裁剪张数。⚠️: 0 表示只从大图中心裁一张"),
-    size: int = Option(5000, "--size", "-s", help="裁剪边长大小 (像素)"),
-    nodata_tolerance: float = Option(0.05, "--nodata-tolerance", "-t", help="允许的 nodata 占比上限 (0.0 - 1.0)"),
+    num_crops: int = Option(3, "--num-crops", "-n", help="[优先级低于 '-v'] 裁剪张数。⚠️: 0 表示只从大图中心裁一张"),
+    size: int = Option(5000, "--size", "-s", help="[优先级低于 '-v'] 裁剪边长大小 (像素)"),
+    nodata_tolerance: float = Option(0.05, "--nodata-tolerance", "-t", help="[优先级低于 '-v'] 允许的 nodata 占比上限 (0.0 - 1.0)"),
+    vector: Optional[str] = Option(None, "--vector", "-v", help="输入的矢量文件路径 (如 .shp, .geojson 等，若指定则启用'按图索骥模式')"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
 ) -> int:
-    settings, _ = _bootstrap(level=log_level, task_type="crop-tiff", to_file=False)
+    settings, _ = _bootstrap(level=log_level, task_type="crop-tiff", to_file=False) 
     from .utils import crop_tiff_main
     try:
         return crop_tiff_main(
@@ -618,7 +584,8 @@ def cmd_crop_tiff(
             output_dir=dest,
             num_crops=num_crops,
             size=size,
-            nodata_tolerance=nodata_tolerance
+            nodata_tolerance=nodata_tolerance,
+            vector_path=vector
         )
     except Exception as e:
         logger.exception(f"执行 crop-tiff 失败: {e}")
