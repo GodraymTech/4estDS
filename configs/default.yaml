@@ -27,13 +27,20 @@ preprocess:
   scope:
     enable: true              # 对大图是否启用自标定以自适应计算最优几何 (True/False)
     seed_window_size: 2560     # 采样种子窗口边长，也是判断是否为大图的阈值
-    max_level: 1               # 四叉树探针分裂的最大次数
+    max_level: 2               # 四叉树探针分裂的最大次数
     sample_delta: 2            # 每一轮采样追加的种子窗口数
     sample_budget: 8           # 采样种子窗口上限数目
     nodata_tolerance: 0.10     # 每个种子窗口允许的 nodata 占比上限
     tile_grid: [512, 640, 768, 896, 1024, 1280, 1536, 2048] # 寻优边长候选集
     overlap_grid: [0.1, 0.15, 0.2, 0.25, 0.3]              # 寻优重叠率候选集
-    draw_box: true             # 仅调试用：是否在采样图上绘制检测框并双图落盘
+    draw_box: false             # 仅调试用：是否在采样图上绘制检测框并双图落盘
+
+# 针对训练的预处理模块配置
+train_preprocess:
+  new_sample_rate: 1.0        # 新数据集采样率 (0.0~1.0)
+  old_sample_rate: 1.0        # 旧数据集采样率 (0.0~1.0)
+  new_ratio_min: 0.1          # 混合后新数据集所占的最小比例 (0.0~1.0)
+  neg_ratio: 0.1              # 负样本占总图像数的比例 (0.0~1.0)
 
 detect:
   arch: ultralytics       # 默认使用通用 ultralytics 后端 (自动支持 YOLO 和 RT-DETR 权重)
@@ -44,9 +51,9 @@ detect:
   verbose: true           # 推理时是否输出 ultralytics 自身的详细推理日志
   models:
     ultralytics:
-      weights: "m03"
+      # weights: "m03"
       # weights: "rtdetr-l.pt"
-      # weights: ".4estDS/outputs/20260624_1318_290e5_train/weights/last.pt"
+      weights: ".4estDS/outputs/20260627_1722_fb93c_train/weights/best.pt"
 
 postprocess:
   draw_box: true                 # 🔴 是否在原图(或原图中心5000*5000的子图）上绘制检测框, 并保存
@@ -71,6 +78,8 @@ fusion:
   volume_method: "cbh"           # 树冠体积估算方法: cbh (枝下高积分) / paraboloid (抛物面拟合) / cone (圆锥体拟合) / ellipsoid (半椭球体拟合) / column (柱体积分) / convex_hull (点云凸包，仅在LAS模式生效) / voxel (点云体素化，仅在LAS模式生效)
   cbh_factor: 0.3                # 枝下高占树高比例 (0.0 - 1.0)
   voxel_size: 0.2                # 体素化估算方法中的三维网格单元大小 (米)
+
+
 
 
 

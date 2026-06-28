@@ -106,6 +106,8 @@ class GeoInfo:
     linear_unit_m: float = 1.0          # 投影坐标系的线性单位->米
     origin_lat: float | None = None     # 地理坐标系度->米所需纬度
     source: str = "unknown"             # rasterio | world_file | geotiff_tags
+    crs_epsg: int | None = None
+    crs_wkt: str | None = None
 
     def __post_init__(self):
         dx = abs(self.transform.a)
@@ -320,8 +322,14 @@ def _geo_from_rasterio(transform, crs) -> GeoInfo | None:
     except (AttributeError, TypeError, ValueError):
         return None
     crs_kind, unit_m, origin_lat = "unknown", 1.0, None
+    crs_epsg = None
+    crs_wkt = None
     if crs is not None:
         try:
+            if hasattr(crs, "to_epsg"):
+                crs_epsg = crs.to_epsg()
+            if hasattr(crs, "to_wkt"):
+                crs_wkt = crs.to_wkt()
             if getattr(crs, "is_geographic", False):
                 crs_kind, origin_lat = "geographic", aff.f
             else:
@@ -334,6 +342,7 @@ def _geo_from_rasterio(transform, crs) -> GeoInfo | None:
     return GeoInfo(
         transform=aff, crs_kind=crs_kind, linear_unit_m=unit_m,
         origin_lat=origin_lat, source="rasterio",
+        crs_epsg=crs_epsg, crs_wkt=crs_wkt,
     )
 
 
@@ -399,6 +408,8 @@ def compute_tract_geometry(
         "pixel_h": int(height) if height else None,
         "crs_kind": geo.crs_kind,
         "geo_source": geo.source,
+        "crs_epsg": getattr(geo, "crs_epsg", None),
+        "crs_wkt": getattr(geo, "crs_wkt", None),
     }
     if width and height:
         out["geo_area"] = pa * int(width) * int(height)

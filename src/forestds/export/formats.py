@@ -55,6 +55,8 @@ def export_tract_to_file(
     fmt: str = "geojson",
     out_path: str | Path | None = None,
     db_url: str | None = None,
+    crs_epsg: int | None = None,
+    crs_wkt: str | None = None,
 ) -> dict:
     """从数据库读取并导出单木空间观测记录。
 
@@ -84,7 +86,48 @@ def export_tract_to_file(
     if not target_run_id:
         target_run_id = reader.latest_run_for_tract(target_tract_id, url=db_url)
 
-    # 3. 拉取观测记录，强制转为 list 防止 generator 被多次消费
+    # 3. 确定空间参考 EPSG/WKT
+    resolved_crs_epsg = crs_epsg
+    resolved_crs_wkt = crs_wkt
+    if not resolved_crs_epsg or not resolved_crs_wkt:
+        try:
+            tract_info = reader.get_tract(target_tract_id, url=db_url)
+            if tract_info:
+                if not resolved_crs_epsg:
+                    resolved_crs_epsg = tract_info.get("crs_epsg")
+                if not resolved_crs_wkt:
+                    resolved_crs_wkt = tract_info.get("crs_wkt")
+        except Exception as e:
+            log.warning(f"获取地块空间参考失败: {e}")
+
+    # 3.1 终极防御：若数据库中依然缺失空间参考，尝试从关联的 run_logs.input_path 影像文件中直接读取投影
+    if not resolved_crs_epsg and not resolved_crs_wkt:
+        try:
+            if target_run_id:
+                import sqlite3
+                from ..db.schema import resolve_db_path
+                conn = sqlite3.connect(resolve_db_path(db_url))
+                try:
+                    row = conn.execute(
+                        "SELECT input_path FROM run_logs WHERE run_id=?", (target_run_id,)
+                    ).fetchone()
+                    if row and row[0]:
+                        img_path = Path(row[0])
+                        if img_path.exists():
+                            import rasterio
+                            with rasterio.open(img_path) as src:
+                                if src.crs:
+                                    if hasattr(src.crs, "to_wkt"):
+                                        resolved_crs_wkt = src.crs.to_wkt()
+                                    if hasattr(src.crs, "to_epsg"):
+                                        resolved_crs_epsg = src.crs.to_epsg()
+                                    log.info(f"从输入影像 {img_path} 成功回溯还原空间参考")
+                finally:
+                    conn.close()
+        except Exception as autodetect_err:
+            log.warning(f"自动回溯获取空间参考失败: {autodetect_err}")
+
+    # 4. 拉取观测记录，强制转为 list 防止 generator 被多次消费
     observations: list[dict] = list(reader.fetch_observations(
         tract_id=target_tract_id, run_id=target_run_id, url=db_url
     ))
@@ -199,7 +242,9 @@ def export_tract_to_file(
                 run_id=target_run_id,
                 fmt="geojson",
                 out_path=fallback_path,
-                db_url=db_url
+                db_url=db_url,
+                crs_epsg=resolved_crs_epsg,
+                crs_wkt=resolved_crs_wkt,
             )
             
         # 使用 geopandas 导出
@@ -240,6 +285,10 @@ def export_tract_to_file(
             }]
             
         gdf = gpd.GeoDataFrame(data_list)
+        if resolved_crs_wkt:
+            gdf.crs = resolved_crs_wkt
+        elif resolved_crs_epsg:
+            gdf.crs = f"EPSG:{resolved_crs_epsg}"
         driver = "ESRI Shapefile" if fmt == "shp" else "GPKG"
         gdf.to_file(final_path, driver=driver)
 

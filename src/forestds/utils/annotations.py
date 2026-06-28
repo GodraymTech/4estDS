@@ -16,6 +16,25 @@ from loguru import logger
 # 引入 Ultralytics 内置的高性能算子
 from ultralytics.utils.ops import xyxy2xywhn, xywhn2xyxy
 
+SUPPORTED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
+
+
+def find_image_for_xml(xml_path: Path, search_dirs: list[Path]) -> Path | None:
+    """在指定的多个目录中寻找与 XML 同名的图像文件。"""
+    stem = xml_path.stem
+    for d in search_dirs:
+        if not d.exists():
+            continue
+        for ext in SUPPORTED_IMAGE_EXTS:
+            img_path = d / f"{stem}{ext}"
+            if img_path.exists():
+                return img_path
+            # 兼容大小写后缀
+            img_path_upper = d / f"{stem}{ext.upper()}"
+            if img_path_upper.exists():
+                return img_path_upper
+    return None
+
 
 def parse_voc_file(xml_path: Path) -> tuple[int, int, list[tuple[str, float, float, float, float]]]:
     """解析 VOC 格式的 XML 标注文件。

@@ -114,6 +114,8 @@ def ensure_tract(
     gsd: float | None = None,
     geo_area: float | None = None,
     area_unit: str | None = None,
+    crs_epsg: int | None = None,
+    crs_wkt: str | None = None,
 ) -> str:
     """按 (acquisition_time, location) 幂等获取/创建地块,返回 tract_id。"""
     conn = _connect(url)
@@ -123,6 +125,15 @@ def ensure_tract(
             (acquisition_time, location),
         ).fetchone()
         if row:
+            if crs_epsg is not None or crs_wkt is not None:
+                conn.execute(
+                    "UPDATE tracts SET "
+                    "crs_epsg=COALESCE(crs_epsg, ?), "
+                    "crs_wkt=COALESCE(crs_wkt, ?) "
+                    "WHERE tract_id=?",
+                    (crs_epsg, crs_wkt, row[0]),
+                )
+                conn.commit()
             return row[0]
         name_part = ""
         if name:
@@ -132,10 +143,10 @@ def ensure_tract(
         conn.execute(
             "INSERT INTO tracts "
             "(tract_id, name, acquisition_time, location, pixel_w, pixel_h, gsd, "
-            " geo_area, area_unit, status) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            " geo_area, area_unit, crs_epsg, crs_wkt, status) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (tract_id, name, acquisition_time, location,
-             pixel_w, pixel_h, gsd, geo_area, area_unit, "registered"),
+             pixel_w, pixel_h, gsd, geo_area, area_unit, crs_epsg, crs_wkt, "registered"),
         )
         if geo_area:
             log.info(

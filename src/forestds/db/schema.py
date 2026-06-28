@@ -66,6 +66,7 @@ DDL: tuple[str, ...] = (
         geo_area         REAL,
         area_unit        TEXT,
         crs_epsg         INTEGER,
+        crs_wkt          TEXT,
         geotransform     TEXT,
         bounds_bbox      TEXT,
         nodata           REAL,
@@ -168,6 +169,10 @@ def init_db(url: str | None = None) -> Path:
             pass
         try:
             conn.execute("ALTER TABLE tract_trees ADD COLUMN crown_volume_geo REAL")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE tracts ADD COLUMN crs_wkt TEXT")
         except sqlite3.OperationalError:
             pass
         conn.commit()

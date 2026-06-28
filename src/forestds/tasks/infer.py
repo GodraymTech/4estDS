@@ -212,6 +212,8 @@ def run_infer_pipeline(
         gsd=geo.get("gsd"),
         geo_area=geo.get("geo_area"),
         area_unit=geo.get("area_unit"),
+        crs_epsg=geo.get("crs_epsg"),
+        crs_wkt=geo.get("crs_wkt"),
     )
 
     # ── 4. 高程融合树高（可选）────────────────────────────────────────────────
@@ -293,6 +295,8 @@ def run_infer_pipeline(
             exp = export_tract_to_file(
                 tract_id=tract_id, run_id=run_id, fmt=resolved_export_fmt,
                 out_path=paths.outputs_infer_dir() / "vectors", db_url=db_url,
+                crs_epsg=geo.get("crs_epsg"),
+                crs_wkt=geo.get("crs_wkt"),
             )
             if not isinstance(exp, dict):
                 raise TypeError(f"export_tract_to_file 返回了非预期类型 {type(exp).__name__}，期望 dict")

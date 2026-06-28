@@ -22,7 +22,7 @@ import yaml
 from loguru import logger
 
 # 复用项目现有的数据集辅助接口
-from forestds.tasks.train import SUPPORTED_IMAGE_EXTS, find_image_for_xml
+from forestds.utils.annotations import SUPPORTED_IMAGE_EXTS, find_image_for_xml
 
 
 def _worker_process_task(task: dict) -> tuple[bool, str]:

@@ -56,7 +56,7 @@ def cmd_infer(
     las: Optional[str] = Option(None, "--las", help="激光点云 LAS/LAZ 路径"),
     las_grid_size: Optional[float] = Option(None, "--las-grid-size", help="点云网格化分辨率(米)"),
     dem_default: Optional[float] = Option(None, "--dem-default", help="单独 DSM 模式下默认常数 DEM 背景高程"),
-    no_draw_box: bool = Option(False, "--no-draw-box", help="不绘制边界框(默认绘制)"),
+    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否绘制边界框 (默认:True)"),
     export_format: Optional[str] = Option(None, "--export-format", "-f", help="推理完成后自动导出 GIS 图层格式 (geojson / shp / gpkg / csv)，不指定则不导出"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
@@ -73,7 +73,7 @@ def cmd_infer(
     settings, run_id = _bootstrap(log_level, task_type="infer") 
     logger.info("[infer] settings snapshot: {}", settings)
 
-    draw_box = not no_draw_box
+    act_draw_box = draw_box if draw_box is not None else settings.get("postprocess.draw_box", True)
 
     # 路由分支：如果大于 1 个输入路径，或者单个路径是目录，则走批量流程
     is_batch = len(images) > 1 or (len(images) == 1 and Path(images[0]).is_dir())
@@ -95,7 +95,7 @@ def cmd_infer(
                 arch=arch_val, acquisition_time=acquisition_time, location=location,
                 tile_size=tile_size, overlap_rate=overlap_rate, chm=chm, dsm=dsm, dem=dem,
                 las=las, las_grid_size=las_grid_size, dem_default=dem_default,
-                draw_box=draw_box, export_fmt=export_format,
+                draw_box=act_draw_box, export_fmt=export_format,
             )
         except NotImplementedError as e:
             writer.finish_run_log(run_id, "failed", error=str(e), url=settings.get("url", None))
@@ -140,7 +140,7 @@ def cmd_infer(
             las=las,
             las_grid_size=las_grid_size,
             dem_default=dem_default,
-            draw_box=draw_box,
+            draw_box=act_draw_box,
             export_fmt=export_format,
         )
 
@@ -161,16 +161,19 @@ def cmd_preprocess(
     image: str = Argument(..., help="输入影像/图像路径(支持 TIFF/PNG/JPG 等)"),
     tile_size: Optional[int] = Option(None, "--tile-size", "-s", help="手动指定切片边长(不指定则自适应)"),
     overlap_rate: Optional[float] = Option(None, "--overlap-rate", "-r", help="手动指定重叠率(0.0~0.5，不指定则自适应)"),
-    action: Optional[str] = Option("dynamic", "--action", "-a", help="切片行为: dynamic (边切边推理) | static (静态切片：先落盘后推理)"),
-    draw_box: bool = Option(False, "--draw-box", "-d", help="自标定样本图上绘制检测框（默认不绘制）"),
+    action: Optional[str] = Option(None, "--action", "-a", help="切片行为: dynamic (边切边推理) | static (静态切片：先落盘后推理) (默认:dynamic)"),
+    draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", "-d", help="自标定样本图上是否绘制检测框 (默认:False)"),
     out_dir: Optional[str] = Option(None, "--out-dir", "-o", help="切片输出目录 (默认 `run_dir()`)"),
 ) -> int:
     settings, run_id = _bootstrap(task_type="preprocess")
+    act_action = action if action is not None else settings.get("preprocess.action", "dynamic")
+    act_draw_box = draw_box if draw_box is not None else settings.get("preprocess.scope.draw_box", False)
+
     if "preprocess" not in settings.data:
         settings.data["preprocess"] = {}
     if "scope" not in settings.data["preprocess"]:
         settings.data["preprocess"]["scope"] = {}
-    settings.data["preprocess"]["scope"]["draw_box"] = draw_box
+    settings.data["preprocess"]["scope"]["draw_box"] = act_draw_box
     logger.info(f"开始预处理输入文件: {image}")
 
     import os
@@ -186,7 +189,7 @@ def cmd_preprocess(
         # 调用统一预处理管道
         res = prepare_inference_image(
             image_path=image,
-            slice_action=action,
+            slice_action=act_action,
             tile_size=tile_size,
             overlap_rate=overlap_rate,
             settings=settings,
@@ -212,19 +215,56 @@ def cmd_preprocess(
         return 1
 
 
+@app.command("preprocess-train", help="针对训练的数据集自适应预处理与规整")
+def cmd_preprocess_train(
+    data_dir: str = Argument(..., help="新数据集目录路径"),
+    old_data_dir: Optional[str] = Option(None, "--old-data-dir", help="增量训练 of 旧数据集目录"),
+    new_sample_rate: Optional[float] = Option(None, "--new-sample-rate", help="增量数据集采样率 (默认:1.0)"),
+    old_sample_rate: Optional[float] = Option(None, "--old-sample-rate", help="旧数据集采样率 (默认:1.0)"),
+    new_ratio_min: Optional[float] = Option(None, "--new-ratio-min", help="合并后'增量数据集'所占的最小比例 (默认:0.1)"),
+    neg_ratio: Optional[float] = Option(None, "--neg-ratio", help="负样本占总图像数的比例 (默认:0.1)"),
+    out_dir: Optional[str] = Option(None, "--out-dir", "-o", help="输出规整数据集的目录（默认自动生成）"),
+) -> int:
+    """自适应解析 VOC/COCO/YOLO 数据集，支持多级目录、负样本与增量混合，并输出数据分布报告。"""
+    settings, run_id = _bootstrap(task_type="preprocess_train")
+    from .tasks.preprocess_train import preprocess_train_dataset
+
+    # 从 settings 加载默认值
+    tp_cfg = settings.get("train_preprocess", {})
+    act_new_sr = new_sample_rate if new_sample_rate is not None else tp_cfg.get("new_sample_rate", 1.0)
+    act_old_sr = old_sample_rate if old_sample_rate is not None else tp_cfg.get("old_sample_rate", 1.0)
+    act_new_rm = new_ratio_min if new_ratio_min is not None else tp_cfg.get("new_ratio_min", 0.1)
+    act_neg_r = neg_ratio if neg_ratio is not None else tp_cfg.get("neg_ratio", 0.1)
+
+    try:
+        preprocess_train_dataset(
+            data_dir=data_dir,
+            old_data_dir=old_data_dir,
+            new_sample_rate=act_new_sr,
+            old_sample_rate=act_old_sr,
+            new_ratio_min=act_new_rm,
+            neg_ratio=act_neg_r,
+            dest_dir=out_dir,
+        )
+        logger.info("[preprocess-train] 数据集自适应预处理与规整成功！")
+        return 0
+    except Exception as e:
+        logger.exception(f"[preprocess-train] 数据集预处理执行遭遇异常: {e}")
+        return 1
+
+
 @app.command("train", help="模型训练")
 def cmd_train(
-    data_dir: str = Argument(..., help="数据集目录路径 (VOC/COCO/YOLO)"),
+    data_dir: str = Argument(..., help="数据集目录路径 (VOC/COCO/YOLO/混合)"),
     model: str = Argument(..., help="模型路径 (.yaml 结构配置或 .pt 预训练权重)"),
-    cfg: str = Option(
-        "configs/ultralytics_train.yaml", "--cfg", "-c",
-        help="训练参数配置文件路径"
-    ),
-    format: str = Option(
-        "YOLO", "--format", "-f",
-        help="数据集类型 (YOLO / VOC / COCO)"
-    ),
-    log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
+    cfg: str = Option("configs/ultralytics_train.yaml", "--cfg", "-c",help="训练参数配置文件路径"),
+    format: str = Option("YOLO", "--format", "-f",help="数据集类型 (YOLO / VOC / COCO)"),
+    old_data_dir: Optional[str] = Option(None, "--old-data-dir", help="增量训练的旧数据集目录"),
+    new_sample_rate: Optional[float] = Option(None, "--new-sample-rate", help="增量数据集采样率 (默认:1.0)"),
+    old_sample_rate: Optional[float] = Option(None, "--old-sample-rate", help="旧数据集采样率 (默认:1.0)"),
+    new_ratio_min: Optional[float] = Option(None, "--new-ratio-min", help="合并后'增量数据集'所占的最小比例 (默认:0.1)"),
+    neg_ratio: Optional[float] = Option(None, "--neg-ratio", help="负样本占总图像数的比例 (默认:0.1)"),
+    log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
 ) -> int:
     """YOLO 模型训练命令，支持 VOC / COCO / YOLO 等多格式自适应转换与极简训练。"""
     settings, run_id = _bootstrap(log_level, task_type="train")
@@ -236,7 +276,12 @@ def cmd_train(
             model_path=model,
             cfg_path=cfg,
             dataset_format=format,
-            run_id=run_id
+            run_id=run_id,
+            old_data_dir=old_data_dir,
+            new_sample_rate=new_sample_rate,
+            old_sample_rate=old_sample_rate,
+            new_ratio_min=new_ratio_min,
+            neg_ratio=neg_ratio,
         )
         logger.debug(f"[train] 训练已结束。成果保存目录: {results['run_dir']}")
         return 0
@@ -252,34 +297,36 @@ def cmd_train(
 
 
 
+
 @app.command("report", help="专业统计报告")
 def cmd_report(
     tract_id: Optional[str] = Option(None, "--tract-id", help="地块 ID"),
     run_id: Optional[str] = Option(None, "--run-id", help="限定某次 run"),
     acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYmmdd"),
     location: Optional[str] = Option(None, "--location", help="地块位置标识"),
-    format: str = Option("md", "--format", help="输出格式 (md / csv / pdf)"),
+    format: Optional[str] = Option(None, "--format", help="输出格式 (md / csv / pdf) (默认:md)"),
     out: Optional[str] = Option(None, "--out", help="输出目录(默认 <home>/outputs)"),
-    no_charts: bool = Option(False, "--no-charts", help="不生成图表(PDF)"),
+    no_charts: Optional[bool] = Option(None, "--no-charts/--charts", help="是否不生成图表(PDF) (默认:False)"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
-    args = SimpleNamespace(
-        tract_id=tract_id, run_id=run_id, acquisition_time=acquisition_time,
-        location=location, format=format, out=out, no_charts=no_charts, log_level=log_level
-    )
-
-    settings, run_id = _bootstrap(args.log_level, task_type="report")
+    settings, run_id = _bootstrap(log_level, task_type="report")
     from .report import generate_report
+
+    act_format = format if format is not None else settings.get("report.format", "md")
+    if no_charts is not None:
+        act_no_charts = no_charts
+    else:
+        act_no_charts = not settings.get("report.with_charts", True)
 
     try:
         out_res = generate_report(
-            tract_id=args.tract_id,
-            run_id=args.run_id,
-            acquisition_time=args.acquisition_time,
-            location=args.location,
-            fmt=args.format,
-            out_dir=args.out,
-            with_charts=not args.no_charts,
+            tract_id=tract_id,
+            run_id=run_id,
+            acquisition_time=acquisition_time,
+            location=location,
+            fmt=act_format,
+            out_dir=out,
+            with_charts=not act_no_charts,
             db_url=settings.get("url", None),
         )
     except ValueError as e:
@@ -297,23 +344,21 @@ def cmd_report(
 def cmd_export(
     tract_id: Optional[str] = Option(None, "--tract-id", help="地块 ID(默认最新)"),
     run_id: Optional[str] = Option(None, "--run-id", help="限定特定运行(默认最新)"),
-    format: str = Option("geojson", "--format", help="导出格式: shp / geojson / gpkg / csv"),
+    format: Optional[str] = Option(None, "--format", help="导出格式: shp / geojson / gpkg / csv (默认:geojson)"),
     out: Optional[str] = Option(None, "--out", help="导出路径/目录(默认 outputs 目录)"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
-    args = SimpleNamespace(
-        tract_id=tract_id, run_id=run_id, format=format, out=out, log_level=log_level
-    )
-
-    settings, _ = _bootstrap(args.log_level, task_type="export")
+    settings, _ = _bootstrap(log_level, task_type="export")
     from .export import export_tract_to_file
+
+    act_format = format if format is not None else settings.get("export.default_format", "geojson")
 
     try:
         res = export_tract_to_file(
-            tract_id=args.tract_id,
-            run_id=args.run_id,
-            fmt=args.format,
-            out_path=args.out,
+            tract_id=tract_id,
+            run_id=run_id,
+            fmt=act_format,
+            out_path=out,
             db_url=settings.get("url", None),
         )
         if res.get("fallback"):
