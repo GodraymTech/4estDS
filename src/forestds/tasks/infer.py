@@ -125,13 +125,13 @@ def run_infer_pipeline(
 
     # 2.3 路由并初始化对应的影像源适配器 (ImageSource)
     if mode == "physical_slice":
-        log.info("【模式路由】-->「静态切片落盘推理模式」，切片目录为: {}", tiles_dir)
+        log.info("【推理模式路由】-->「已落盘切片推理模式」")
         source = TiledDirectorySource(tiles_dir, width, height)
     elif mode == "on_the_fly":
-        log.info("【模式路由】-->「COG 动态滑窗推理模式」，影像为: {}", image_path)
+        log.info("【推理模式路由】-->「COG 动态滑窗推理模式」")
         source = RasterImageSource(image_path)
     else:
-        log.info("【模式路由】-->「整图直接推理模式」，影像为: {}", image_path)
+        log.info("【推理模式路由】-->「整图直接推理模式」")
         with Image.open(image_path) as img:
             pixels = np.asarray(img.convert("RGB"))
         source = InMemorySource(pixels)

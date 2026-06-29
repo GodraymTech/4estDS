@@ -322,7 +322,7 @@ def run_scope_calibration(
                 from ..export.visualize import draw_detections_on_image
                 debug_dir = paths.outputs_preprocess_dir() / f"scopedebug__{path.stem}"
                 debug_dir.mkdir(parents=True, exist_ok=True)
-                log.info(f"[调试] 带检测框的采样图将绘制在: {debug_dir}")
+                # log.info(f"[调试] 带检测框的采样图将绘制在: {debug_dir}")
                 for (win, fx, fy, t_sz, img_p), detections in zip(windows_to_infer, res_list):
                     if draw_box:
                         try:

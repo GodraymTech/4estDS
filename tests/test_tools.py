@@ -458,6 +458,46 @@ def test_clean_pipeline(tmp_path, monkeypatch):
     assert not temp_home.exists()
 
 
+def test_preprocess_train_pipeline(tmp_path):
+    new_dir = tmp_path / "new_dataset"
+    new_dir.mkdir()
+    
+    leaf_dir = new_dir / "leaf_pos"
+    leaf_dir.mkdir()
+    (leaf_dir / "classes.txt").write_text("tree\nbuilding\n")
+    
+    img_p = leaf_dir / "img1.jpg"
+    Image.new("RGB", (100, 100)).save(img_p)
+    
+    (leaf_dir / "img1.txt").write_text("0 0.5 0.5 0.2 0.2\n")
+    
+    bg_dir = new_dir / "background_neg"
+    bg_dir.mkdir()
+    Image.new("RGB", (100, 100)).save(bg_dir / "img_neg.jpg")
+    
+    from forestds.tasks.preprocess_train import scan_dataset, preprocess_train_dataset
+    pos_samples, neg_images, global_classes_map = scan_dataset(new_dir)
+    
+    assert len(pos_samples) == 1
+    assert len(neg_images) == 1
+    assert neg_images[0][1] == "background_neg"
+    assert global_classes_map == {0: "tree"}
+    assert pos_samples[0]["node_name"] == "leaf_pos"
+    
+    dest_dir = tmp_path / "dest_dataset"
+    data_yaml_path = preprocess_train_dataset(
+        data_dir=str(new_dir),
+        dest_dir=str(dest_dir),
+        neg_ratio=0.1,
+        new_sample_rate=1.0
+    )
+    
+    assert data_yaml_path.exists()
+    assert (dest_dir / "data.yaml").exists()
+    assert (dest_dir / "distribution_report.md").exists()
+    assert (dest_dir / "distribution_report.png").exists()
+
+
 if __name__ == "__main__":
     print("Running test_find_label_file...")
     test_find_label_file()

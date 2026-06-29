@@ -33,7 +33,7 @@ preprocess:
     nodata_tolerance: 0.10     # 每个种子窗口允许的 nodata 占比上限
     tile_grid: [512, 640, 768, 896, 1024, 1280, 1536, 2048] # 寻优边长候选集
     overlap_grid: [0.1, 0.15, 0.2, 0.25, 0.3]              # 寻优重叠率候选集
-    draw_box: false             # 仅调试用：是否在采样图上绘制检测框并双图落盘
+    draw_box: true             # 仅调试用：是否在采样图上绘制检测框并双图落盘
 
 # 针对训练的预处理模块配置
 train_preprocess:
@@ -52,8 +52,8 @@ detect:
   models:
     ultralytics:
       # weights: "m03"
-      weights: "rtdetr-l.pt"
-      # weights: ".4estDS/outputs/20260627_1722_fb93c_train/weights/best.pt"
+      # weights: "rtdetr-l.pt"
+      weights: ".4estDS/outputs/20260629_1501_7d20f_train/weights/best.pt"
 
 postprocess:
   draw_box: true                 # 🔴 是否在原图(或原图中心5000*5000的子图）上绘制检测框, 并保存
