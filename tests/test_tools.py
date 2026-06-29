@@ -198,7 +198,6 @@ def test_resolve_weights_path():
 def test_standardize_dataset_voc():
     import shutil
     from forestds.utils.standardize_dataset import standardize_ds
-    from forestds.tasks.train import convert_voc_dataset
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
@@ -251,20 +250,6 @@ def test_standardize_dataset_voc():
         lines_sorted = sorted(lines)
         assert lines_sorted[0].strip() == "0 0.600000 0.600000 0.200000 0.200000"
         assert lines_sorted[1].strip() == "1 0.200000 0.300000 0.200000 0.200000"
-        
-        # 3. 测试 tasks/train.py 中的 convert_voc_dataset
-        dest_dir2 = tmp_path / "dst_yolo_train"
-        id_to_class = convert_voc_dataset(data_dir=src_dir, dest_dir=dest_dir2, split_ratio=1.0)
-        
-        assert id_to_class == {0: "building", 1: "tree"}
-        txt_out2 = dest_dir2 / "labels" / "train" / "img1.txt"
-        assert txt_out2.exists()
-        with open(txt_out2, "r") as f:
-            lines2 = f.readlines()
-        assert len(lines2) == 2
-        lines2_sorted = sorted(lines2)
-        assert lines2_sorted[0].strip() == "0 0.600000 0.600000 0.200000 0.200000"
-        assert lines2_sorted[1].strip() == "1 0.200000 0.300000 0.200000 0.200000"
 
 
 def test_prepare_inference_image_routing():
@@ -403,6 +388,74 @@ def test_spatial_grid_wbf_and_nms():
     print(f"\n[WBF Benchmark] 融合 2000 个大图物理框耗时: {t_fused:.4f}秒，得到融合框: {len(fused_boxes)}个")
     assert t_fused < 0.1, f"WBF performance test failed: {t_fused}s >= 0.1s"
     assert len(fused_boxes) > 0
+
+
+def test_clean_pipeline(tmp_path, monkeypatch):
+    temp_home = tmp_path / "temp_home"
+    temp_home.mkdir()
+    
+    for sub in ["config", "cache", "logs", "db", "outputs", "models", "tmp"]:
+        (temp_home / sub).mkdir()
+        
+    monkeypatch.setattr("forestds.paths.home_dir", lambda: temp_home)
+    monkeypatch.setattr("forestds.paths.logs_dir", lambda: temp_home / "logs")
+    monkeypatch.setattr("forestds.paths.outputs_dir", lambda: temp_home / "outputs")
+    
+    (temp_home / "models" / "best.pt").write_text("dummy model")
+    (temp_home / "logs" / "20260628_0440__08c67__export.log").write_text("dummy log")
+    (temp_home / "logs" / "20260628_0440__invalid__export.log").write_text("dummy log")
+    
+    (temp_home / "outputs" / "20260628_0440_08c67_infer").mkdir()
+    (temp_home / "outputs" / "20260628_0440_08c67_infer" / "result.shp").write_text("shp content")
+    (temp_home / "outputs" / "20260628_0440_99999_infer").mkdir()
+    (temp_home / "outputs" / "20260628_0440_99999_infer" / "result.shp").write_text("shp content")
+    
+    (temp_home / "cache" / "temp.tile").write_text("tile")
+    
+    from forestds.db import schema
+    db_url = f"sqlite:///{temp_home}/db/4estds.sqlite"
+    schema.init_db(db_url)
+    
+    import sqlite3
+    conn = sqlite3.connect(temp_home / "db" / "4estds.sqlite")
+    conn.execute("INSERT INTO run_logs (run_id, task_type, started_at) VALUES ('08c67', 'infer', '2026')")
+    conn.execute("INSERT INTO run_logs (run_id, task_type, started_at) VALUES ('99999', 'infer', '2026')")
+    
+    conn.execute("INSERT INTO tracts (tract_id, acquisition_time, location, name) VALUES ('t1', '2026', 'loc1', 't1')")
+    conn.execute("INSERT INTO tree_observations (obs_id, tract_id, run_id) VALUES ('o1', 't1', '08c67')")
+    conn.execute("INSERT INTO tree_observations (obs_id, tract_id, run_id) VALUES ('o2', 't1', '99999')")
+    conn.execute("INSERT INTO tree_individuals (individual_id) VALUES ('i1')")
+    conn.execute("INSERT INTO tract_trees (canonical_id, tract_id, chosen_obs_id, individual_id) VALUES ('c1', 't1', 'o1', 'i1')")
+    
+    conn.commit()
+    conn.close()
+    
+    from forestds.tasks.clean import run_clean_pipeline
+    res = run_clean_pipeline(level="standard", db_url=db_url)
+    
+    assert res["status"] == "success"
+    # 验证按地块统计的删除数据是否正确
+    by_tract = res.get("deleted_db_by_tract", {})
+    assert by_tract.get("tree_observations") == {"t1": 1}
+    
+    conn = sqlite3.connect(temp_home / "db" / "4estds.sqlite")
+    conn.row_factory = sqlite3.Row
+    runs = [r["run_id"] for r in conn.execute("SELECT run_id FROM run_logs").fetchall()]
+    assert "08c67" in runs
+    assert "99999" not in runs
+    
+    assert (temp_home / "outputs" / "20260628_0440_08c67_infer").exists()
+    assert not (temp_home / "outputs" / "20260628_0440_99999_infer").exists()
+    assert (temp_home / "models" / "best.pt").exists()
+    assert not (temp_home / "cache" / "temp.tile").exists()
+    conn.close()
+    
+    run_clean_pipeline(level="reset", db_url=db_url)
+    assert (temp_home / "models" / "best.pt").exists()
+    assert not (temp_home / "outputs" / "20260628_0440_08c67_infer").exists()
+    
+    run_clean_pipeline(level="deep", db_url=db_url)
+    assert not temp_home.exists()
 
 
 if __name__ == "__main__":

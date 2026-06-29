@@ -52,8 +52,8 @@ detect:
   models:
     ultralytics:
       # weights: "m03"
-      # weights: "rtdetr-l.pt"
-      weights: ".4estDS/outputs/20260627_1722_fb93c_train/weights/best.pt"
+      weights: "rtdetr-l.pt"
+      # weights: ".4estDS/outputs/20260627_1722_fb93c_train/weights/best.pt"
 
 postprocess:
   draw_box: true                 # 🔴 是否在原图(或原图中心5000*5000的子图）上绘制检测框, 并保存

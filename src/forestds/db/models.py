@@ -34,7 +34,7 @@ class RunLog(Base):
     task_type: Mapped[str] = mapped_column(String, nullable=False)
     model_arch: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="running")
-    started_at: Mapped[datetime] = mapped_column(String)
+    started_at: Mapped[str] = mapped_column(String, nullable=False)
     ended_at: Mapped[str | None] = mapped_column(String)
     duration_s: Mapped[float | None] = mapped_column(Float)
     input_path: Mapped[str | None] = mapped_column(Text)
@@ -73,6 +73,7 @@ class Tract(Base):
     geo_area: Mapped[float | None] = mapped_column(Float)
     area_unit: Mapped[str | None] = mapped_column(String)
     crs_epsg: Mapped[int | None] = mapped_column(Integer)
+    crs_wkt: Mapped[str | None] = mapped_column(Text)
     geotransform: Mapped[str | None] = mapped_column(Text)
     bounds_bbox: Mapped[str | None] = mapped_column(Text)
     nodata: Mapped[float | None] = mapped_column(Float)
@@ -139,7 +140,11 @@ class TractTree(Base):
     height: Mapped[float | None] = mapped_column(Float)
     crown: Mapped[float | None] = mapped_column(Float)
     crown_volume_geo: Mapped[float | None] = mapped_column(Float)
-    chosen_obs_id: Mapped[str | None] = mapped_column(String)
-    active_run_id: Mapped[str | None] = mapped_column(String)
+    chosen_obs_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tree_observations.obs_id", ondelete="SET NULL")
+    )
+    active_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("run_logs.run_id", ondelete="SET NULL")
+    )
 
     individual: Mapped[TreeIndividual | None] = relationship(back_populates="canonicals")

@@ -516,47 +516,109 @@ def cmd_track(
     return 0
 
 
-@app.command("clean", help="清理运行期目录(保留子目录结构，默认不删 models)")
+@app.command("clean", help="清理运行期目录(支持多级别清理，智能垃圾回收)")
 def cmd_clean(
-    delete_models: bool = Option(
+    level: str = Option(
+        "standard",
+        "--level",
+        "-l",
+        help="清理级别: standard (默认：与日志文件对齐) / reset (仅保留 models 和 config子目录) / deep (强制彻底清空 home_dir)",
+    ),
+    yes: bool = Option(
         False,
-        "--delete-models",
-        help="是否连同 models 目录下的模型权重一并删除(默认保留)",
+        "--yes",
+        "-y",
+        help="在 deep 级别清理时直接执行免去交互确认",
     ),
 ) -> int:
-    import shutil
+    from .tasks.clean import run_clean_pipeline
     from . import paths
+    import typer
+    
+    level = level.lower().strip()
+    if level not in ("deep", "reset", "standard"):
+        logger.error(f"[clean] 不支持的清理级别 '{level}'，可选: standard, reset, deep")
+        return 1
 
-    root = paths.home_dir()
-    logger.info(f"[clean] 开始清理运行期目录: {root}")
-    if not root.exists():
-        logger.info("[clean] 运行期目录不存在，无需清理。")
-        return 0
+    if level == "deep" and not yes:
+        typer.secho(
+            "⚠️  警告 (CRITICAL WARNING) ⚠️\n"
+            f"deep 清理级别将彻底清空您的整个运行期根目录 [{paths.home_dir()}]！\n"
+            "这会永久清空您的所有本地数据库记录、模型权重 (models) 以及本地配置文件！此操作不可逆！",
+            fg=typer.colors.RED,
+            bold=True,
+        )
+        confirm = typer.confirm("您确定要继续此操作吗？", default=False)
+        if not confirm:
+            logger.info("[clean] 操作被用户取消。")
+            return 1
 
-    for item in root.iterdir():
-        if item.is_dir():
-            # 保留 models 目录及其内容（除非 delete_models 为 True）
-            if item.name == "models" and not delete_models:
-                logger.info(f"[clean] 保留模型目录: {item}")
+    logger.info(f"[clean] 开始执行 [{level}] 级别的清理管线...")
+    try:
+        res = run_clean_pipeline(level=level)
+    except Exception as e:
+        logger.error(f"[clean] 清理过程发生致命错误: {e}")
+        return 1
+
+    if level == "deep":
+        logger.info(
+            f"[clean] 深度清理完成！共删除文件 {res['deleted_files_count']} 个，"
+            f"释放磁盘空间 {res['freed_bytes'] / 1024 / 1024:.2f} MB"
+        )
+    elif level == "reset":
+        logger.info(
+            f"[clean] 重置完成！已保留 models 与 config 目录。共删除文件 {res['deleted_files_count']} 个，"
+            f"释放磁盘空间 {res['freed_bytes'] / 1024 / 1024:.2f} MB"
+        )
+    else:  # standard (smart GC)
+        logger.info("[clean] 智能垃圾回收 (standard) 完成！")
+        
+        if res.get("deleted_runs"):
+            logger.info("🗑️  已清理的历史运行记录 (run_id):")
+            for run in res["deleted_runs"]:
+                logger.info(f"  - {run}")
+        
+        if res.get("deleted_tracts"):
+            logger.info("🗺️  已清理的无用关联地块 (tract_id):")
+            for tract in res["deleted_tracts"]:
+                logger.info(f"  - {tract}")
+                
+        if res.get("deleted_outputs"):
+            logger.info("📂  已清理的无用输出子目录:")
+            for folder in res["deleted_outputs"]:
+                logger.info(f"  - {folder}")
+        
+        db_stats = res.get("deleted_db_stats", {})
+        db_by_tract = res.get("deleted_db_by_tract", {})
+        
+        # 1. 打印按地块进行统计的单木信息删除明细
+        obs_by_t = db_by_tract.get("tree_observations", {})
+        trees_by_t = db_by_tract.get("tract_trees", {})
+        affected_tracts = set(obs_by_t.keys()) | set(trees_by_t.keys())
+        if affected_tracts:
+            logger.info("🌲  单木空间观测清理明细 (按地块统计):")
+            for tid in affected_tracts:
+                obs_cnt = obs_by_t.get(tid, 0)
+                tree_cnt = trees_by_t.get(tid, 0)
+                if obs_cnt > 0 or tree_cnt > 0:
+                    logger.info(f"  - 地块 [{tid}]: 删除了 {obs_cnt} 条原始观测, {tree_cnt} 条规范单木")
+        
+        # 2. 打印其他表的删除统计 (排除已按地块/明细统计的表)
+        other_tables_printed = False
+        for table_name, deleted_count in db_stats.items():
+            if table_name in ("tree_observations", "tract_trees", "run_logs"):
                 continue
-
-            logger.info(f"[clean] 清空目录内容: {item}")
-            for sub_item in item.iterdir():
-                try:
-                    if sub_item.is_dir() and not sub_item.is_symlink():
-                        shutil.rmtree(sub_item)
-                    else:
-                        sub_item.unlink()
-                except Exception as e:
-                    logger.warning(f"[clean] 无法删除 {sub_item}: {e}")
-        else:
-            try:
-                item.unlink()
-                logger.info(f"[clean] 删除文件: {item}")
-            except Exception as e:
-                logger.warning(f"[clean] 无法删除文件 {item}: {e}")
-
-    logger.info("[clean] 清理完成！已保留子目录结构。")
+            if deleted_count > 0:
+                if not other_tables_printed:
+                    logger.info("📊  其它数据库表记录清理汇总:")
+                    other_tables_printed = True
+                logger.info(f"  - [{table_name}] 删除了 {deleted_count} 行记录")
+                    
+        logger.info(
+            f"💾  物理存储：共清理文件 {res['deleted_files_count']} 个，"
+            f"释放磁盘空间 {res['freed_bytes'] / 1024 / 1024:.2f} MB"
+        )
+        
     return 0
 
 
