@@ -419,11 +419,12 @@ def cmd_batch(
 
 @app.command("db", help="数据库管理")
 def cmd_db(
-    db_action: str = Argument(..., help="动作 (init / migrate)"),
+    db_action: str = Argument(..., help="动作 (init / migrate / promote)"),
+    run_id: Optional[str] = Option(None, "--run-id", "-r", help="要激活/发布的推理 run_id (仅在 promote 动作时必需)"),
 ) -> int:
     args = SimpleNamespace(db_action=db_action)
 
-    settings, run_id = _bootstrap(task_type="db")
+    settings, _ = _bootstrap(task_type="db")
     from .db import schema
 
     if args.db_action == "init":
@@ -431,6 +432,18 @@ def cmd_db(
         logger.info(f"[db] 数据库已初始化: {path}")
     elif args.db_action == "migrate":
         logger.info("[db] TODO: 接入 Alembic 迁移(现以 init 建表作为兜底)")
+    elif args.db_action == "promote":
+        if not run_id:
+            logger.error("[db] 动作 promote 要求提供 --run-id / -r 参数！")
+            return 2
+        from .db import writer
+        try:
+            db_url = settings.get("url", None)
+            writer.promote_run(run_id, url=db_url)
+            logger.info(f"[db] 推理任务 {run_id} 已成功发布激活为正式版本。")
+        except Exception as e:
+            logger.error(f"[db] 发布推理任务失败: {e}")
+            return 1
     else:
         logger.error("[db] 未知子命令")
         return 2
@@ -465,12 +478,22 @@ def cmd_track(
     snapshots: list[tuple[str, list]] = []
     for t in tracts:
         tid = t["tract_id"]
-        run_for = reader.latest_run_for_tract(tid, url=db_url)
+        run_for = reader.active_run_for_tract(tid, url=db_url)
         if not run_for:
-            logger.warning(f"[track] 地块 {tid} 无观测 run,跳过")
-            continue
+            # 自动寻回最近的成功推理任务，进行兜底激活
+            latest = reader.latest_run_for_tract(tid, url=db_url)
+            if latest:
+                logger.info(f"[track] 地块 {tid} 暂无激活版本，系统自动激活最近推理任务 {latest}。")
+                try:
+                    writer.promote_run(latest, url=db_url)
+                    run_for = latest
+                except Exception as ex:
+                    logger.error(f"[track] 自动激活任务 {latest} 失败: {ex}")
+                    continue
+            else:
+                logger.warning(f"[track] 地块 {tid} 无任何成功的推理记录，跳过。")
+                continue
         obs = reader.fetch_observations(tract_id=tid, run_id=run_for, url=db_url)
-        writer.consolidate_tract_trees(tid, run_for, obs, url=db_url)
         recs = []
         for o in obs:
             pt = writer.parse_point(o.get("geom_point"))

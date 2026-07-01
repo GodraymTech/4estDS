@@ -166,5 +166,18 @@ def find_cached_tiles(input_path: str, *, url: str | None = None) -> Path | None
     if td.is_dir() and any(td.glob("*.*")):
         log.warning("命中切片缓存, 无需执行切割: run_id={} tiles_dir={}", row["run_id"], td)
         return td
-    log.warning("缓存记录存在但目录已失效: {}", td)
+    log.warning("缓存记录存在变动，但目录已失效: {}", td)
     return None
+
+
+def active_run_for_tract(tract_id: str, *, url: str | None = None) -> str | None:
+    """返回地块当前激活/发布的 run_id。"""
+    conn = _connect(url)
+    try:
+        row = conn.execute(
+            "SELECT active_run_id FROM tracts WHERE tract_id=?",
+            (tract_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row["active_run_id"] if row else None

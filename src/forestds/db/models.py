@@ -82,6 +82,9 @@ class Tract(Base):
     footprint_geom: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String, default="registered")
     notes: Mapped[str | None] = mapped_column(Text)
+    active_run_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("run_logs.run_id", ondelete="SET NULL")
+    )
 
     sources: Mapped[list["TractSource"]] = relationship(back_populates="tract")
 

@@ -75,6 +75,7 @@ DDL: tuple[str, ...] = (
         footprint_geom   TEXT,
         status           TEXT DEFAULT 'registered',
         notes            TEXT,
+        active_run_id    TEXT REFERENCES run_logs(run_id) ON DELETE SET NULL,
         UNIQUE (acquisition_time, location)
     )
     """,

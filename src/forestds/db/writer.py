@@ -334,6 +334,45 @@ def parse_point(wkt: str | None) -> tuple[float, float] | None:
         return None
 
 
+def bbox_iou_geo(box1, box2):
+    ax_min, ax_max = sorted([box1[0], box1[2]])
+    ay_min, ay_max = sorted([box1[1], box1[3]])
+    bx_min, bx_max = sorted([box2[0], box2[2]])
+    by_min, by_max = sorted([box2[1], box2[3]])
+    
+    inter_x_min = max(ax_min, bx_min)
+    inter_y_min = max(ay_min, by_min)
+    inter_x_max = min(ax_max, bx_max)
+    inter_y_max = min(ay_max, by_max)
+    
+    inter_w = max(0.0, inter_x_max - inter_x_min)
+    inter_h = max(0.0, inter_y_max - inter_y_min)
+    inter_area = inter_w * inter_h
+    
+    area_a = (ax_max - ax_min) * (ay_max - ay_min)
+    area_b = (bx_max - bx_min) * (by_max - by_min)
+    union_area = area_a + area_b - inter_area
+    if union_area <= 0.0:
+        return 0.0
+    return inter_area / union_area
+
+
+def parse_polygon_geo(wkt: str | None) -> list[float] | None:
+    if not wkt or not isinstance(wkt, str):
+        return None
+    s = wkt.strip()
+    if "((" not in s or "))" not in s:
+        return None
+    try:
+        inner = s[s.index("((") + 2: s.index("))")]
+        points = [p.split() for p in inner.split(",")]
+        xs = [float(p[0]) for p in points]
+        ys = [float(p[1]) for p in points]
+        return [min(xs), min(ys), max(xs), max(ys)]
+    except Exception:
+        return None
+
+
 def consolidate_tract_trees(
     tract_id: str,
     run_id: str,
@@ -341,36 +380,224 @@ def consolidate_tract_trees(
     *,
     url: str | None = None,
 ) -> int:
-    """将某 run 的观测整理为地块规范单木 tract_trees(幂等: 先清空该地块再重建)。
+    """将某 run 的观测整理为地块规范单木 tract_trees(增量更新: 基于 KD-Tree 和 bbox IoU 空间匹配)。
 
-    observations: fetch_observations 返回的 dict 列表
-    (含 obs_id/geom_point/geom_crown/height/crown_area_px/species/confidence)。
-    返回写入的规范株条数。保留已有 individual_id 链接(重建后由 persist_individuals 回填)。
+    observations: fetch_observations 返回的 dict 列表。
     """
+    from scipy.spatial import cKDTree
+
+    # 1. 查询该地块已有的规范单木
     conn = _connect(url)
-    n = 0
+    conn.row_factory = sqlite3.Row
     try:
-        conn.execute("DELETE FROM tract_trees WHERE tract_id=?", (tract_id,))
+        row_tract = conn.execute(
+            "SELECT crs_epsg FROM tracts WHERE tract_id = ?",
+            (tract_id,),
+        ).fetchone()
+        crs_epsg = row_tract[0] if row_tract else None
+
+        # 2.0米匹配容差：EPSG:4326(约2e-5度)；投影坐标系(2.0米)
+        if crs_epsg == 4326:
+            matching_radius = 2.0 / 111320.0
+        else:
+            matching_radius = 2.0
+
+        existing_rows = conn.execute(
+            "SELECT canonical_id, geom_point, geom_crown, individual_id FROM tract_trees WHERE tract_id = ?",
+            (tract_id,),
+        ).fetchall()
+
+        # 2. 如果旧表为空，直接执行批量写入
+        if not existing_rows:
+            n = 0
+            for o in observations:
+                canonical_id = f"ct_{uuid.uuid4().hex[:12]}"
+                conn.execute(
+                    "INSERT INTO tract_trees "
+                    "(canonical_id, tract_id, individual_id, species, confidence, "
+                    " geom_point, geom_crown, height, chosen_obs_id, active_run_id, "
+                    " crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
+                     o.get("geom_point"), o.get("geom_crown"),
+                     o.get("height"), o.get("obs_id"), run_id,
+                     o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
+                     o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real")),
+                )
+                n += 1
+            conn.commit()
+            log.info("规范单木整理[初次写入]: {} 株 -> tract_id={} run_id={}", n, tract_id, run_id)
+            return n
+
+        # 3. 如果旧表不为空，执行 KD-Tree 匹配与增量更新
+        old_trees = []
+        for r in existing_rows:
+            pt = parse_point(r["geom_point"])
+            if pt:
+                old_trees.append({
+                    "canonical_id": r["canonical_id"],
+                    "pt": pt,
+                    "individual_id": r["individual_id"],
+                    "bbox": parse_polygon_geo(r["geom_crown"]),
+                    "geom_crown": r["geom_crown"]
+                })
+
+        old_coords = [ot["pt"] for ot in old_trees]
+        tree = cKDTree(old_coords)
+        matched_old_ids = set()
+        n_updated = 0
+        n_inserted = 0
+
         for o in observations:
-            canonical_id = f"ct_{uuid.uuid4().hex[:12]}"
-            conn.execute(
-                "INSERT INTO tract_trees "
-                "(canonical_id, tract_id, individual_id, species, confidence, "
-                " geom_point, geom_crown, height, chosen_obs_id, active_run_id, "
-                " crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
-                 o.get("geom_point"), o.get("geom_crown"),
-                 o.get("height"), o.get("obs_id"), run_id,
-                 o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
-                 o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real")),
-            )
-            n += 1
+            new_pt = parse_point(o.get("geom_point"))
+            if not new_pt:
+                canonical_id = f"ct_{uuid.uuid4().hex[:12]}"
+                conn.execute(
+                    "INSERT INTO tract_trees "
+                    "(canonical_id, tract_id, individual_id, species, confidence, "
+                    " geom_point, geom_crown, height, chosen_obs_id, active_run_id, "
+                    " crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
+                     o.get("geom_point"), o.get("geom_crown"),
+                     o.get("height"), o.get("obs_id"), run_id,
+                     o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
+                     o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real")),
+                )
+                n_inserted += 1
+                continue
+
+            indices = tree.query_ball_point(new_pt, r=matching_radius)
+            best_old_id = None
+            best_iou = 0.0
+
+            new_bbox = None
+            if o.get("box_geo"):
+                try:
+                    new_bbox = json.loads(o["box_geo"])
+                except Exception:
+                    pass
+            if new_bbox is None:
+                new_bbox = parse_polygon_geo(o.get("geom_crown"))
+
+            for idx in indices:
+                ot = old_trees[idx]
+                if ot["canonical_id"] in matched_old_ids:
+                    continue
+
+                if new_bbox and ot["bbox"]:
+                    iou = bbox_iou_geo(new_bbox, ot["bbox"])
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_old_id = ot["canonical_id"]
+
+            if best_old_id and best_iou > 0.5:
+                matched_old_ids.add(best_old_id)
+                orig_ind_id = next(ot["individual_id"] for ot in old_trees if ot["canonical_id"] == best_old_id)
+                conn.execute(
+                    "UPDATE tract_trees SET "
+                    "individual_id = ?, species = ?, confidence = ?, geom_point = ?, geom_crown = ?, "
+                    "height = ?, chosen_obs_id = ?, active_run_id = ?, "
+                    "crown_area_geo_est = ?, crown_area_geo_real = ?, "
+                    "crown_volume_geo_est = ?, crown_volume_geo_real = ? "
+                    "WHERE canonical_id = ?",
+                    (orig_ind_id, o.get("species"), o.get("confidence"), o.get("geom_point"), o.get("geom_crown"),
+                     o.get("height"), o.get("obs_id"), run_id,
+                     o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
+                     o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real"),
+                     best_old_id),
+                )
+                n_updated += 1
+            else:
+                canonical_id = f"ct_{uuid.uuid4().hex[:12]}"
+                conn.execute(
+                    "INSERT INTO tract_trees "
+                    "(canonical_id, tract_id, individual_id, species, confidence, "
+                    " geom_point, geom_crown, height, chosen_obs_id, active_run_id, "
+                    " crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
+                     o.get("geom_point"), o.get("geom_crown"),
+                     o.get("height"), o.get("obs_id"), run_id,
+                     o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
+                     o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real")),
+                )
+                n_inserted += 1
+
+        n_deleted = 0
+        for ot in old_trees:
+            if ot["canonical_id"] not in matched_old_ids:
+                conn.execute("DELETE FROM tract_trees WHERE canonical_id = ?", (ot["canonical_id"],))
+                n_deleted += 1
+
         conn.commit()
+        log.info(
+            "规范单木整理[增量更新成功]: 更新={}株 新增={}株 移除={}株 -> tract_id={} run_id={}",
+            n_updated, n_inserted, n_deleted, tract_id, run_id
+        )
+        return n_updated + n_inserted
     finally:
         conn.close()
-    log.info("规范单木整理: {} 株 -> tract_id={} run_id={}", n, tract_id, run_id)
-    return n
+
+
+def promote_run(run_id: str, *, url: str | None = None) -> None:
+    """激活/发布一个推理 Run 作为该地块的正式版本，触发增量同步与 active_run_id 回填。"""
+    from pathlib import Path
+    conn = _connect(url)
+    conn.row_factory = sqlite3.Row
+    try:
+        run_row = conn.execute(
+            "SELECT status, input_path FROM run_logs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if not run_row:
+            raise ValueError(f"推理任务 {run_id} 不存在。")
+        if run_row["status"] != "succeeded":
+            raise ValueError(f"推理任务 {run_id} 状态为 '{run_row['status']}'，只有成功的任务才能发布。")
+
+        obs_rows = conn.execute(
+            "SELECT * FROM tree_observations WHERE run_id = ?",
+            (run_id,),
+        ).fetchall()
+
+        tract_id = None
+        if obs_rows:
+            tract_id = obs_rows[0]["tract_id"]
+        else:
+            input_path = run_row["input_path"]
+            if input_path:
+                stem = Path(input_path).name
+                row_tract = conn.execute(
+                    "SELECT tract_id FROM tracts WHERE name = ? OR location LIKE ?",
+                    (stem, f"%{stem}%")
+                ).fetchone()
+                if row_tract:
+                    tract_id = row_tract[0]
+
+        if not tract_id:
+            input_path = run_row["input_path"]
+            row_tract = conn.execute(
+                "SELECT tract_id FROM tracts WHERE location = ? OR name = ?",
+                (input_path, input_path)
+            ).fetchone()
+            if row_tract:
+                tract_id = row_tract[0]
+
+        if not tract_id:
+            raise ValueError(f"无法确定推理任务 {run_id} 关联的地块 ID。")
+
+        from .reader import _rows_to_dicts
+        obs_dicts = _rows_to_dicts(obs_rows)
+        consolidate_tract_trees(tract_id, run_id, obs_dicts, url=url)
+
+        conn.execute(
+            "UPDATE tracts SET active_run_id = ? WHERE tract_id = ?",
+            (run_id, tract_id),
+        )
+        conn.commit()
+        log.info("推理任务 {} 已成功发布激活为地块 {} 的正式版本。", run_id, tract_id)
+    finally:
+        conn.close()
 
 
 def persist_individuals(individuals, *, url: str | None = None) -> int:

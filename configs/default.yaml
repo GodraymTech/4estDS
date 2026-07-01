@@ -75,9 +75,9 @@ fusion:
   height_stat: "max"             # 树高采样统计量 (max / p95 / median / mean)
   las_grid_size: 0.05            # 激光点云网格化分辨率 (米)
   dem_default: 0.0               # 单独 DSM 模式下默认常数背景 DEM 高程 (米)
-  volume_method: "cbh"           # 树冠体积估算方法: cbh (枝下高积分) / paraboloid (抛物面拟合) / cone (圆锥体拟合) / 
-                                    # ellipsoid (半椭球体拟合) / column (柱体积分) / 
-                                    #convex_hull (点云凸包，仅在LAS模式生效) / voxel (点云体素化，仅在LAS模式生效)
+  volume_method: "cbh"           # 树冠体积估算方法: cbh (枝下高积分) / column (柱体积分) / 【支持像素过滤】
+                                    # paraboloid (抛物面拟合) / cone (圆锥体拟合) / ellipsoid (半椭球体拟合) / 【纯几何估计】
+                                    #convex_hull (点云凸包) / voxel (点云体素化) 【仅在LAS模式生效】
   cbh_factor: 0.3                # 枝下高占树高比例 (0.0 - 1.0)
   voxel_size: 0.2                # 体素化估算方法中的三维网格单元大小 (米)
   chm_threshold: 0.1             # CHM 相对高度二值掩膜截断阈值，用于去噪与树冠勾勒 (米)
