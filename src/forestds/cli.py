@@ -637,15 +637,18 @@ def cmd_draw_bbox(
     return draw_bbox_main(image, label, with_infer, settings)
 
 
-@tool_app.command("draw-dsm", help="基于 DSM 高程从影像中提取并画出冠幅轮廓线")
+@tool_app.command("draw-dsm", help="基于 DSM/DEM 差分或估计在影像中绘制并生成高程热力图或矢量轮廓文件")
 def cmd_draw_dsm(
     image: str = Argument(..., help="正射影像 DOM TIFF 路径"),
     dsm: str = Argument(..., help="数字表面模型 DSM TIFF 路径"),
+    dem: Optional[str] = Option(None, "--dem", "-d", help="数字高程模型 DEM TIFF 路径 (可选，若不指定则降级为形态学估计)"),
+    mode: str = Option("both", "--mode", "-m", help="绘制及提取模式: heatmap (热力图) / contour (轮廓线) / both (全部生成，默认)"),
+    threshold: float = Option(0.1, "--threshold", "-t", help="CHM 高度过滤阈值 (米，默认: 0.1m)"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
 ) -> int:
     _, _ = _bootstrap(level=log_level, task_type="draw-dsm", to_file=False)
     from .utils import draw_dsm_main
-    return draw_dsm_main(image, dsm)
+    return draw_dsm_main(image, dsm, dem=dem, mode=mode, threshold=threshold)
 
 
 @tool_app.command("standardize-ds", help="将数据集目录改造成适合 Ultralytics YOLO 训练的新目录结构")

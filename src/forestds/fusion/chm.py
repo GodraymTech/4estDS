@@ -242,6 +242,7 @@ class CHMSampler:
     dsm: Optional[np.ndarray] = None
     dem: Optional[np.ndarray] = None
     dem_geo: Optional[GeoInfo] = None
+    chm_threshold: float = 0.1
     
     def __post_init__(self) -> None:
         if self.stat not in _VALID_STATS:
@@ -374,7 +375,16 @@ class CHMSampler:
 
             win = self.chm[r0:r1, c0:c1]
 
-        valid_h = win[~np.isnan(win)]
+        # 计算单个像元地理面积
+        if self.chm_geo is not None:
+            pixel_area = self.chm_geo.pixel_area_m2() or 1.0
+        else:
+            if self.coregistered:
+                pixel_area = abs(self.chm_transform.pixel_size_x() * self.chm_transform.pixel_size_y())
+            else:
+                pixel_area = 1.0
+        # ── 提取高度指标并计算有效高度像元 ─────────────────────────────────────
+        valid_h = win[~np.isnan(win) & (win >= self.chm_threshold)]
         if valid_h.size == 0:
             return None, None, "chm_nodata"
 
@@ -392,13 +402,6 @@ class CHMSampler:
             return None, None, "chm_outlier"
 
         # 2. 树冠三维体积估算
-        if self.chm_geo is not None:
-            pixel_area = self.chm_geo.pixel_area_m2() or 1.0
-        else:
-            if self.coregistered:
-                pixel_area = abs(self.chm_transform.pixel_size_x() * self.chm_transform.pixel_size_y())
-            else:
-                pixel_area = 1.0
 
         # 计算树冠宽度和高度的地理单位长度
         if self.coregistered:
@@ -549,6 +552,7 @@ def build_chm_sampler(
     volume_method: str = "cbh",
     cbh_factor: float = 0.3,
     voxel_size: float = 0.2,
+    chm_threshold: float = 0.1,
 ) -> Optional[CHMSampler]:
     """根据多渠道源输入（chm、dsm+dem、单独dsm、las点云）构建统一的 CHMSampler。"""
     chm: Optional[np.ndarray] = None
@@ -600,6 +604,7 @@ def build_chm_sampler(
             dsm=dsm,
             dem=dem,
             dem_geo=dem_geo,
+            chm_threshold=chm_threshold,
         )
 
     if chm is None or chm.size == 0:
@@ -628,4 +633,5 @@ def build_chm_sampler(
         voxel_size=voxel_size,
         raw_points=raw_pts,
         las_grid_size=las_grid_size,
+        chm_threshold=chm_threshold,
     )

@@ -230,6 +230,7 @@ def run_infer_pipeline(
             volume_method=str(settings.get("fusion.volume_method", settings.get("volume_method", "cbh"))),
             cbh_factor=float(settings.get("fusion.cbh_factor", settings.get("cbh_factor", 0.3))),
             voxel_size=float(settings.get("fusion.voxel_size", settings.get("voxel_size", 0.2))),
+            chm_threshold=float(settings.get("fusion.chm_threshold", 0.1)),
         )
         if sampler is not None:
             sampler.annotate(result.detections)
