@@ -221,6 +221,12 @@ def run_infer_pipeline(
         from ..fusion import build_chm_sampler
         from ..geo import resolve_geo
         rgb_geo = resolve_geo(image_path, transform=transform_obj, crs=crs_obj)
+        
+        find_real_canopy_val = settings.get("fusion.find_real_canopy", True)
+        if isinstance(find_real_canopy_val, str):
+            find_real_canopy_val = find_real_canopy_val.lower() == "true"
+        max_valid_height_val = float(settings.get("fusion.max_valid_height", 8.0))
+
         sampler = build_chm_sampler(
             chm_path=chm, dsm_path=dsm, dem_path=dem, las_path=las,
             las_grid_size=las_grid_size or float(settings.get("fusion.las_grid_size", settings.get("las_grid_size", 0.05))),
@@ -231,12 +237,50 @@ def run_infer_pipeline(
             cbh_factor=float(settings.get("fusion.cbh_factor", settings.get("cbh_factor", 0.3))),
             voxel_size=float(settings.get("fusion.voxel_size", settings.get("voxel_size", 0.2))),
             chm_threshold=float(settings.get("fusion.chm_threshold", 0.1)),
+            find_real_canopy=find_real_canopy_val,
+            max_valid_height=max_valid_height_val,
         )
         if sampler is not None:
             sampler.annotate(result.detections)
             for _stype, _path in (("chm", chm), ("dsm", dsm), ("dem", dem), ("las", las)):
                 if _path:
                     writer.register_source(tract_id, _stype, _path)
+
+        # 触发多源融合成果可视化输出至 multisource/ 目录
+        if dsm or las:
+            multisource_dir = paths.outputs_infer_dir() / "multisource"
+            multisource_dir.mkdir(parents=True, exist_ok=True)
+            chm_threshold_val = float(settings.get("fusion.chm_threshold", 0.1))
+            if las:
+                from ..utils.draw_las import draw_las_main
+                log.info("触发多源融合绘图：开始为点云生成三维及格网可视化图件...")
+                try:
+                    draw_las_main(
+                        las_path=las,
+                        image_path=image_path,
+                        dem=dem,
+                        profile_width=0.5,
+                        threshold=chm_threshold_val,
+                        out_dir=multisource_dir,
+                        max_valid_height=max_valid_height_val,
+                    )
+                except Exception as e:
+                    log.warning("多源融合点云绘图失败: {}", e)
+            elif dsm:
+                from ..utils.draw_dsm import draw_dsm_main
+                log.info("触发多源融合绘图：开始为 DSM 生成高程及等高线可视化图件...")
+                try:
+                    draw_dsm_main(
+                        image_path=image_path,
+                        dsm_path=dsm,
+                        dem=dem,
+                        mode="both",
+                        threshold=chm_threshold_val,
+                        out_dir=multisource_dir,
+                        max_valid_height=max_valid_height_val,
+                    )
+                except Exception as e:
+                    log.warning("多源融合 DSM 绘图失败: {}", e)
 
     # ── 5. 观测入库 ────────────────────────────────────────────────────────────
     written = writer.write_observations(
@@ -295,7 +339,7 @@ def run_infer_pipeline(
             from ..export import export_tract_to_file
             exp = export_tract_to_file(
                 tract_id=tract_id, run_id=run_id, fmt=resolved_export_fmt,
-                out_path=paths.outputs_infer_dir() / "vectors", db_url=db_url,
+                out_path=paths.outputs_infer_dir() / "vectors_bbox", db_url=db_url,
                 crs_epsg=geo.get("crs_epsg"),
                 crs_wkt=geo.get("crs_wkt"),
             )

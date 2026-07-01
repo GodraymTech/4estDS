@@ -644,11 +644,27 @@ def cmd_draw_dsm(
     dem: Optional[str] = Option(None, "--dem", "-d", help="数字高程模型 DEM TIFF 路径 (可选，若不指定则降级为形态学估计)"),
     mode: str = Option("both", "--mode", "-m", help="绘制及提取模式: heatmap (热力图) / contour (轮廓线) / both (全部生成，默认)"),
     threshold: float = Option(0.1, "--threshold", "-t", help="CHM 高度过滤阈值 (米，默认: 0.1m)"),
+    max_valid_height: float = Option(8.0, "--max-valid-height", "-h", help="最大有效高度 (米，默认: 8.0m)"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
 ) -> int:
     _, _ = _bootstrap(level=log_level, task_type="draw-dsm", to_file=False)
     from .utils import draw_dsm_main
-    return draw_dsm_main(image, dsm, dem=dem, mode=mode, threshold=threshold)
+    return draw_dsm_main(image, dsm, dem=dem, mode=mode, threshold=threshold, max_valid_height=max_valid_height)
+
+
+@tool_app.command("draw-las", help="基于 LAS 激光雷达点云与正射影像对齐并生成垂直剖面图、高程热力图、等高线图与 shp 矢量图层")
+def cmd_draw_las(
+    las: str = Argument(..., help="输入的激光点云 LAS/LAZ 路径"),
+    image: str = Argument(..., help="正射影像 DOM TIFF 路径"),
+    dem: Optional[str] = Option(None, "--dem", "-d", help="数字高程模型 DEM TIFF 路径 (可选，若不指定则根据点云估计地表高程)"),
+    profile_width: float = Option(0.5, "--profile-width", "-w", help="垂直切片条带采样宽度 (米，默认: 0.5m)"),
+    threshold: float = Option(0.1, "--threshold", "-t", help="CHM 高度过滤阈值 (米，默认: 0.1m)"),
+    max_valid_height: float = Option(8.0, "--max-valid-height", "-h", help="最大有效高度 (米，默认: 8.0m)"),
+    log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
+) -> int:
+    _, _ = _bootstrap(level=log_level, task_type="draw-las", to_file=False)
+    from .utils import draw_las_main
+    return draw_las_main(las, image, dem=dem, profile_width=profile_width, threshold=threshold, max_valid_height=max_valid_height)
 
 
 @tool_app.command("standardize-ds", help="将数据集目录改造成适合 Ultralytics YOLO 训练的新目录结构")

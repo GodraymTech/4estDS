@@ -160,7 +160,10 @@ def export_tract_to_file(
             writer_csv = csv.writer(csvfile)
             writer_csv.writerow([
                 "obs_id", "species", "confidence",
-                "crown_w_geo", "crown_h_geo", "crown_area_geo",
+                "crown_w_geo", "crown_h_geo",
+                "crown_area_px_est", "crown_area_px_real",
+                "crown_area_geo_est", "crown_area_geo_real",
+                "crown_volume_geo_est", "crown_volume_geo_real",
                 "height", "height_source", "geom_crown", "geom_point",
                 "box_px_sub", "source_subimage_path", "run_id"
             ])
@@ -171,7 +174,12 @@ def export_tract_to_file(
                     obs.get("confidence"),
                     obs.get("crown_w_geo"),
                     obs.get("crown_h_geo"),
-                    obs.get("crown_area_geo"),
+                    obs.get("crown_area_px_est"),
+                    obs.get("crown_area_px_real"),
+                    obs.get("crown_area_geo_est"),
+                    obs.get("crown_area_geo_real"),
+                    obs.get("crown_volume_geo_est"),
+                    obs.get("crown_volume_geo_real"),
                     obs.get("height"),
                     obs.get("height_source"),
                     obs.get("geom_crown"),
@@ -196,7 +204,12 @@ def export_tract_to_file(
                 "confidence": obs.get("confidence"),
                 "crown_w_geo": obs.get("crown_w_geo"),
                 "crown_h_geo": obs.get("crown_h_geo"),
-                "crown_area_geo": obs.get("crown_area_geo"),
+                "crown_area_px_est": obs.get("crown_area_px_est"),
+                "crown_area_px_real": obs.get("crown_area_px_real"),
+                "crown_area_geo_est": obs.get("crown_area_geo_est"),
+                "crown_area_geo_real": obs.get("crown_area_geo_real"),
+                "crown_volume_geo_est": obs.get("crown_volume_geo_est"),
+                "crown_volume_geo_real": obs.get("crown_volume_geo_real"),
                 "height": obs.get("height"),
                 "height_source": obs.get("height_source"),
                 "run_id": obs.get("run_id"),
@@ -269,7 +282,12 @@ def export_tract_to_file(
                 "confidence": obs.get("confidence"),
                 "crown_w": obs.get("crown_w_geo"),
                 "crown_h": obs.get("crown_h_geo"),
-                "crown_area": obs.get("crown_area_geo"),
+                "area_px_est": obs.get("crown_area_px_est"),
+                "area_px_real": obs.get("crown_area_px_real"),
+                "area_geo_est": obs.get("crown_area_geo_est"),
+                "area_geo_real": obs.get("crown_area_geo_real"),
+                "volume_est": obs.get("crown_volume_geo_est"),
+                "volume_real": obs.get("crown_volume_geo_real"),
                 "height": obs.get("height"),
                 "height_src": obs.get("height_source"),
                 "run_id": obs.get("run_id"),
@@ -280,8 +298,11 @@ def export_tract_to_file(
         if not data_list:
             data_list = [{
                 "geometry": None, "obs_id": None, "species": None, "confidence": None,
-                "crown_w": None, "crown_h": None, "crown_area": None, "height": None,
-                "height_src": None, "run_id": None, "tract_id": None
+                "crown_w": None, "crown_h": None,
+                "area_px_est": None, "area_px_real": None,
+                "area_geo_est": None, "area_geo_real": None,
+                "volume_est": None, "volume_real": None,
+                "height": None, "height_src": None, "run_id": None, "tract_id": None
             }]
             
         gdf = gpd.GeoDataFrame(data_list)

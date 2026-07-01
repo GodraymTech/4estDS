@@ -101,18 +101,21 @@ DDL: tuple[str, ...] = (
         box_geo             TEXT,
         crown_w_px          REAL,
         crown_h_px          REAL,
-        crown_area_px       REAL,
         crown_w_geo         REAL,
         crown_h_geo         REAL,
-        crown_area_geo      REAL,
         height              REAL,
         height_source       TEXT,
-        crown_volume_geo    REAL,
         center_geo          TEXT,
         source_subimage_path TEXT,
         slice_size          INTEGER,
         geom_point          TEXT,
-        geom_crown          TEXT
+        geom_crown          TEXT,
+        crown_area_px_est   REAL,
+        crown_area_px_real  REAL,
+        crown_area_geo_est  REAL,
+        crown_area_geo_real REAL,
+        crown_volume_geo_est REAL,
+        crown_volume_geo_real REAL
     )
     """,
     # 地块规范单木(同一时相择优)
@@ -126,10 +129,12 @@ DDL: tuple[str, ...] = (
         geom_point    TEXT,
         geom_crown    TEXT,
         height        REAL,
-        crown         REAL,
-        crown_volume_geo REAL,
         chosen_obs_id TEXT REFERENCES tree_observations(obs_id) ON DELETE SET NULL,
-        active_run_id TEXT REFERENCES run_logs(run_id) ON DELETE SET NULL
+        active_run_id TEXT REFERENCES run_logs(run_id) ON DELETE SET NULL,
+        crown_area_geo_est   REAL,
+        crown_area_geo_real  REAL,
+        crown_volume_geo_est REAL,
+        crown_volume_geo_real REAL
     )
     """,
     # 常用索引
@@ -158,23 +163,7 @@ def init_db(url: str | None = None) -> Path:
         conn.execute("PRAGMA foreign_keys = ON")
         for stmt in DDL:
             conn.execute(stmt)
-        # 向后兼容迁移：为旧库补充 tiles_dir 列（SQLite 不支持 IF NOT EXISTS，忽略重复错误）
-        try:
-            conn.execute("ALTER TABLE run_logs ADD COLUMN tiles_dir TEXT")
-        except sqlite3.OperationalError:
-            pass  # 列已存在，无需处理
-        try:
-            conn.execute("ALTER TABLE tree_observations ADD COLUMN crown_volume_geo REAL")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE tract_trees ADD COLUMN crown_volume_geo REAL")
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute("ALTER TABLE tracts ADD COLUMN crs_wkt TEXT")
-        except sqlite3.OperationalError:
-            pass
+        # DDL contains all required column definitions. No migration checks needed.
         conn.commit()
     finally:
         conn.close()

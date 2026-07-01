@@ -66,7 +66,7 @@ def latest_run_for_tract(tract_id: str, *, url: str | None = None) -> str | None
         row = conn.execute(
             "SELECT o.run_id FROM tree_observations o "
             "JOIN run_logs r ON r.run_id = o.run_id "
-            "WHERE o.tract_id=? ORDER BY r.started_at DESC LIMIT 1",
+            "WHERE o.tract_id=? AND r.status='succeeded' ORDER BY r.started_at DESC LIMIT 1",
             (tract_id,),
         ).fetchone()
     finally:
@@ -99,6 +99,13 @@ def fetch_observations(
     finally:
         conn.close()
     obs = _rows_to_dicts(rows)
+    for o in obs:
+        if "crown_area_px" not in o or o["crown_area_px"] is None:
+            o["crown_area_px"] = o.get("crown_area_px_real")
+        if "crown_area_geo" not in o or o["crown_area_geo"] is None:
+            o["crown_area_geo"] = o.get("crown_area_geo_real")
+        if "crown_volume_geo" not in o or o["crown_volume_geo"] is None:
+            o["crown_volume_geo"] = o.get("crown_volume_geo_real")
     log.debug("fetch_observations: {} 条 (run_id={} tract_id={})", len(obs), run_id, tract_id)
     return obs
 

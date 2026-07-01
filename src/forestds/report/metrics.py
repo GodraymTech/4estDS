@@ -114,7 +114,7 @@ def _collect(observations: list[dict], key: str) -> list[float]:
     for o in observations:
         v = _num(o.get(key))
         if v is not None:
-            if key == "height" and v > 5.0:
+            if key == "height" and v > 50.0:
                 continue
             out.append(v)
     return out
@@ -127,6 +127,15 @@ def compute_report(
     run_id: str | None = None,
 ) -> ReportData:
     """从观测记录计算一份完整报告数据。"""
+    # Map legacy keys to physical/real measurements for compatibility with rendering and calculations
+    for o in observations:
+        if "crown_area_px" not in o or o["crown_area_px"] is None:
+            o["crown_area_px"] = o.get("crown_area_px_real")
+        if "crown_area_geo" not in o or o["crown_area_geo"] is None:
+            o["crown_area_geo"] = o.get("crown_area_geo_real")
+        if "crown_volume_geo" not in o or o["crown_volume_geo"] is None:
+            o["crown_volume_geo"] = o.get("crown_volume_geo_real")
+
     tract = tract or {}
     area_m2 = _num(tract.get("geo_area"))
     species = species_composition(observations)

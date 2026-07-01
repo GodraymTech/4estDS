@@ -12,12 +12,12 @@ from typing import Optional
 
 import numpy as np
 
-from ..geo import Affine, GeoInfo, resolve_geo
+from ..geo import Affine, GeoInfo, resolve_geo, _M_PER_DEG_LAT
 from loguru import logger as log
 from ..logging_setup import log_distribution
 
 # 树高合理上限(m)。
-_MAX_PLAUSIBLE_HEIGHT = 5.0
+_MAX_PLAUSIBLE_HEIGHT = 50.0
 _VALID_STATS = ("p95", "max", "median", "mean")
 _VALID_VOLUME_METHODS = ("cbh", "paraboloid", "cone", "ellipsoid", "column")
 
@@ -163,15 +163,37 @@ def chm_from_las(
     height_above_ground = z - z_base
     height_above_ground = np.maximum(0.0, height_above_ground)
 
-    # 基于点云自身地理包围盒创建网格，由 CHMSampler 的仿射变换自动完成空间跨分辨率对齐。
+    # 3. 判定坐标系种类与网格分辨率换算
+    epsg = 4326
+    try:
+        if las.header.parse_crs() is not None:
+            epsg_str = las.header.parse_crs().to_epsg()
+            if epsg_str:
+                epsg = int(epsg_str)
+    except Exception:
+        pass
+    
     x_min, x_max = np.min(x), np.max(x)
     y_min, y_max = np.min(y), np.max(y)
     
-    cols = max(1, int(np.ceil((x_max - x_min) / grid_size)))
-    rows = max(1, int(np.ceil((y_max - y_min) / grid_size)))
+    crs_kind = "unknown"
+    origin_lat = None
+    import math
+    if epsg == 4326:
+        crs_kind = "geographic"
+        origin_lat = float(y_max + y_min) / 2.0
+        grid_size_x = grid_size / (_M_PER_DEG_LAT * math.cos(math.radians(origin_lat)))
+        grid_size_y = grid_size / _M_PER_DEG_LAT
+    else:
+        crs_kind = "projected"
+        grid_size_x = grid_size
+        grid_size_y = grid_size
+
+    cols = max(1, int(np.ceil((x_max - x_min) / grid_size_x)))
+    rows = max(1, int(np.ceil((y_max - y_min) / grid_size_y)))
     
-    col_idx = ((x - x_min) / grid_size).astype(np.int32)
-    row_idx = ((y_max - y) / grid_size).astype(np.int32)
+    col_idx = ((x - x_min) / grid_size_x).astype(np.int32)
+    row_idx = ((y_max - y) / grid_size_y).astype(np.int32)
     
     # 滤除越界点
     valid_mask = (col_idx >= 0) & (col_idx < cols) & (row_idx >= 0) & (row_idx < rows)
@@ -192,33 +214,15 @@ def chm_from_las(
     
     # 构造仿射地理转换信息
     from ..geo import Affine
-    new_transform = Affine(grid_size, 0.0, x_min, 0.0, -grid_size, y_max)
-    # EPSG 可从 las 中提取，若未提供使用 EPSG:4326
-    epsg = 4326
-    try:
-        if las.header.parse_crs() is not None:
-            epsg_str = las.header.parse_crs().to_epsg()
-            if epsg_str:
-                epsg = int(epsg_str)
-    except Exception:
-        pass
+    new_transform = Affine(grid_size_x, 0.0, x_min, 0.0, -grid_size_y, y_max)
     
-    # 判定坐标系种类
-    crs_kind = "unknown"
-    origin_lat = None
-    if epsg == 4326:
-        crs_kind = "geographic"
-        origin_lat = float(y_max + y_min) / 2.0
-    else:
-        crs_kind = "projected"
-
     geo_info = GeoInfo(
         transform=new_transform,
         crs_kind=crs_kind,
         origin_lat=origin_lat,
         source="las_mesh",
     )
-    log.info("点云网格化成功: CHM 尺寸=%dx%d 范围=[{:.2f}, {:.2f}]m", cols, rows, float(np.nanmin(chm)), float(np.nanmax(chm)))
+    log.info("点云网格化成功: CHM 尺寸={}x{} 范围=[{:.2f}, {:.2f}]m", cols, rows, float(np.nanmin(chm[~np.isnan(chm)])), float(np.nanmax(chm[~np.isnan(chm)])))
     return chm, geo_info, (x, y, height_above_ground)
 
 
@@ -243,6 +247,8 @@ class CHMSampler:
     dem: Optional[np.ndarray] = None
     dem_geo: Optional[GeoInfo] = None
     chm_threshold: float = 0.1
+    find_real_canopy: bool = True
+    max_valid_height: float = 8.0
     
     def __post_init__(self) -> None:
         if self.stat not in _VALID_STATS:
@@ -252,6 +258,9 @@ class CHMSampler:
             log.warning("未知体积估算方法 {}, 回退 cbh", self.volume_method)
             self.volume_method = "cbh"
             
+        if self.chm is not None:
+            self.chm = np.minimum(self.chm, self.max_valid_height)
+            
         if self.source_name == "dsm_dem" and self.dsm is not None:
             shape_h, shape_w = self.dsm.shape
         else:
@@ -260,15 +269,15 @@ class CHMSampler:
         coreg = self.chm_transform is not None and self.rgb_transform is not None
         mode = "仿射配准" if coreg else "像素对齐"
         log.info(
-            "CHMSampler 初始化: CHM 尺寸={}x{} 配准模式={} 统计量={} 体积估算={} (factor={:.2f})",
-            shape_w, shape_h, mode, self.stat, self.volume_method, self.cbh_factor
+            "CHMSampler 初始化: CHM 尺寸={}x{} 配准模式={} 统计量={} 体积估算={} (factor={:.2f}) find_real_canopy={} max_valid_height={}m",
+            shape_w, shape_h, mode, self.stat, self.volume_method, self.cbh_factor, self.find_real_canopy, self.max_valid_height
         )
 
     @property
     def coregistered(self) -> bool:
         return self.chm_transform is not None and self.rgb_transform is not None
 
-    def metrics_for_detection(self, det) -> tuple[Optional[float], Optional[float], str]:
+    def metrics_for_detection(self, det) -> dict:
         """计算检测框对应的树高与树冠体积。
 
         将检测框在影像中的完整包围盒区域映射到 CHM 网格中，
@@ -287,7 +296,7 @@ class CHMSampler:
                 
                 win_dsm = self.dsm[r0:r1, c0:c1]
                 if win_dsm.size == 0:
-                    return None, None, "chm_out_of_bounds"
+                    return {"error": "chm_out_of_bounds"}
                 win_dem = self.dem[r0:r1, c0:c1]
                 if win_dem.shape != win_dsm.shape:
                     win_dem = win_dem[:win_dsm.shape[0], :win_dsm.shape[1]]
@@ -309,7 +318,7 @@ class CHMSampler:
                 
                 win_dsm = self.dsm[r0:r1, c0:c1]
                 if win_dsm.size == 0:
-                    return None, None, "chm_out_of_bounds"
+                    return {"error": "chm_out_of_bounds"}
                 
                 dem_transform = self.dem_geo.transform if self.dem_geo is not None else self.chm_transform
                 dem_h, dem_w = self.dem.shape
@@ -324,7 +333,7 @@ class CHMSampler:
                 
                 win_dem_raw = self.dem[dr0:dr1, dc0:dc1]
                 if win_dem_raw.size == 0:
-                    return None, None, "chm_nodata"
+                    return {"error": "chm_nodata"}
                 
                 # 局部双线性缩放
                 try:
@@ -371,7 +380,7 @@ class CHMSampler:
                 r1 = min(h_h, int(round(max(row1, row2))) + 1)
 
             if c0 >= c1 or r0 >= r1:
-                return None, None, "chm_out_of_bounds"
+                return {"error": "chm_out_of_bounds"}
 
             win = self.chm[r0:r1, c0:c1]
 
@@ -383,10 +392,11 @@ class CHMSampler:
                 pixel_area = abs(self.chm_transform.pixel_size_x() * self.chm_transform.pixel_size_y())
             else:
                 pixel_area = 1.0
+
         # ── 提取高度指标并计算有效高度像元 ─────────────────────────────────────
         valid_h = win[~np.isnan(win) & (win >= self.chm_threshold)]
         if valid_h.size == 0:
-            return None, None, "chm_nodata"
+            return {"error": "chm_nodata"}
 
         # 1. 树高提取
         if self.stat == "max":
@@ -399,7 +409,7 @@ class CHMSampler:
             h_est = float(np.percentile(valid_h, 95))
 
         if h_est < 0.0 or h_est > self.max_height:
-            return None, None, "chm_outlier"
+            return {"error": "chm_outlier"}
 
         # 2. 树冠三维体积估算
 
@@ -421,82 +431,114 @@ class CHMSampler:
         else:
             w_geo = det.width
             h_geo = det.height
-        r = (w_geo + h_geo) / 4.0  # 树冠平均半径
+            
+        r_est = (w_geo + h_geo) / 4.0  # 树冠估算平均半径
         
         cbh = h_est * self.cbh_factor
         h_crown = max(0.0, h_est - cbh)
 
-        actual_method = self.volume_method
-        if actual_method in ("convex_hull", "voxel") and self.raw_points is None:
-            log.warning(
-                "检测到体积估算方法为 {}, 但未提供点云数据，回退到 A-1 (cbh) 枝下高积分法",
-                actual_method
-            )
-            actual_method = "cbh"
+        # A. 估计轨 (est track)
+        area_px_est = float(det.width * det.height)
+        if self.rgb_geo is not None:
+            area_geo_est = w_geo * h_geo
+        else:
+            area_geo_est = area_px_est * pixel_area
+        vol_est = float((1.0 / 3.0) * np.pi * (r_est ** 2) * h_crown)
 
-        volume = 0.0
-        if actual_method == "column":
-            forest_h = valid_h[valid_h >= 0.5]
-            if forest_h.size > 0:
-                volume = float(np.sum(forest_h) * pixel_area)
-        elif actual_method == "cbh":
-            crown_pixels = valid_h[valid_h >= cbh]
-            if crown_pixels.size > 0:
-                volume = float(np.sum(crown_pixels - cbh) * pixel_area)
-        elif actual_method == "paraboloid":
-            volume = float(0.5 * np.pi * (r ** 2) * h_crown)
-        elif actual_method == "cone":
-            volume = float((1.0 / 3.0) * np.pi * (r ** 2) * h_crown)
-        elif actual_method == "ellipsoid":
-            volume = float((2.0 / 3.0) * np.pi * (r ** 2) * h_crown)
-        elif actual_method == "convex_hull":
-            x_pts, y_pts, h_pts = self.raw_points
-            mask = (x_pts >= wx_min) & (x_pts <= wx_max) & (y_pts >= wy_min) & (y_pts <= wy_max)
-            tree_mask = mask & (h_pts >= cbh) & (h_pts <= self.max_height)
-            tx = x_pts[tree_mask]
-            ty = y_pts[tree_mask]
-            th = h_pts[tree_mask]
-            if len(tx) >= 4:
-                try:
-                    from scipy.spatial import ConvexHull
-                    pts_3d = np.column_stack((tx, ty, th))
-                    hull = ConvexHull(pts_3d)
-                    volume = float(hull.volume)
-                except Exception as e:
-                    log.warning("凸包体积计算失败(可能是点共面)，回退至 cbh 积分: {}", e)
+        # B. 真实轨 (real track)
+        if self.find_real_canopy:
+            area_px_real = float(valid_h.size)
+            area_geo_real = float(valid_h.size * pixel_area)
+            
+            import math
+            r_real = math.sqrt(area_geo_real / np.pi) if area_geo_real > 0 else 0.0
+            
+            actual_method = self.volume_method
+            if actual_method in ("convex_hull", "voxel") and self.raw_points is None:
+                log.warning(
+                    "检测到体积估算方法为 {}, 但未提供点云数据，回退到 A-1 (cbh) 枝下高积分法",
+                    actual_method
+                )
+                actual_method = "cbh"
+
+            vol_real = 0.0
+            if actual_method == "column":
+                forest_h = valid_h[valid_h >= 0.5]
+                if forest_h.size > 0:
+                    vol_real = float(np.sum(forest_h) * pixel_area)
+            elif actual_method == "cbh":
+                crown_pixels = valid_h[valid_h >= cbh]
+                if crown_pixels.size > 0:
+                    vol_real = float(np.sum(crown_pixels - cbh) * pixel_area)
+            elif actual_method == "paraboloid":
+                vol_real = float(0.5 * np.pi * (r_real ** 2) * h_crown)
+            elif actual_method == "cone":
+                vol_real = float((1.0 / 3.0) * np.pi * (r_real ** 2) * h_crown)
+            elif actual_method == "ellipsoid":
+                vol_real = float((2.0 / 3.0) * np.pi * (r_real ** 2) * h_crown)
+            elif actual_method == "convex_hull":
+                x_pts, y_pts, h_pts = self.raw_points
+                mask = (x_pts >= wx_min) & (x_pts <= wx_max) & (y_pts >= wy_min) & (y_pts <= wy_max)
+                tree_mask = mask & (h_pts >= cbh) & (h_pts <= self.max_height)
+                tx = x_pts[tree_mask]
+                ty = y_pts[tree_mask]
+                th = h_pts[tree_mask]
+                if len(tx) >= 4:
+                    try:
+                        from scipy.spatial import ConvexHull
+                        pts_3d = np.column_stack((tx, ty, th))
+                        hull = ConvexHull(pts_3d)
+                        vol_real = float(hull.volume)
+                    except Exception as e:
+                        log.warning("凸包体积计算失败(可能是点共面)，回退至 cbh 积分: {}", e)
+                        crown_pixels = valid_h[valid_h >= cbh]
+                        if crown_pixels.size > 0:
+                            vol_real = float(np.sum(crown_pixels - cbh) * pixel_area)
+                else:
+                    log.warning("边界内有效点数少于4个(实际为 {})，回退至 cbh 积分", len(tx))
                     crown_pixels = valid_h[valid_h >= cbh]
                     if crown_pixels.size > 0:
-                        volume = float(np.sum(crown_pixels - cbh) * pixel_area)
-            else:
-                log.warning("边界内有效点数少于4个(实际为 {})，回退至 cbh 积分", len(tx))
-                crown_pixels = valid_h[valid_h >= cbh]
-                if crown_pixels.size > 0:
-                    volume = float(np.sum(crown_pixels - cbh) * pixel_area)
-        elif actual_method == "voxel":
-            x_pts, y_pts, h_pts = self.raw_points
-            mask = (x_pts >= wx_min) & (x_pts <= wx_max) & (y_pts >= wy_min) & (y_pts <= wy_max)
-            tree_mask = mask & (h_pts >= cbh) & (h_pts <= self.max_height)
-            tx = x_pts[tree_mask]
-            ty = y_pts[tree_mask]
-            th = h_pts[tree_mask]
-            if len(tx) > 0:
-                vs = self.voxel_size
-                vx = (tx / vs).astype(np.int32)
-                vy = (ty / vs).astype(np.int32)
-                vh = (th / vs).astype(np.int32)
-                unique_voxels = set(zip(vx, vy, vh))
-                volume = float(len(unique_voxels) * (vs ** 3))
-            else:
-                crown_pixels = valid_h[valid_h >= cbh]
-                if crown_pixels.size > 0:
-                    volume = float(np.sum(crown_pixels - cbh) * pixel_area)
+                        vol_real = float(np.sum(crown_pixels - cbh) * pixel_area)
+            elif actual_method == "voxel":
+                x_pts, y_pts, h_pts = self.raw_points
+                mask = (x_pts >= wx_min) & (x_pts <= wx_max) & (y_pts >= wy_min) & (y_pts <= wy_max)
+                tree_mask = mask & (h_pts >= cbh) & (h_pts <= self.max_height)
+                tx = x_pts[tree_mask]
+                ty = y_pts[tree_mask]
+                th = h_pts[tree_mask]
+                if len(tx) > 0:
+                    vs = self.voxel_size
+                    vx = (tx / vs).astype(np.int32)
+                    vy = (ty / vs).astype(np.int32)
+                    vh = (th / vs).astype(np.int32)
+                    unique_voxels = set(zip(vx, vy, vh))
+                    vol_real = float(len(unique_voxels) * (vs ** 3))
+                else:
+                    crown_pixels = valid_h[valid_h >= cbh]
+                    if crown_pixels.size > 0:
+                        vol_real = float(np.sum(crown_pixels - cbh) * pixel_area)
+        else:
+            area_px_real = area_px_est
+            area_geo_real = area_geo_est
+            vol_real = vol_est
 
-        return h_est, volume, self.source_name
+        return {
+            "height": h_est,
+            "volume_est": vol_est,
+            "volume_real": vol_real,
+            "crown_area_px_est": area_px_est,
+            "crown_area_px_real": area_px_real,
+            "crown_area_geo_est": area_geo_est,
+            "crown_area_geo_real": area_geo_real,
+            "source_name": self.source_name,
+        }
 
     def height_for_detection(self, det) -> tuple[Optional[float], str]:
         """保持原有 height 接口，向后兼容。"""
-        h, _, src = self.metrics_for_detection(det)
-        return h, src
+        res = self.metrics_for_detection(det)
+        if "error" in res:
+            return None, res["error"]
+        return res["height"], res["source_name"]
 
     def annotate(self, detections) -> dict:
         """为每个检测写入 extra 物理指标，返回统计摘要。"""
@@ -504,20 +546,40 @@ class CHMSampler:
         heights: list[float] = []
         volumes: list[float] = []
         for d in detections:
-            h, vol, src = self.metrics_for_detection(d)
+            res = self.metrics_for_detection(d)
             if not hasattr(d, "extra") or d.extra is None:
                 continue
-            d.extra["height"] = h
-            d.extra["height_source"] = src
-            d.extra["volume"] = vol
-            if src == "chm_nodata":
-                n_nod += 1
-            elif src == "chm_outlier":
-                n_out += 1
-            elif src == "chm_out_of_bounds":
-                n_unreg += 1
+            if "error" in res:
+                src = res["error"]
+                d.extra["height"] = None
+                d.extra["height_source"] = src
+                d.extra["volume"] = None
+                d.extra["crown_area_px_est"] = None
+                d.extra["crown_area_px_real"] = None
+                d.extra["crown_area_geo_est"] = None
+                d.extra["crown_area_geo_real"] = None
+                d.extra["volume_est"] = None
+                d.extra["volume_real"] = None
+                if src == "chm_nodata":
+                    n_nod += 1
+                elif src == "chm_outlier":
+                    n_out += 1
+                elif src == "chm_out_of_bounds":
+                    n_unreg += 1
             else:
                 n_h += 1
+                src = res["source_name"]
+                h = res["height"]
+                vol = res["volume_real"]
+                d.extra["height"] = h
+                d.extra["height_source"] = src
+                d.extra["volume"] = vol
+                d.extra["crown_area_px_est"] = res["crown_area_px_est"]
+                d.extra["crown_area_px_real"] = res["crown_area_px_real"]
+                d.extra["crown_area_geo_est"] = res["crown_area_geo_est"]
+                d.extra["crown_area_geo_real"] = res["crown_area_geo_real"]
+                d.extra["volume_est"] = res["volume_est"]
+                d.extra["volume_real"] = res["volume_real"]
                 if h is not None:
                     heights.append(h)
                 if vol is not None:
@@ -553,6 +615,8 @@ def build_chm_sampler(
     cbh_factor: float = 0.3,
     voxel_size: float = 0.2,
     chm_threshold: float = 0.1,
+    find_real_canopy: bool = True,
+    max_valid_height: float = 8.0,
 ) -> Optional[CHMSampler]:
     """根据多渠道源输入（chm、dsm+dem、单独dsm、las点云）构建统一的 CHMSampler。"""
     chm: Optional[np.ndarray] = None
@@ -605,6 +669,8 @@ def build_chm_sampler(
             dem=dem,
             dem_geo=dem_geo,
             chm_threshold=chm_threshold,
+            find_real_canopy=find_real_canopy,
+            max_valid_height=max_valid_height,
         )
 
     if chm is None or chm.size == 0:
@@ -634,4 +700,6 @@ def build_chm_sampler(
         raw_points=raw_pts,
         las_grid_size=las_grid_size,
         chm_threshold=chm_threshold,
+        find_real_canopy=find_real_canopy,
+        max_valid_height=max_valid_height,
     )

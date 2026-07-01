@@ -195,6 +195,13 @@ def write_observations(
             box_px_sub = extra.get("box_px_sub")
             source_subimage_path = extra.get("source_subimage_path")
             
+            crown_area_px_est = extra.get("crown_area_px_est")
+            crown_area_px_real = extra.get("crown_area_px_real")
+            crown_area_geo_est = extra.get("crown_area_geo_est")
+            crown_area_geo_real = extra.get("crown_area_geo_real")
+            crown_volume_geo_est = extra.get("volume_est")
+            crown_volume_geo_real = extra.get("volume_real")
+
             # 计算地理空间字段
             center_geo = None
             box_geo = None
@@ -223,21 +230,36 @@ def write_observations(
                 except Exception as e:
                     log.warning(f"单木像素坐标转地理坐标失败: {e}")
 
+            # 填充没有多源数据时的回退计算值
+            if crown_area_px_est is None:
+                crown_area_px_est = float(d.width * d.height)
+            if crown_area_px_real is None:
+                crown_area_px_real = crown_area_px_est
+            if crown_area_geo_est is None:
+                crown_area_geo_est = crown_area_geo if crown_area_geo is not None else (float(d.width * d.height * (gsd * gsd)) if gsd else 0.0)
+            if crown_area_geo_real is None:
+                crown_area_geo_real = crown_area_geo_est
+            if crown_area_geo is None:
+                crown_area_geo = crown_area_geo_real
+
             conn.execute(
                 "INSERT INTO tree_observations "
                 "(obs_id, tract_id, run_id, species, confidence, box_px_sub, box_px_full, box_geo, "
-                " crown_w_px, crown_h_px, crown_area_px, crown_w_geo, crown_h_geo, crown_area_geo, "
-                " height, height_source, crown_volume_geo, center_geo, source_subimage_path, slice_size, geom_point, geom_crown) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " crown_w_px, crown_h_px, crown_w_geo, crown_h_geo, "
+                " height, height_source, center_geo, source_subimage_path, slice_size, geom_point, geom_crown, "
+                " crown_area_px_est, crown_area_px_real, crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (obs_id, tract_id, run_id, d.label, d.score,
                  json.dumps(box_px_sub) if box_px_sub else None,
                  json.dumps([d.x1, d.y1, d.x2, d.y2]),
                  box_geo,
-                 d.width, d.height, d.width * d.height,
-                 crown_w_geo, crown_h_geo, crown_area_geo,
-                 height, height_source, crown_volume_geo,
+                 d.width, d.height, crown_w_geo, crown_h_geo,
+                 height, height_source,
                  center_geo, source_subimage_path, slice_size,
-                 f"POINT({cx} {cy})", geom_crown),
+                 f"POINT({cx} {cy})", geom_crown,
+                 crown_area_px_est, crown_area_px_real,
+                 crown_area_geo_est, crown_area_geo_real,
+                 crown_volume_geo_est, crown_volume_geo_real),
             )
             n += 1
         conn.commit()
@@ -334,12 +356,14 @@ def consolidate_tract_trees(
             conn.execute(
                 "INSERT INTO tract_trees "
                 "(canonical_id, tract_id, individual_id, species, confidence, "
-                " geom_point, geom_crown, height, crown, crown_volume_geo, chosen_obs_id, active_run_id) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " geom_point, geom_crown, height, chosen_obs_id, active_run_id, "
+                " crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
                  o.get("geom_point"), o.get("geom_crown"),
-                 o.get("height"), o.get("crown_area_px"),
-                 o.get("crown_volume_geo"), o.get("obs_id"), run_id),
+                 o.get("height"), o.get("obs_id"), run_id,
+                 o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
+                 o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real")),
             )
             n += 1
         conn.commit()
