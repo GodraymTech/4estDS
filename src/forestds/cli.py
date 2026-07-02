@@ -61,8 +61,7 @@ def cmd_infer(
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
     from pathlib import Path
-    from .db import writer
-    from .tasks.infer import VALID_EXPORT_FORMATS, run_infer_pipeline
+    from .tasks.infer import VALID_EXPORT_FORMATS
 
     if export_format and export_format not in VALID_EXPORT_FORMATS:
         logger.error(
@@ -82,40 +81,37 @@ def cmd_infer(
         image = images[0]
         arch_val = arch or settings.get("detect.arch", "ultralytics")
 
-        logger.info("[infer] run_id={} arch={} image={}", run_id, arch_val, image)
-        writer.start_run_log(
-            run_id, "infer", model_arch=arch_val, input_path=image,
-            params={"arch": arch_val, "image": image},
-            url=settings.get("url", None),
-        )
+        # 复用应用服务层的统一 run 生命周期(与 Worker/API 同一条代码路径, DRY)。
+        # CLI 保持原有行为: publish=False(不自动 promote_run)，并保留退出码语义。
+        from .contracts import InferenceRequest
+        from .service import InferenceError, run_inference_job
 
+        logger.info("[infer] run_id={} arch={} image={}", run_id, arch_val, image)
+        req = InferenceRequest(
+            image_path=image, arch=arch_val,
+            acquisition_time=acquisition_time, location=location,
+            tile_size=tile_size, overlap_rate=overlap_rate,
+            chm=chm, dsm=dsm, dem=dem, las=las,
+            las_grid_size=las_grid_size, dem_default=dem_default,
+            draw_box=act_draw_box, export_fmt=export_format, publish=False,
+        )
         try:
-            result = run_infer_pipeline(
-                image, run_id=run_id, settings=settings,
-                arch=arch_val, acquisition_time=acquisition_time, location=location,
-                tile_size=tile_size, overlap_rate=overlap_rate, chm=chm, dsm=dsm, dem=dem,
-                las=las, las_grid_size=las_grid_size, dem_default=dem_default,
-                draw_box=act_draw_box, export_fmt=export_format,
-            )
-        except NotImplementedError as e:
-            writer.finish_run_log(run_id, "failed", error=str(e), url=settings.get("url", None))
-            logger.warning("[infer] {}", e)
-            return 0
-        except FileNotFoundError as e:
-            writer.finish_run_log(run_id, "failed", error=str(e), url=settings.get("url", None))
-            logger.error("[infer] 文件未找到: {}", e)
-            return 1
-        except Exception as e:
-            writer.finish_run_log(run_id, "failed", error=str(e), url=settings.get("url", None))
-            # 使用 opt(exception=False) 避免 loguru _better_exceptions 尝试 repr 推理帧中的
-            # 大型 numpy 数组（如 71k 检测框），该操作会导致 C 层段错误。
-            logger.opt(exception=False).error("[infer] 失败: {} — {}", type(e).__name__, e)
+            result = run_inference_job(req, settings=settings, run_id=run_id)
+        except InferenceError as e:
+            cause = e.cause
+            if isinstance(cause, NotImplementedError):
+                logger.warning("[infer] {}", cause)
+                return 0
+            if isinstance(cause, FileNotFoundError):
+                logger.error("[infer] 文件未找到: {}", cause)
+                return 1
+            # run_log 终态与错误日志已由服务层处理(且已避免 repr 大型 numpy 数组)。
             return 1
 
         logger.info(
             "[infer] 完成！耗时={:.1f}s  瓦片={}/{}  检测={} 株  入库={} 条",
-            result["duration_s"], result["tiles_processed"], result["tiles_total"],
-            result["fused_count"], result["observations_written"],
+            result.duration_s, result.tiles_processed, result.tiles_total,
+            result.fused_count, result.observations_written,
         )
         # if result.get("report_path"):
         #     logger.info("[infer] 报告 → {}", result["report_path"])

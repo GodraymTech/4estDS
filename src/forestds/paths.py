@@ -40,9 +40,8 @@ def home_dir() -> Path:
         if p.name != _DEFAULT_DIRNAME:
             p = p / _DEFAULT_DIRNAME
         return p
-    # TODO复原
-    # return (Path.home() / _DEFAULT_DIRNAME).resolve()
-    return Path(__file__).resolve().parent.parent.parent / _DEFAULT_DIRNAME
+    # 默认落在用户主目录下的 ~/.4estDS，容器内可用 forestds_HOME 覆盖(见 config)。
+    return (Path.home() / _DEFAULT_DIRNAME).resolve()
 
 
 def ensure_home() -> Path:
@@ -70,10 +69,19 @@ def subdir(name: str) -> Path:
     return p
 
 
+_ENV_CONFIG_FILE = "forestds_CONFIG_FILE"
+
+
 def config_file() -> Path:
-    # return home_dir() / "config" / "config.yaml"
-    # TODO还原
-    return Path("/home/ray/rays/repos/4estDS/configs/default.yaml")
+    """用户级配置文件路径(可被 ``~/.4estDS/config.yaml`` 覆盖包内默认值)。
+
+    优先级: 环境变量 ``forestds_CONFIG_FILE`` 显式指定 > ``<home>/config/config.yaml``。
+    容器化部署时通过挂载配置文件 + 设置该环境变量即可注入外部配置。
+    """
+    env_cfg = os.environ.get(_ENV_CONFIG_FILE)
+    if env_cfg:
+        return Path(env_cfg).expanduser().resolve()
+    return home_dir() / "config" / "config.yaml"
 
 
 def logs_dir() -> Path:
