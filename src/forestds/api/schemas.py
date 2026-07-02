@@ -1,0 +1,76 @@
+"""API 请求/响应模型。
+
+与 contracts.py 的域 DTO 分开：这里是 *传输层* 形状(HTTP 边界)，避免把 Web 关心
+泄露到域模型(SOLID: 关注分离)。推理请求复用 contracts.InferenceRequest 的子集字段。
+"""
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+from ..contracts import ExportFormat, JobStatus
+
+
+class UploadResponse(BaseModel):
+    key: str = Field(..., description="存储对象 key，提交推理时回传")
+    filename: str
+    size: int
+
+
+class InferSubmit(BaseModel):
+    """提交推理作业的请求体。image_key 来自 /uploads 返回。"""
+
+    image_key: str = Field(..., description="已上传影像的存储 key")
+    arch: Optional[str] = None
+    acquisition_time: Optional[str] = Field(None, description="地块时相 YYYYmmdd")
+    location: Optional[str] = None
+    tile_size: Optional[int] = Field(None, ge=1)
+    overlap_rate: Optional[float] = Field(None, ge=0.0, le=0.5)
+    export_fmt: Optional[ExportFormat] = None
+
+
+class JobRef(BaseModel):
+    job_id: str = Field(..., description="作业标识(即 run_id)")
+    status: JobStatus
+
+
+class JobStatusOut(BaseModel):
+    job_id: str
+    status: JobStatus
+    tract_id: Optional[str] = None
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    duration_s: Optional[float] = None
+    error: Optional[str] = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
+class TractOut(BaseModel):
+    """地块台账行(宽松字段，直接透传 reader 行)。"""
+
+    model_config = {"extra": "allow"}
+
+    tract_id: str
+    name: Optional[str] = None
+    acquisition_time: Optional[str] = None
+    location: Optional[str] = None
+    geo_area: Optional[float] = None
+    area_unit: Optional[str] = None
+    crs_epsg: Optional[int] = None
+    active_run_id: Optional[str] = None
+    status: Optional[str] = None
+
+
+class ChangeCompareOut(BaseModel):
+    """时序变化对比(两个 run/时相)。"""
+
+    tract_id: str
+    base_run_id: Optional[str] = None
+    target_run_id: Optional[str] = None
+    base_count: int = 0
+    target_count: int = 0
+    delta_count: int = 0
+    base_crown_area: Optional[float] = None
+    target_crown_area: Optional[float] = None
+    delta_crown_area: Optional[float] = None
