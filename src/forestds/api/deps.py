@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from fastapi import Header
+
 
 @lru_cache(maxsize=1)
 def get_settings():
@@ -21,6 +23,19 @@ def get_settings():
 def get_db_url() -> str | None:
     """当前数据库 URL(None 表示默认本地 sqlite)。"""
     return get_settings().get("url", None)
+
+
+def get_tenant_id(
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+) -> str:
+    """从请求头解析租户 (缺省回退 DEFAULT_TENANT)。
+
+    生产应由网关/鉴权中间件签发可信租户, 此处仅作传输层读取;
+    下游经 db.tenancy.set_tenant() 绑定到 PostGIS RLS 会话 GUC。
+    """
+    from ..db.tenancy import DEFAULT_TENANT
+
+    return x_tenant_id or DEFAULT_TENANT
 
 
 def get_storage_dep():
