@@ -61,7 +61,7 @@ export function ChangeMetricsPanel({
             <Tag color={m.areaDelta >= 0 ? "green" : "red"}>
               {m.areaDelta >= 0 ? "冠幅扩张" : "冠幅退化"}
             </Tag>
-            <span style={NOTE}>聚合总量对比（逐图斑变化 P2）</span>
+            <span style={NOTE}>聚合总量对比（逐图斑见「图斑变化」）</span>
           </div>
         </div>
       )}

@@ -1,10 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { Card, Empty, Select, Space, Spin, Tag, Typography } from "antd";
+import {
+  Card,
+  Empty,
+  Segmented,
+  Select,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+} from "antd";
 import { useTracts } from "../entities/tract";
 import { groupPhasesByLocation, pickLatestTwo } from "../entities/phase";
 import { TemporalCompare } from "../features/temporal-wipe";
+import { ChangeDetectView } from "../features/change-detect";
 import { ChangeMetricsPanel } from "../features/change-metrics";
+
+type ChangeView = "wipe" | "detect";
 
 const { Text } = Typography;
 
@@ -21,6 +33,7 @@ export function ChangePage() {
   }, [groups, location]);
 
   const [range, setRange] = useState<[number, number]>([0, 0]);
+  const [view, setView] = useState<ChangeView>("wipe");
 
   // 地点切换时重置到最新两时相。
   useEffect(() => {
@@ -39,14 +52,24 @@ export function ChangePage() {
           <Spin />
         </div>
       ) : active ? (
-        <TemporalCompare
-          key={active.location}
-          phases={active.phases}
-          range={range}
-          onRangeChange={setRange}
-          center={[110.3, 21.5]}
-          zoom={11}
-        />
+        view === "wipe" ? (
+          <TemporalCompare
+            key={active.location}
+            phases={active.phases}
+            range={range}
+            onRangeChange={setRange}
+            center={[110.3, 21.5]}
+            zoom={11}
+          />
+        ) : (
+          <ChangeDetectView
+            key={active.location}
+            phases={active.phases}
+            range={range}
+            center={[110.3, 21.5]}
+            zoom={11}
+          />
+        )
       ) : (
         <div style={CENTER}>
           <Empty description="暂无地块数据" />
@@ -55,7 +78,16 @@ export function ChangePage() {
 
       <Card style={PANEL} styles={CARD_STYLES} title="变化检测">
         <Space direction="vertical" size={8} style={FULL}>
-          <Text type="secondary">选择地点，拖动分隔把手卷帘对比两期。</Text>
+          <Text type="secondary">选择地点，切换卷帘或逐图斑叠分对比两期。</Text>
+          <Segmented
+            block
+            value={view}
+            onChange={(v) => setView(v as ChangeView)}
+            options={[
+              { label: "时相卷帘", value: "wipe" },
+              { label: "图斑变化", value: "detect" },
+            ]}
+          />
           <Select
             style={FULL}
             placeholder="选择地点"
