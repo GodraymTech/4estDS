@@ -1,0 +1,43 @@
+/* 全局基线样式。字体经 @fontsource 自托管, 在 main.tsx 以副作用导入(契合内网, 无外部 CDN)。 */
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 地理量等宽排版: 坐标/面积/株数/时间戳/运行号 —— 仪器面板美学(可信/可追溯)。 */
+.geo-metric,
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* 无障碍质量底线: 键盘焦点始终可见。 */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* 尊重系统降动效偏好。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

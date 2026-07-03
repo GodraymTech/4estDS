@@ -1,0 +1,52 @@
+/* 4estDS 设计令牌 · 潮间带 Intertidal
+   单一真相(DRY): 所有颜色/字体/间距/圆角在此定义, 组件与 AntD 主题皆引用之。
+   源自红树林潮滩世界, 刻意避开 AI 套路(暖奶油/醋绿黑底/报刊发丝线)。 */
+:root {
+  /* 色彩 · 潮间带 */
+  --ink: #10302b; /* 潮墨: 导航 / 深色地图 chrome / 正文 */
+  --tide: #0e6e63; /* 潮青: 主品牌 / 主操作 */
+  --canopy: #3e8e5a; /* 冠绿: 正向 / 新增图斑 / 成活 */
+  --laterite: #b8472a; /* 赤土: 预警 / 减少 / 违法 / 退化 */
+  --silt: #c9a24b; /* 滩泥: 注意 / 中等预警 */
+  --carbon: #1e4e8c; /* 蓝碳: 蓝碳模块专用深蓝 */
+  --haze: #edf1ef; /* 雾白: 冷调画布(非暖奶油) */
+  --paper: #f7f9f8; /* 卡片 / 浮层底 */
+  --line: #d8e0dd; /* 分隔线 */
+  --muted: #5c6b66; /* 次要文字 */
+
+  /* 语义别名: 组件只用语义名, 换主题只改此层 */
+  --color-bg: var(--haze);
+  --color-surface: var(--paper);
+  --color-border: var(--line);
+  --color-text: var(--ink);
+  --color-text-muted: var(--muted);
+  --color-primary: var(--tide);
+  --color-success: var(--canopy);
+  --color-warning: var(--silt);
+  --color-danger: var(--laterite);
+  --color-info: var(--carbon);
+
+  /* 字体栈 · IBM Plex 超家族 + 思源 (中英+等宽一体) */
+  --font-display:
+    "IBM Plex Serif", "Source Han Serif SC", "Noto Serif SC", serif;
+  --font-body:
+    "IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Sarasa Mono SC", ui-monospace, monospace;
+
+  /* 圆角 / 间距 / 阴影 */
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --shadow-1: 0 1px 2px rgba(16, 48, 43, 0.06), 0 1px 3px rgba(16, 48, 43, 0.1);
+  --shadow-2: 0 4px 12px rgba(16, 48, 43, 0.12);
+
+  /* 布局尺度 */
+  --nav-rail-width: 72px;
+  --header-height: 56px;
+}
