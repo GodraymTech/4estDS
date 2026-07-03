@@ -16,7 +16,7 @@ export interface RasterBasemap {
   attribution?: string;
 }
 
-export type VectorLayerKind = "point" | "polygon";
+export type VectorLayerKind = "point" | "polygon" | "line";
 
 export interface GeoJsonLayerSpec {
   id: string;
@@ -54,6 +54,6 @@ export interface MapInitOptions {
 }
 
 export type MapCoreEvent =
-  "ready" | "featureClick" | "featureHover" | "move" | "moveend";
+  "ready" | "featureClick" | "featureHover" | "move" | "moveend" | "mapClick";
 
 export type MapCoreHandler = (payload: unknown) => void;

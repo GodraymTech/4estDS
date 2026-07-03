@@ -14,6 +14,7 @@ import type { MapController } from "./MapController";
 
 const DEFAULT_POINT_COLOR = "#0e6e63";
 const DEFAULT_POLYGON_COLOR = "#3e8e5a";
+const DEFAULT_LINE_COLOR = "#b8472a";
 
 /**
  * MapController 的 MapLibre 实现。
@@ -97,6 +98,18 @@ export class MapLibreController implements MapController {
           "circle-opacity": 0.85,
         },
       });
+    } else if (spec.kind === "line") {
+      map.addLayer({
+        id: spec.id,
+        type: "line",
+        source: spec.id,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": spec.color ?? DEFAULT_LINE_COLOR,
+          "line-width": 2.5,
+          "line-dasharray": [2, 1],
+        },
+      });
     } else {
       map.addLayer({
         id: spec.id,
@@ -171,14 +184,38 @@ export class MapLibreController implements MapController {
     });
   }
 
-  on(event: MapCoreEvent, handler: MapCoreHandler): void {
+  setCursor(cursor: string | null): void {
     const map = this.map;
     if (!map) return;
-    if (event === "move") map.on("move", () => handler(null));
-    else if (event === "moveend")
-      map.on("moveend", () => handler(map.getBounds()));
-    else if (event === "ready") map.on("load", () => handler(null));
+    map.getCanvas().style.cursor = cursor ?? "";
+  }
+
+  on(event: MapCoreEvent, handler: MapCoreHandler): () => void {
+    const map = this.map;
+    if (!map) return () => {};
+    if (event === "mapClick") {
+      const cb = (e: maplibregl.MapMouseEvent) =>
+        handler([e.lngLat.lng, e.lngLat.lat] as LngLat);
+      map.on("click", cb);
+      return () => map.off("click", cb);
+    }
+    if (event === "move") {
+      const cb = () => handler(null);
+      map.on("move", cb);
+      return () => map.off("move", cb);
+    }
+    if (event === "moveend") {
+      const cb = () => handler(map.getBounds());
+      map.on("moveend", cb);
+      return () => map.off("moveend", cb);
+    }
+    if (event === "ready") {
+      const cb = () => handler(null);
+      map.on("load", cb);
+      return () => map.off("load", cb);
+    }
     // featureClick / featureHover 在后续绑定到具体图层。
+    return () => {};
   }
 
   private requireMap(): maplibregl.Map {

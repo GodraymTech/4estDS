@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { Button, Card, List, Segmented, Space, Spin, Tag } from "antd";
 import { MapStage } from "../shared/ui/MapStage";
 import { boundsOf, type MapController } from "../shared/map-core";
+import { MeasureToolbar } from "../features/measure";
 import { useTracts, type Tract } from "../entities/tract";
 import { useObservations } from "../entities/observation";
 import type { GeometryKind } from "../shared/api";
@@ -23,6 +24,7 @@ export function AtlasPage() {
     geometry,
   );
   const mapRef = useRef<MapController | null>(null);
+  const [mapCtl, setMapCtl] = useState<MapController | null>(null);
 
   // 路由携带 tractId 时优先选中该地块(总览图点击进入)。
   useEffect(() => {
@@ -58,6 +60,7 @@ export function AtlasPage() {
   const onReady = useCallback(
     (map: MapController) => {
       mapRef.current = map;
+      setMapCtl(map);
       draw();
     },
     [draw],
@@ -78,6 +81,7 @@ export function AtlasPage() {
   return (
     <div style={STAGE_WRAP}>
       <MapStage center={[110.3, 21.5]} zoom={9} onReady={onReady} />
+      <MeasureToolbar map={mapCtl} />
       <Card style={PANEL} styles={CARD_STYLES} title="地块台账">
         <div style={TOOLBAR}>
           <Segmented
