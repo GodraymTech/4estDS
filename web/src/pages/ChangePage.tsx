@@ -1,13 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { Card, Empty, Select, Space, Spin, Tag, Typography } from "antd";
 import { useTracts } from "../entities/tract";
-import { groupPhasesByLocation } from "../entities/phase";
+import { groupPhasesByLocation, pickLatestTwo } from "../entities/phase";
 import { TemporalCompare } from "../features/temporal-wipe";
+import { ChangeMetricsPanel } from "../features/change-metrics";
 
 const { Text } = Typography;
 
-// 变化检测: 时相卷帘对比两期; 单一时相自动降级为现状展示。
+// 变化检测: 时相卷帘对比两期 + 变化量化面板; 单一时相自动降级为现状展示。
+// range(选中的两期)在此页持有, 同时驱动卷帘与量化面板(单一真相)。
 export function ChangePage() {
   const { data: tracts, isLoading } = useTracts();
   const groups = useMemo(() => groupPhasesByLocation(tracts ?? []), [tracts]);
@@ -18,9 +20,16 @@ export function ChangePage() {
     return groups.find((g) => g.location === location) ?? groups[0];
   }, [groups, location]);
 
+  const [range, setRange] = useState<[number, number]>([0, 0]);
+
+  // 地点切换时重置到最新两时相。
+  useEffect(() => {
+    if (active) setRange(pickLatestTwo(active.phases));
+  }, [active]);
+
   const options = groups.map((g) => ({
     value: g.location,
-    label: g.location + "\uff08" + g.phases.length + " \u65f6相\uff09",
+    label: g.location + "\uff08" + g.phases.length + " \u65f6\u76f8\uff09",
   }));
 
   return (
@@ -33,6 +42,8 @@ export function ChangePage() {
         <TemporalCompare
           key={active.location}
           phases={active.phases}
+          range={range}
+          onRangeChange={setRange}
           center={[110.3, 21.5]}
           zoom={11}
         />
@@ -60,6 +71,10 @@ export function ChangePage() {
           </Space>
         </Space>
       </Card>
+
+      {active && active.phases.length > 1 ? (
+        <ChangeMetricsPanel phases={active.phases} range={range} />
+      ) : null}
     </div>
   );
 }

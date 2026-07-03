@@ -1,37 +1,31 @@
-import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { Card, Empty } from "antd";
 import { TemporalWipe, type WipeSide } from "../../shared/ui/TemporalWipe";
 import { MapStage } from "../../shared/ui/MapStage";
 import type { GeoJsonLayerSpec, LngLat } from "../../shared/map-core";
-import { pickLatestTwo, type Phase } from "../../entities/phase";
+import type { Phase } from "../../entities/phase";
 import { useObservations } from "../../entities/observation";
 import { PhaseSlider } from "./PhaseSlider";
 
 const COLOR_BEFORE = "#c9a24b"; // 滩泥(旧时相)
 const COLOR_AFTER = "#3e8e5a"; // 冠绿(新时相)
 
-// 时相卷帘编排器: 组合 时相选择滑块 + 卷帘双图。
-// 根据当前选中的两个时相, 分别拉取其树冠观测作为卷帘两侧叠加。
+// 时相卷帘编排器(受控): range 由父级持有, 与变化量化面板共用单一真相。
+// 根据选中的两个时相, 分别拉取树冠观测作为卷帘两侧叠加。
 // 数据缝(P2): 目前以树冠矢量展示变化; 待后端多时相栓格影像就绪后, 刷开可直接对比真影像。
 export function TemporalCompare({
   phases,
+  range,
+  onRangeChange,
   center,
   zoom,
 }: {
   phases: Phase[];
+  range: [number, number];
+  onRangeChange: (v: [number, number]) => void;
   center: LngLat;
   zoom: number;
 }) {
-  const [range, setRange] = useState<[number, number]>(() =>
-    pickLatestTwo(phases),
-  );
-
-  // 地点切换(phases 变化)时重置到最新两时相。
-  useEffect(() => {
-    setRange(pickLatestTwo(phases));
-  }, [phases]);
-
   const beforePhase = phases[range[0]];
   const afterPhase = phases[range[1]];
   const beforeObs = useObservations(beforePhase?.id, "crown");
@@ -85,7 +79,7 @@ export function TemporalCompare({
     <div style={STAGE}>
       <TemporalWipe before={before} after={after} center={center} zoom={zoom} />
       <Card style={SLIDER_PANEL} styles={SLIDER_CARD_STYLES}>
-        <PhaseSlider phases={phases} value={range} onChange={setRange} />
+        <PhaseSlider phases={phases} value={range} onChange={onRangeChange} />
       </Card>
     </div>
   );
