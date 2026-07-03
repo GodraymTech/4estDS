@@ -1,4 +1,5 @@
 import { env } from "../config/env";
+import { authHeaders } from "../auth/session";
 
 /**
  * HTTP 客户端(单一职责): 统一拼接 baseURL、解析 JSON、抛出人话错误。
@@ -29,14 +30,16 @@ async function parse<T>(res: Response): Promise<T> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  return parse<T>(await fetch(`${env.apiBase}${path}`));
+  return parse<T>(
+    await fetch(`${env.apiBase}${path}`, { headers: authHeaders() }),
+  );
 }
 
 export async function apiPostJson<T>(path: string, body: unknown): Promise<T> {
   return parse<T>(
     await fetch(`${env.apiBase}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     }),
   );
@@ -54,6 +57,9 @@ export function apiUpload<T>(
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${env.apiBase}${path}`);
+    for (const [k, v] of Object.entries(authHeaders())) {
+      xhr.setRequestHeader(k, v);
+    }
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) {
         onProgress(Math.round((e.loaded / e.total) * 100));

@@ -14,6 +14,7 @@ import {
 import type { ComponentType } from "react";
 import { Brand } from "./Brand";
 import { primaryNav } from "./navItems";
+import { useRole } from "../../shared/auth";
 
 // 图标名 → 组件映射(避免在数据里存组件, 保持 navItems 为纯数据)。
 const ICONS: Record<string, ComponentType> = {
@@ -29,24 +30,27 @@ const ICONS: Record<string, ComponentType> = {
 
 // 左侧固定导航 rail(图标 + 悬停提示)。行业几乎统一, 主导航不藏入抽屉。
 export function NavRail() {
+  const { can } = useRole();
   return (
     <nav style={WRAP} aria-label="主导航">
       <Brand collapsed />
       <div style={LIST}>
-        {primaryNav.map((item) => {
-          const Icon = ICONS[item.icon];
-          return (
-            <Tooltip key={item.key} title={item.label} placement="right">
-              <NavLink
-                to={item.path}
-                style={({ isActive }) => navLinkStyle(isActive)}
-                aria-label={item.label}
-              >
-                {Icon ? <Icon /> : null}
-              </NavLink>
-            </Tooltip>
-          );
-        })}
+        {primaryNav
+          .filter((item) => can(item.perm))
+          .map((item) => {
+            const Icon = ICONS[item.icon];
+            return (
+              <Tooltip key={item.key} title={item.label} placement="right">
+                <NavLink
+                  to={item.path}
+                  style={({ isActive }) => navLinkStyle(isActive)}
+                  aria-label={item.label}
+                >
+                  {Icon ? <Icon /> : null}
+                </NavLink>
+              </Tooltip>
+            );
+          })}
       </div>
     </nav>
   );

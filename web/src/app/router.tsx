@@ -9,7 +9,9 @@ import { ReportsPage } from "../pages/ReportsPage";
 import { AlertsPage } from "../pages/AlertsPage";
 import { CarbonPage } from "../pages/CarbonPage";
 import { AdminPage } from "../pages/AdminPage";
+import { ForbiddenPage } from "../pages/ForbiddenPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
+import { RoleGate } from "../shared/auth";
 
 // 路由装配(薄): 壳为布局父, 页面为子。每页对应一个业务切片。
 export const router = createBrowserRouter([
@@ -23,11 +25,25 @@ export const router = createBrowserRouter([
       { path: "atlas/:tractId", element: <AtlasPage /> },
       { path: "change", element: <ChangePage /> },
       { path: "ledger", element: <LedgerPage /> },
-      { path: "tasks", element: <TasksPage /> },
+      {
+        path: "tasks",
+        element: (
+          <RoleGate perm="run:infer" fallback={<ForbiddenPage />}>
+            <TasksPage />
+          </RoleGate>
+        ),
+      },
       { path: "reports", element: <ReportsPage /> },
       { path: "alerts", element: <AlertsPage /> },
       { path: "carbon", element: <CarbonPage /> },
-      { path: "admin", element: <AdminPage /> },
+      {
+        path: "admin",
+        element: (
+          <RoleGate perm="admin:system" fallback={<ForbiddenPage />}>
+            <AdminPage />
+          </RoleGate>
+        ),
+      },
       { path: "*", element: <NotFoundPage /> },
     ],
   },
