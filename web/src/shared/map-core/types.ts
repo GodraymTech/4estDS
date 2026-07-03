@@ -26,6 +26,16 @@ export interface GeoJsonLayerSpec {
   color?: string;
 }
 
+/**
+ * HTML 标记规格: 业务自建 DOM 元素(如倒水滴图标)并自行绑定交互,
+ * map-core 仅负责把它定位到经纬度。形状/交互属于设计层, 不下沉到防腐层。
+ */
+export interface MarkerSpec {
+  id: string;
+  lngLat: LngLat;
+  element: HTMLElement;
+}
+
 /** 相机状态(中立): 用于时相卷帘的双图联动同步。 */
 export interface Camera {
   center: LngLat;

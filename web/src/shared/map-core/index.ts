@@ -7,6 +7,7 @@ export type {
   LngLat,
   MapCoreEvent,
   MapInitOptions,
+  MarkerSpec,
   RasterBasemap,
   VectorLayerKind,
 } from "./types";

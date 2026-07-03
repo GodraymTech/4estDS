@@ -8,6 +8,7 @@ import type {
   MapCoreEvent,
   MapCoreHandler,
   MapInitOptions,
+  MarkerSpec,
 } from "./types";
 import type { MapController } from "./MapController";
 
@@ -21,6 +22,7 @@ const DEFAULT_POLYGON_COLOR = "#3e8e5a";
 export class MapLibreController implements MapController {
   private map: maplibregl.Map | null = null;
   private ready = false;
+  private markers = new Map<string, maplibregl.Marker>();
 
   private rasterStyle(
     basemap: MapInitOptions["basemap"],
@@ -61,6 +63,7 @@ export class MapLibreController implements MapController {
   }
 
   destroy(): void {
+    this.clearMarkers();
     this.map?.remove();
     this.map = null;
     this.ready = false;
@@ -119,6 +122,25 @@ export class MapLibreController implements MapController {
     const src = this.map?.getSource(layerId) as
       maplibregl.GeoJSONSource | undefined;
     src?.setData(data as GeoJSON.GeoJSON);
+  }
+
+  setMarkers(markers: MarkerSpec[]): void {
+    const map = this.requireMap();
+    this.clearMarkers();
+    for (const m of markers) {
+      const marker = new maplibregl.Marker({
+        element: m.element,
+        anchor: "bottom",
+      })
+        .setLngLat(m.lngLat)
+        .addTo(map);
+      this.markers.set(m.id, marker);
+    }
+  }
+
+  clearMarkers(): void {
+    for (const marker of this.markers.values()) marker.remove();
+    this.markers.clear();
   }
 
   fitBounds(bounds: BBox, padding = 40): void {

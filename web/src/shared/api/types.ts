@@ -8,6 +8,10 @@ export interface Tract {
   area_unit?: string;
   crs_epsg?: number;
   active_run_id?: string;
+  // 地块代表点经纬度(WGS84)。用于总览图倒水滴标记。
+  // TODO(后端契约): /tracts 应由存储的地块几何质心回填此两个字段(代价极低)。
+  center_lng?: number;
+  center_lat?: number;
   [k: string]: unknown;
 }
 

@@ -7,6 +7,7 @@ import type {
   MapCoreEvent,
   MapCoreHandler,
   MapInitOptions,
+  MarkerSpec,
 } from "./types";
 
 /**
@@ -26,6 +27,10 @@ export interface MapController {
   removeLayer(id: string): void;
   /** 仅更新已有图层的数据(不重建图层)。 */
   setData(layerId: string, data: GeoJson): void;
+
+  /** 替换全部 HTML 标记(倒水滴地块图标等)。 */
+  setMarkers(markers: MarkerSpec[]): void;
+  clearMarkers(): void;
 
   fitBounds(bounds: BBox, padding?: number): void;
   flyTo(center: LngLat, zoom: number): void;
