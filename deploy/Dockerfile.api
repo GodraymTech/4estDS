@@ -16,11 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-# 安装包 + API 运行时依赖(FastAPI/uvicorn/redis/dramatiq/psycopg/minio)。
+# 安装包 + API/运行时依赖(由 pyproject extras 单一真相声明)。
 # geo/multisource 按需在 worker 镜像安装(推理才需要)；API 保持轻量。
-RUN pip install . \
-    && pip install "fastapi>=0.110" "uvicorn[standard]>=0.29" "python-multipart>=0.0.9" \
-       "redis>=5" "dramatiq[redis]>=1.16" "psycopg[binary]>=3.1" "minio>=7.2"
+RUN pip install ".[server,runtime]"
 
 EXPOSE 8000
 

@@ -1,0 +1,48 @@
+# Docker 构建上下文裁剪(context = 仓库根)。
+.git
+.github
+.gitignore
+
+# Python 缓存/虚拟环境/产物
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.uv/
+build/
+dist/
+
+# 测试/lint 缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 前端(由 Dockerfile.web 单独构建, api/worker 无需)
+web/node_modules/
+web/dist/
+web/src-tauri/target/
+web/src-tauri/gen/
+
+# 运行期数据/大文件
+.4estDS/
+outputs/
+data/
+models/
+*.sqlite
+*.db
+*.tif
+*.tiff
+*.las
+*.laz
+
+# 文档/草稿(后端镜像用不到)
+docs/
+scratch/
+
+# IDE/OS
+.idea/
+.vscode/
+.DS_Store

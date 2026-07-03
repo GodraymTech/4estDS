@@ -1,0 +1,33 @@
+# 4estDS GPU Worker 镜像 (CUDA + cuDNN 运行时)。
+# 用途: 有 NVIDIA GPU 的推理机上消费 Dramatiq gpu 队列; 与 Dockerfile.worker 等价, 仅基础镜像不同。
+# 前置: 宿主机装好 NVIDIA 驱动 + nvidia-container-toolkit; 并在 compose 中为 worker 打开 GPU 预留。
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Python 3.12 + GDAL/OpenCV 运行时原生库。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      software-properties-common ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      python3.12 python3.12-venv python3.12-dev python3-pip \
+      libexpat1 libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+# 安装推理/地理/多源 + 运行时依赖。
+RUN python3.12 -m pip install --break-system-packages ".[runtime,detect,geo,multisource]"
+# GPU 加速: ultralytics 依赖的 torch 默认可能为 CPU 轮子。
+# 如需 GPU, 用与 CUDA 匹配且与 ultralytics 兼容的构建覆盖(版本需实测):
+#   python3.12 -m pip install --break-system-packages --force-reinstall \
+#     torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# GPU 队列 concurrency=1: 单进程单线程消费, 避免显存竞争; 模型进程内常驻复用。
+CMD ["python3.12", "-m", "dramatiq", "forestds.worker.actors", "--queues", "gpu", "--processes", "1", "--threads", "1"]
