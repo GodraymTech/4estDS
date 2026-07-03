@@ -13,7 +13,7 @@ export type {
 } from "./types";
 export type { MapController } from "./MapController";
 export { MapLibreController } from "./MapLibreController";
-export { defaultBasemap } from "./basemap";
+export { defaultBasemap, rasterBasemap } from "./basemap";
 export { boundsOf } from "./geo";
 
 import { MapLibreController } from "./MapLibreController";

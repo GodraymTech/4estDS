@@ -10,9 +10,10 @@ import {
   type RasterBasemap,
 } from "../map-core";
 
-// 卷帘一侧: 可选的矢量叠加图层。
+// 卷帘一侧: 可选的矢量叠加图层 + 可选的该时相真影像底图。
 export interface WipeSide {
   overlay?: GeoJsonLayerSpec;
+  basemap?: RasterBasemap;
 }
 
 // 时相卷帘(Temporal Wipe) —— 产品签名交互。
@@ -90,6 +91,19 @@ export function TemporalWipe({
     if (!c || !ready || !after.overlay) return;
     c.setGeoJsonLayer(after.overlay);
   }, [ready, after.overlay]);
+
+  // 各时相真影像底图热替换(就绪后按侧刷开)。
+  useEffect(() => {
+    const c = beforeCtrl.current;
+    if (!c || !ready || !before.basemap) return;
+    c.setBasemap(before.basemap);
+  }, [ready, before.basemap]);
+
+  useEffect(() => {
+    const c = afterCtrl.current;
+    if (!c || !ready || !after.basemap) return;
+    c.setBasemap(after.basemap);
+  }, [ready, after.basemap]);
 
   // 分隔把手拖动: 基于容器宽度换算比例。
   useEffect(() => {

@@ -5,6 +5,19 @@ import type { RasterBasemap } from "./types";
 // 内网部署应通过 env 换为天地图/自建瓦片服务。
 const OSM_TEMPLATE = "https://" + "tile.openstreetmap.org/" + "{z}/{x}/{y}.png";
 
+// 由后端多时相真影像瓦片构造底图(时相卷帘刷开真影像)。
+export function rasterBasemap(
+  tiles: string[],
+  opts?: { id?: string; tileSize?: number; attribution?: string },
+): RasterBasemap {
+  return {
+    id: opts?.id ?? "basemap",
+    tiles,
+    tileSize: opts?.tileSize ?? 256,
+    attribution: opts?.attribution ?? "",
+  };
+}
+
 export function defaultBasemap(): RasterBasemap {
   return {
     id: "basemap",

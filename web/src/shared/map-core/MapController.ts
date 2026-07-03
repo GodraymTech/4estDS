@@ -8,6 +8,7 @@ import type {
   MapCoreHandler,
   MapInitOptions,
   MarkerSpec,
+  RasterBasemap,
 } from "./types";
 
 /**
@@ -41,6 +42,9 @@ export interface MapController {
 
   /** 设置地图光标(如量算时的 crosshair); 传 null 恢复默认。 */
   setCursor(cursor: string | null): void;
+
+  /** 热替换底图瓦片(多时相真影像刷开): 复用同一 raster source, 仅换 tiles。 */
+  setBasemap(basemap: RasterBasemap): void;
 
   /** 订阅事件, 返回退订函数(用于量算等临时交互的清理)。 */
   on(event: MapCoreEvent, handler: MapCoreHandler): () => void;

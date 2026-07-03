@@ -62,6 +62,22 @@ class TractOut(BaseModel):
     status: Optional[str] = None
 
 
+class TractImageryOut(BaseModel):
+    """地块多时相真影像瓦片配置(供前端时相卷帘刷开真影像)。
+
+    tiles 为空 / available=False 时前端回退默认底图, 保证降级可用。
+    """
+
+    tract_id: str
+    acquisition_time: Optional[str] = None
+    tiles: Optional[list[str]] = None
+    tile_size: int = 256
+    attribution: Optional[str] = None
+    min_zoom: Optional[int] = None
+    max_zoom: Optional[int] = None
+    available: bool = False
+
+
 class ChangeCompareOut(BaseModel):
     """时序变化对比(两个 run/时相)。"""
 

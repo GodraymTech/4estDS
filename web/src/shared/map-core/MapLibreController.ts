@@ -9,6 +9,7 @@ import type {
   MapCoreHandler,
   MapInitOptions,
   MarkerSpec,
+  RasterBasemap,
 } from "./types";
 import type { MapController } from "./MapController";
 
@@ -24,6 +25,7 @@ export class MapLibreController implements MapController {
   private map: maplibregl.Map | null = null;
   private ready = false;
   private markers = new Map<string, maplibregl.Marker>();
+  private basemapSourceId = "basemap";
 
   private rasterStyle(
     basemap: MapInitOptions["basemap"],
@@ -44,6 +46,7 @@ export class MapLibreController implements MapController {
 
   init(opts: MapInitOptions): Promise<void> {
     const interactive = opts.interactive ?? true;
+    this.basemapSourceId = opts.basemap.id;
     return new Promise((resolve) => {
       const map = new maplibregl.Map({
         container: opts.container,
@@ -188,6 +191,12 @@ export class MapLibreController implements MapController {
     const map = this.map;
     if (!map) return;
     map.getCanvas().style.cursor = cursor ?? "";
+  }
+
+  setBasemap(basemap: RasterBasemap): void {
+    const src = this.map?.getSource(this.basemapSourceId) as
+      maplibregl.RasterTileSource | undefined;
+    if (src && typeof src.setTiles === "function") src.setTiles(basemap.tiles);
   }
 
   on(event: MapCoreEvent, handler: MapCoreHandler): () => void {

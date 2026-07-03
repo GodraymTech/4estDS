@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from ..deps import get_db_url
 from ..geojson import rows_to_featurecollection
-from ..schemas import ChangeCompareOut, TractOut
+from ..schemas import ChangeCompareOut, TractImageryOut, TractOut
 
 router = APIRouter(prefix="/tracts", tags=["tracts"])
 
@@ -49,6 +49,49 @@ def get_tract(tract_id: str, db_url: str | None = Depends(get_db_url)) -> TractO
     if tract is None:
         raise HTTPException(status_code=404, detail=f"地块不存在: {tract_id}")
     return TractOut(**tract)
+
+
+def _derive_imagery(tract: dict) -> dict:
+    """从地块元数据派生多时相真影像瓦片配置。
+
+    约定优先级: imagery_tiles(list) > imagery_tiles_url / tiles_url(单模板)。
+    未配置则 tiles=None(available=False), 前端回退默认底图。
+    """
+    tiles: list[str] | None = None
+    raw = tract.get("imagery_tiles")
+    if isinstance(raw, list) and raw:
+        tiles = [str(t) for t in raw]
+    else:
+        url = tract.get("imagery_tiles_url") or tract.get("tiles_url")
+        if isinstance(url, str) and url:
+            tiles = [url]
+    return {
+        "tiles": tiles,
+        "tile_size": int(tract.get("imagery_tile_size") or 256),
+        "attribution": tract.get("imagery_attribution"),
+        "min_zoom": tract.get("imagery_min_zoom"),
+        "max_zoom": tract.get("imagery_max_zoom"),
+    }
+
+
+@router.get("/{tract_id}/imagery", response_model=TractImageryOut, summary="多时相真影像瓦片")
+def get_imagery(tract_id: str, db_url: str | None = Depends(get_db_url)) -> TractImageryOut:
+    from ...db import reader
+
+    tract = reader.get_tract(tract_id, url=db_url)
+    if tract is None:
+        raise HTTPException(status_code=404, detail=f"地块不存在: {tract_id}")
+    d = _derive_imagery(tract)
+    return TractImageryOut(
+        tract_id=tract_id,
+        acquisition_time=tract.get("acquisition_time"),
+        tiles=d["tiles"],
+        tile_size=d["tile_size"],
+        attribution=d["attribution"],
+        min_zoom=d["min_zoom"],
+        max_zoom=d["max_zoom"],
+        available=bool(d["tiles"]),
+    )
 
 
 @router.get("/{tract_id}/observations", summary="观测图层 GeoJSON")

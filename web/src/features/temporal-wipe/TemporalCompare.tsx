@@ -2,9 +2,16 @@ import type { CSSProperties } from "react";
 import { Card, Empty } from "antd";
 import { TemporalWipe, type WipeSide } from "../../shared/ui/TemporalWipe";
 import { MapStage } from "../../shared/ui/MapStage";
-import type { GeoJsonLayerSpec, LngLat } from "../../shared/map-core";
+import {
+  rasterBasemap,
+  type GeoJsonLayerSpec,
+  type LngLat,
+  type RasterBasemap,
+} from "../../shared/map-core";
 import type { Phase } from "../../entities/phase";
 import { useObservations } from "../../entities/observation";
+import { useTractImagery } from "../../entities/tract";
+import type { TractImagery } from "../../shared/api";
 import { PhaseTimeline } from "./PhaseTimeline";
 
 const COLOR_BEFORE = "#c9a24b"; // 滩泥(旧时相)
@@ -30,6 +37,9 @@ export function TemporalCompare({
   const afterPhase = phases[range[1]];
   const beforeObs = useObservations(beforePhase?.id, "crown");
   const afterObs = useObservations(afterPhase?.id, "crown");
+  // 各时相真影像底图(后端就绪则刷开真影像, 否则回退默认底图)。
+  const beforeImagery = useTractImagery(beforePhase?.id);
+  const afterImagery = useTractImagery(afterPhase?.id);
 
   if (phases.length === 0) {
     return (
@@ -65,6 +75,7 @@ export function TemporalCompare({
       beforeObs.data,
       COLOR_BEFORE,
     ),
+    basemap: imageryToBasemap(beforeImagery.data),
   };
   const after: WipeSide = {
     overlay: buildOverlay(
@@ -73,6 +84,7 @@ export function TemporalCompare({
       afterObs.data,
       COLOR_AFTER,
     ),
+    basemap: imageryToBasemap(afterImagery.data),
   };
 
   return (
@@ -87,6 +99,16 @@ export function TemporalCompare({
       </Card>
     </div>
   );
+}
+
+function imageryToBasemap(img?: TractImagery): RasterBasemap | undefined {
+  if (!img || !img.available || !img.tiles || img.tiles.length === 0) {
+    return undefined;
+  }
+  return rasterBasemap(img.tiles, {
+    tileSize: img.tile_size,
+    attribution: img.attribution ?? undefined,
+  });
 }
 
 function buildOverlay(
