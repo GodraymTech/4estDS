@@ -26,14 +26,24 @@ export interface GeoJsonLayerSpec {
   color?: string;
 }
 
+/** 相机状态(中立): 用于时相卷帘的双图联动同步。 */
+export interface Camera {
+  center: LngLat;
+  zoom: number;
+  bearing: number;
+  pitch: number;
+}
+
 export interface MapInitOptions {
   container: HTMLElement;
   center: LngLat;
   zoom: number;
   basemap: RasterBasemap;
+  /** 是否可交互(卷帘的跟随图为 false, 仅随主图相机同步)。 */
+  interactive?: boolean;
 }
 
 export type MapCoreEvent =
-  "ready" | "featureClick" | "featureHover" | "moveend";
+  "ready" | "featureClick" | "featureHover" | "move" | "moveend";
 
 export type MapCoreHandler = (payload: unknown) => void;

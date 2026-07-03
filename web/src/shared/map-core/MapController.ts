@@ -1,5 +1,6 @@
 import type {
   BBox,
+  Camera,
   GeoJson,
   GeoJsonLayerSpec,
   LngLat,
@@ -29,13 +30,9 @@ export interface MapController {
   fitBounds(bounds: BBox, padding?: number): void;
   flyTo(center: LngLat, zoom: number): void;
 
-  /**
-   * 签名交互: 时相卷帘(Temporal Wipe)。
-   * 在 before/after 两个栓格图层间按 x(0..1) 揭示; x=0 全 before, x=1 全 after。
-   * (P0 提供接口与基础实现, 像素级裁切随时相滑块在 P1 完善。)
-   */
-  setWipe(beforeLayerId: string, afterLayerId: string, x: number): void;
-  clearWipe(): void;
+  /** 相机同步(时相卷帘的双图联动): 读取与无动画套用当前视口。 */
+  getCamera(): Camera;
+  jumpTo(camera: Camera): void;
 
   on(event: MapCoreEvent, handler: MapCoreHandler): void;
 }

@@ -1,6 +1,7 @@
 // map-core 公共出口。业务只从此导入, 不触及具体实现文件。
 export type {
   BBox,
+  Camera,
   GeoJson,
   GeoJsonLayerSpec,
   LngLat,

@@ -1,6 +1,7 @@
 import maplibregl from "maplibre-gl";
 import type {
   BBox,
+  Camera,
   GeoJson,
   GeoJsonLayerSpec,
   LngLat,
@@ -10,7 +11,6 @@ import type {
 } from "./types";
 import type { MapController } from "./MapController";
 
-const EMPTY: GeoJson = { type: "FeatureCollection", features: [] };
 const DEFAULT_POINT_COLOR = "#0e6e63";
 const DEFAULT_POLYGON_COLOR = "#3e8e5a";
 
@@ -21,30 +21,37 @@ const DEFAULT_POLYGON_COLOR = "#3e8e5a";
 export class MapLibreController implements MapController {
   private map: maplibregl.Map | null = null;
   private ready = false;
-  private readonly rasterStyle: (
+
+  private rasterStyle(
     basemap: MapInitOptions["basemap"],
-  ) => maplibregl.StyleSpecification = (basemap) => ({
-    version: 8,
-    sources: {
-      [basemap.id]: {
-        type: "raster",
-        tiles: basemap.tiles,
-        tileSize: basemap.tileSize ?? 256,
-        attribution: basemap.attribution ?? "",
+  ): maplibregl.StyleSpecification {
+    return {
+      version: 8,
+      sources: {
+        [basemap.id]: {
+          type: "raster",
+          tiles: basemap.tiles,
+          tileSize: basemap.tileSize ?? 256,
+          attribution: basemap.attribution ?? "",
+        },
       },
-    },
-    layers: [{ id: basemap.id, type: "raster", source: basemap.id }],
-  });
+      layers: [{ id: basemap.id, type: "raster", source: basemap.id }],
+    };
+  }
 
   init(opts: MapInitOptions): Promise<void> {
+    const interactive = opts.interactive ?? true;
     return new Promise((resolve) => {
       const map = new maplibregl.Map({
         container: opts.container,
         style: this.rasterStyle(opts.basemap),
         center: opts.center,
         zoom: opts.zoom,
+        interactive,
+        attributionControl: false,
       });
-      map.addControl(new maplibregl.NavigationControl({}), "top-right");
+      if (interactive)
+        map.addControl(new maplibregl.NavigationControl({}), "top-right");
       map.on("load", () => {
         this.ready = true;
         resolve();
@@ -94,7 +101,7 @@ export class MapLibreController implements MapController {
         source: spec.id,
         paint: {
           "fill-color": spec.color ?? DEFAULT_POLYGON_COLOR,
-          "fill-opacity": 0.25,
+          "fill-opacity": 0.3,
           "fill-outline-color": "#1a5c38",
         },
       });
@@ -122,38 +129,34 @@ export class MapLibreController implements MapController {
     this.map?.flyTo({ center, zoom, duration: 800, essential: true });
   }
 
-  // 时相卷帘(基础实现): 以 x=0.5 为阈切换前/后图层可见性。
-  // 像素级卷帘裁切(随滑块连续揭示) 将在 P1 接入 clip 实现。
-  setWipe(beforeLayerId: string, afterLayerId: string, x: number): void {
-    const map = this.map;
-    if (!map) return;
-    const showAfter = x >= 0.5;
-    if (map.getLayer(beforeLayerId)) {
-      map.setLayoutProperty(
-        beforeLayerId,
-        "visibility",
-        showAfter ? "none" : "visible",
-      );
-    }
-    if (map.getLayer(afterLayerId)) {
-      map.setLayoutProperty(
-        afterLayerId,
-        "visibility",
-        showAfter ? "visible" : "none",
-      );
-    }
+  getCamera(): Camera {
+    const map = this.requireMap();
+    const c = map.getCenter();
+    return {
+      center: [c.lng, c.lat],
+      zoom: map.getZoom(),
+      bearing: map.getBearing(),
+      pitch: map.getPitch(),
+    };
   }
 
-  clearWipe(): void {
-    // P1: 恢复双图层可见与裁切。
+  jumpTo(camera: Camera): void {
+    this.map?.jumpTo({
+      center: camera.center,
+      zoom: camera.zoom,
+      bearing: camera.bearing,
+      pitch: camera.pitch,
+    });
   }
 
   on(event: MapCoreEvent, handler: MapCoreHandler): void {
     const map = this.map;
     if (!map) return;
-    if (event === "moveend") map.on("moveend", () => handler(map.getBounds()));
+    if (event === "move") map.on("move", () => handler(null));
+    else if (event === "moveend")
+      map.on("moveend", () => handler(map.getBounds()));
     else if (event === "ready") map.on("load", () => handler(null));
-    // featureClick / featureHover 在 P1 绑定到具体图层。
+    // featureClick / featureHover 在后续绑定到具体图层。
   }
 
   private requireMap(): maplibregl.Map {
