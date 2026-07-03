@@ -5,7 +5,7 @@ import { MapStage } from "../../shared/ui/MapStage";
 import type { GeoJsonLayerSpec, LngLat } from "../../shared/map-core";
 import type { Phase } from "../../entities/phase";
 import { useObservations } from "../../entities/observation";
-import { PhaseSlider } from "./PhaseSlider";
+import { PhaseTimeline } from "./PhaseTimeline";
 
 const COLOR_BEFORE = "#c9a24b"; // 滩泥(旧时相)
 const COLOR_AFTER = "#3e8e5a"; // 冠绿(新时相)
@@ -78,8 +78,12 @@ export function TemporalCompare({
   return (
     <div style={STAGE}>
       <TemporalWipe before={before} after={after} center={center} zoom={zoom} />
-      <Card style={SLIDER_PANEL} styles={SLIDER_CARD_STYLES}>
-        <PhaseSlider phases={phases} value={range} onChange={onRangeChange} />
+      <Card style={TIMELINE_PANEL} styles={SLIDER_CARD_STYLES}>
+        <PhaseTimeline
+          phases={phases}
+          range={range}
+          onRangeChange={onRangeChange}
+        />
       </Card>
     </div>
   );
@@ -102,12 +106,12 @@ const CENTER: CSSProperties = {
   alignItems: "center",
   height: "100%",
 };
-const SLIDER_PANEL: CSSProperties = {
+const TIMELINE_PANEL: CSSProperties = {
   position: "absolute",
-  top: 16,
+  bottom: 24,
   left: "50%",
   transform: "translateX(-50%)",
-  width: "min(560px, calc(100% - 360px))",
+  width: "min(680px, calc(100% - 120px))",
   zIndex: 5,
   boxShadow: "var(--shadow-2)",
 };
