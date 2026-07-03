@@ -11,6 +11,7 @@ import {
 import type { Phase } from "../../entities/phase";
 import { pickLatestTwo } from "../../entities/phase";
 import { phasePositions } from "./phaseTime";
+import { useReducedMotion } from "../../shared/lib/useReducedMotion";
 
 const { Text } = Typography;
 
@@ -35,6 +36,7 @@ export function PhaseTimeline({
   onRangeChange: (v: [number, number]) => void;
 }) {
   const [playing, setPlaying] = useState(false);
+  const reduced = useReducedMotion();
   const positions = phasePositions(phases);
   const last = phases.length - 1;
 
@@ -43,7 +45,7 @@ export function PhaseTimeline({
   rangeRef.current = range;
 
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || reduced) return;
     const id = window.setInterval(() => {
       const [lo, hi] = rangeRef.current;
       if (hi >= last) {
@@ -53,9 +55,10 @@ export function PhaseTimeline({
       onRangeChange([lo, hi + 1]);
     }, PLAY_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [playing, last, onRangeChange]);
+  }, [playing, reduced, last, onRangeChange]);
 
   const togglePlay = useCallback(() => {
+    if (reduced) return;
     setPlaying((p) => {
       if (p) return false;
       // 已到末期时再次播放: 从基线下一期重新开始。
@@ -63,7 +66,7 @@ export function PhaseTimeline({
       if (hi >= last) onRangeChange([lo, Math.min(lo + 1, last)]);
       return true;
     });
-  }, [last, onRangeChange]);
+  }, [reduced, last, onRangeChange]);
 
   const setNearer = (i: number) => {
     const [lo, hi] = rangeRef.current;
@@ -102,13 +105,24 @@ export function PhaseTimeline({
               disabled={playing || hi <= lo}
             />
           </Tooltip>
-          <Button
-            size="small"
-            type="primary"
-            shape="circle"
-            icon={playing ? <PauseOutlined /> : <CaretRightOutlined />}
-            onClick={togglePlay}
-          />
+          <Tooltip
+            title={
+              reduced
+                ? "已按系统“减少动效”关闭自动播放(可手动逐期切换)"
+                : playing
+                  ? "暂停"
+                  : "播放时序"
+            }
+          >
+            <Button
+              size="small"
+              type="primary"
+              shape="circle"
+              icon={playing ? <PauseOutlined /> : <CaretRightOutlined />}
+              onClick={togglePlay}
+              disabled={reduced}
+            />
+          </Tooltip>
           <Tooltip title="下一期">
             <Button
               size="small"
