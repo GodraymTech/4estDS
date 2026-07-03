@@ -64,3 +64,16 @@ export interface FeatureCollection {
   type: "FeatureCollection";
   features: GeoFeature[];
 }
+
+// 地块多时相真影像瓦片(对应 schemas.TractImageryOut)。
+// tiles 为空 / available=false 时, 前端回退默认底图。
+export interface TractImagery {
+  tract_id: string;
+  acquisition_time?: string;
+  tiles?: string[] | null;
+  tile_size?: number;
+  attribution?: string | null;
+  min_zoom?: number | null;
+  max_zoom?: number | null;
+  available: boolean;
+}

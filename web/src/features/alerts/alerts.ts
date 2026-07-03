@@ -1,7 +1,15 @@
-// 预警引擎(纯函数): 仅吃数值信号, 不耦合其他 feature。
-// 从两期变化(聚合量 + 逐图斑)派生退化/清除/株数骤降信号并定级。
+// 预警引擎(纯函数, 仅接数值信号): 从两期变化派生退化/清除/株数骤降信号并定级。
+// 不耦合 UI/地图/请求; 阈值集中一处, 便于后续校准。
 export type AlertSeverity = "high" | "medium" | "low";
 export type AlertKind = "degradation" | "clearing" | "count_drop";
+
+export interface ChangeSignal {
+  location: string;
+  areaPct: number | null; // 冠幅面积变化百分比
+  countPct: number | null; // 株数变化百分比
+  lostCount: number; // 消失图斑数
+  totalBefore: number; // 旧期图斑总数(算 lostRatio)
+}
 
 export interface AlertItem {
   id: string;
@@ -10,115 +18,82 @@ export interface AlertItem {
   severity: AlertSeverity;
   title: string;
   detail: string;
-  period: string;
 }
 
-// 一个地点两期对比的变化信号(由探针组装)。
-export interface ChangeSignal {
-  location: string;
-  beforeTime: string;
-  afterTime: string;
-  areaBefore: number; // m²
-  areaPct: number | null;
-  countPct: number | null;
-  lostCount: number;
-  retainedCount: number;
-  lostArea: number; // m²
-}
+const SEV_RANK: Record<AlertSeverity, number> = { high: 0, medium: 1, low: 2 };
 
-const SEVERITY_RANK: Record<AlertSeverity, number> = {
-  high: 3,
-  medium: 2,
-  low: 1,
+const KIND_LABEL: Record<AlertKind, string> = {
+  degradation: "冠幅退化",
+  clearing: "疑似清除",
+  count_drop: "株数骤降",
 };
 
-function ha(m2: number): string {
-  return (m2 / 10000).toFixed(2);
-}
-
-function period(a: string, b: string): string {
-  return (a || "?") + " \u2192 " + (b || "?");
-}
-
 export function deriveAlerts(s: ChangeSignal): AlertItem[] {
-  const items: AlertItem[] = [];
-  const p = period(s.beforeTime, s.afterTime);
+  const out: AlertItem[] = [];
 
-  // ① 冠幅退化(面积下降)。
+  // 退化: 冠幅面积显著下降。
   if (s.areaPct !== null && s.areaPct <= -5) {
     const sev: AlertSeverity =
       s.areaPct <= -15 ? "high" : s.areaPct <= -10 ? "medium" : "low";
-    items.push({
+    out.push({
       id: s.location + ":degradation",
       location: s.location,
       kind: "degradation",
       severity: sev,
-      title: "\u51a0\u5e45\u9000\u5316",
-      detail:
-        "\u6811\u51a0\u603b\u9762\u79ef\u4e0b\u964d " +
-        Math.abs(s.areaPct).toFixed(1) +
-        "%\uff08\u51cf\u5c11 " +
-        ha(s.lostArea) +
-        " ha\uff09",
-      period: p,
+      title: KIND_LABEL.degradation,
+      detail: "冠幅面积较上一期下降 " + Math.abs(s.areaPct).toFixed(1) + "%。",
     });
   }
 
-  // ② 图斑清除(消失占比)。
-  const denom = s.lostCount + s.retainedCount;
-  const lostRatio = denom > 0 ? s.lostCount / denom : 0;
+  // 疑似清除: 大量图斑消失且占比可观。
+  const lostRatio = s.totalBefore > 0 ? s.lostCount / s.totalBefore : 0;
   if (s.lostCount >= 5 && lostRatio >= 0.1) {
     const sev: AlertSeverity =
       lostRatio >= 0.3 ? "high" : lostRatio >= 0.2 ? "medium" : "low";
-    items.push({
+    out.push({
       id: s.location + ":clearing",
       location: s.location,
       kind: "clearing",
       severity: sev,
-      title: "\u56fe\u6591\u6e05\u9664",
+      title: KIND_LABEL.clearing,
       detail:
-        "\u6d88\u5931\u6811\u51a0 " +
+        "消失图斑 " +
         s.lostCount +
-        " \u682a\uff08\u5360\u6bd4 " +
+        " 处(占旧期 " +
         (lostRatio * 100).toFixed(0) +
-        "%\uff09",
-      period: p,
+        "%)。",
     });
   }
 
-  // ③ 株数骤降。
+  // 株数骤降。
   if (s.countPct !== null && s.countPct <= -8) {
     const sev: AlertSeverity =
       s.countPct <= -20 ? "high" : s.countPct <= -12 ? "medium" : "low";
-    items.push({
+    out.push({
       id: s.location + ":count_drop",
       location: s.location,
       kind: "count_drop",
       severity: sev,
-      title: "\u682a\u6570\u9aa4\u964d",
-      detail:
-        "\u51a0\u5c42\u682a\u6570\u4e0b\u964d " +
-        Math.abs(s.countPct).toFixed(1) +
-        "%",
-      period: p,
+      title: KIND_LABEL.count_drop,
+      detail: "冠层株数较上一期下降 " + Math.abs(s.countPct).toFixed(1) + "%。",
     });
   }
 
-  return items;
+  return out;
 }
 
-// 高危优先, 同级按地点名稳定排序。
 export function sortAlerts(items: AlertItem[]): AlertItem[] {
-  return [...items].sort((a, b) => {
-    const d = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
-    return d !== 0 ? d : a.location.localeCompare(b.location);
-  });
+  return [...items].sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]);
 }
 
 export function severityColor(sev: AlertSeverity): string {
-  return sev === "high" ? "#b8472a" : sev === "medium" ? "#c9a24b" : "#5c6b66";
+  if (sev === "high") return "#b8472a";
+  if (sev === "medium") return "#c9a24b";
+  return "#5c6b66";
 }
 
 export function severityLabel(sev: AlertSeverity): string {
-  return sev === "high" ? "\u9ad8" : sev === "medium" ? "\u4e2d" : "\u4f4e";
+  if (sev === "high") return "高";
+  if (sev === "medium") return "中";
+  return "低";
 }

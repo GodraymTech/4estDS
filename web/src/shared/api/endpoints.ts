@@ -6,6 +6,7 @@ import type {
   JobRef,
   JobStatus,
   Tract,
+  TractImagery,
   UploadResponse,
 } from "./types";
 
@@ -23,6 +24,10 @@ export const endpoints = {
 
   getJob: (jobId: string): Promise<JobStatus> =>
     apiGet(`/jobs/${encodeURIComponent(jobId)}`),
+
+  // 地块多时相真影像瓦片(时相卷帘刷开真影像)。
+  getImagery: (tractId: string): Promise<TractImagery> =>
+    apiGet(`/tracts/${encodeURIComponent(tractId)}/imagery`),
 
   // 上传影像(multipart, 带进度) -> 存储 key。
   uploadImage: (

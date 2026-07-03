@@ -6,4 +6,5 @@ export const queryKeys = {
   observations: (tractId: string, geometry: GeometryKind) =>
     ["observations", tractId, geometry] as const,
   job: (jobId: string) => ["job", jobId] as const,
+  imagery: (tractId: string) => ["imagery", tractId] as const,
 };
