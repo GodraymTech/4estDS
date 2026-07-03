@@ -1,4 +1,4 @@
-// 后端契约的前端镜像类型(与 Python contracts 对应)。单一真相集中在此。
+// 后端契约的前端镜像类型(与 Python contracts/schemas 对应)。单一真相集中在此。
 export interface Tract {
   tract_id: string;
   name?: string;
@@ -21,9 +21,35 @@ export interface JobStatus {
   job_id: string;
   status: JobState;
   tract_id?: string;
+  started_at?: string;
+  ended_at?: string;
   duration_s?: number;
   error?: string;
   metrics?: Record<string, unknown>;
+}
+
+// 上传响应(对应 schemas.UploadResponse)。key 回传给 /jobs/infer。
+export interface UploadResponse {
+  key: string;
+  filename: string;
+  size: number;
+}
+
+// 提交推理作业的请求体(对应 schemas.InferSubmit)。
+export interface InferSubmit {
+  image_key: string;
+  arch?: string;
+  acquisition_time?: string; // YYYYmmdd
+  location?: string;
+  tile_size?: number;
+  overlap_rate?: number;
+  export_fmt?: string;
+}
+
+// 作业引用(对应 schemas.JobRef)。
+export interface JobRef {
+  job_id: string;
+  status: JobState;
 }
 
 export type GeometryKind = "point" | "crown";
