@@ -30,6 +30,23 @@ body {
   outline-offset: 2px;
 }
 
+/* 跳到主内容: 键盘用户可越过导航直达内容(默认藏, 聚焦显现)。 */
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 1000;
+  padding: 8px 14px;
+  background: var(--color-primary);
+  color: #fff;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: top 0.15s;
+}
+.skip-link:focus {
+  top: 8px;
+}
+
 /* 尊重系统降动效偏好。 */
 @media (prefers-reduced-motion: reduce) {
   *,
