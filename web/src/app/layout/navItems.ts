@@ -61,6 +61,13 @@ export const primaryNav: NavItem[] = [
     perm: "view:alerts",
   },
   {
+    key: "invasion",
+    path: "/invasion",
+    label: "入侵监测",
+    icon: "RadarChartOutlined",
+    perm: "view:invasion",
+  },
+  {
     key: "carbon",
     path: "/carbon",
     label: "蓝碳/MRV",

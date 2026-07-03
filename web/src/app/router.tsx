@@ -8,6 +8,7 @@ import { TasksPage } from "../pages/TasksPage";
 import { ReportsPage } from "../pages/ReportsPage";
 import { AlertsPage } from "../pages/AlertsPage";
 import { CarbonPage } from "../pages/CarbonPage";
+import { InvasionPage } from "../pages/InvasionPage";
 import { AdminPage } from "../pages/AdminPage";
 import { ForbiddenPage } from "../pages/ForbiddenPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       },
       { path: "reports", element: <ReportsPage /> },
       { path: "alerts", element: <AlertsPage /> },
+      { path: "invasion", element: <InvasionPage /> },
       { path: "carbon", element: <CarbonPage /> },
       {
         path: "admin",

@@ -34,6 +34,7 @@ const PERM_LABEL: Record<Permission, string> = {
   "view:reports": "报告查看",
   "view:alerts": "预警查看",
   "view:carbon": "蓝碳/MRV",
+  "view:invasion": "入侵监测",
   "run:infer": "发起推理任务",
   "manage:reports": "报告审批/导出",
   "admin:system": "系统管理",

@@ -10,6 +10,7 @@ export type Permission =
   | "view:reports"
   | "view:alerts"
   | "view:carbon"
+  | "view:invasion"
   | "run:infer"
   | "manage:reports"
   | "admin:system";
@@ -22,6 +23,7 @@ export const ALL_PERMISSIONS: Permission[] = [
   "view:reports",
   "view:alerts",
   "view:carbon",
+  "view:invasion",
   "run:infer",
   "manage:reports",
   "admin:system",
@@ -56,6 +58,7 @@ const VIEW_ALL: Permission[] = [
   "view:reports",
   "view:alerts",
   "view:carbon",
+  "view:invasion",
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {

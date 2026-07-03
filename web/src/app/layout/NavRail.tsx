@@ -9,6 +9,7 @@ import {
   GlobalOutlined,
   SwapOutlined,
   TableOutlined,
+  RadarChartOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import type { ComponentType } from "react";
@@ -25,6 +26,7 @@ const ICONS: Record<string, ComponentType> = {
   ThunderboltOutlined,
   FileTextOutlined,
   AlertOutlined,
+  RadarChartOutlined,
   CloudOutlined,
 };
 
