@@ -2,7 +2,7 @@
   "name": "forestds-web",
   "private": true,
   "version": "0.1.0",
-  "description": "4estDS 一张图前端 (React + Vite + MapLibre, 只读)",
+  "description": "4estDS 一张图前端 (React + Vite + MapLibre, FSD 架构)",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,10 +11,18 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@ant-design/icons": "^5.5.1",
+    "@fontsource/ibm-plex-mono": "^5.1.0",
+    "@fontsource/ibm-plex-sans": "^5.1.0",
+    "@fontsource/ibm-plex-serif": "^5.1.0",
+    "@fontsource/noto-sans-sc": "^5.1.0",
+    "@tanstack/react-query": "^5.59.0",
     "antd": "^5.21.0",
     "maplibre-gl": "^4.7.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.27.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.11",
