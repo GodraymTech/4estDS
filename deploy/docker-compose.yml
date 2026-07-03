@@ -1,0 +1,133 @@
+# 4estDS v1.0 一张图平台 — 单机编排(docker compose)。
+# 服务: postgis / redis / minio / api / worker(GPU) / titiler / web / nginx
+# 设计: API 与 Worker 共享同一镜像(同一 forestds 包)，仅启动命令不同。
+#       Worker 以 --processes 1 --threads 1 消费 gpu 队列 => GPU concurrency=1。
+#       API 与 Worker 挂载同一共享卷 storage(本地存储后端), 保证影像可互访。
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-forestds}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forestds}
+      POSTGRES_DB: ${POSTGRES_DB:-forestds}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./postgis/schema.sql:/docker-entrypoint-initdb.d/10_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forestds}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      forestds_SECTION__: ""
+    depends_on:
+      postgis:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - shared_storage:/data/storage
+      - forestds_home:/root/.4estDS
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.worker
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgis:
+        condition: service_healthy
+    volumes:
+      - shared_storage:/data/storage
+      - forestds_home:/root/.4estDS
+    # GPU: 取消下方注释并安装 nvidia-container-toolkit 后启用。
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    restart: unless-stopped
+
+  titiler:
+    image: ghcr.io/developmentseed/titiler:latest
+    environment:
+      # 允许读取共享卷上的 COG/TIFF，供影像底图动态瓦片。
+      TITILER_API_CORS_ORIGINS: "*"
+    volumes:
+      - shared_storage:/data/storage:ro
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../web
+      dockerfile: ../deploy/Dockerfile.web
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - api
+      - web
+      - titiler
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:
+  shared_storage:
+  forestds_home:

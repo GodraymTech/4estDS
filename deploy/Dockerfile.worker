@@ -1,0 +1,24 @@
+# 4estDS Worker 镜像 (Dramatiq 消费 GPU 队列)。
+# 包含完整推理依赖(detect/geo/multisource)。GPU 环境请改用 nvidia/cuda 基础镜像。
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libexpat1 libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+# 安装包及其推理/地理/多源 extras + 任务队依赖。
+RUN pip install ".[detect,geo,multisource]" \
+    && pip install "redis>=5" "dramatiq[redis]>=1.16" "psycopg[binary]>=3.1" "minio>=7.2"
+
+# GPU 队列 concurrency=1: 单进程单线程消费 gpu 队列，避免显存竞争。
+# 模型在进程内常驻(actors._detector_cache)，首作业预热后复用。
+CMD ["dramatiq", "forestds.worker.actors", "--queues", "gpu", "--processes", "1", "--threads", "1"]

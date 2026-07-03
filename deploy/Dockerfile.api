@@ -1,0 +1,28 @@
+# 4estDS API 镜像 (FastAPI + uvicorn)。
+# 与 worker 共享同一代码包，仅启动命令不同。
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# GDAL/rasterio 系统依赖(引擎读取 TIFF 窗口需要)。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libexpat1 libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+# 安装包 + API 运行时依赖(FastAPI/uvicorn/redis/dramatiq/psycopg/minio)。
+# geo/multisource 按需在 worker 镜像安装(推理才需要)；API 保持轻量。
+RUN pip install . \
+    && pip install "fastapi>=0.110" "uvicorn[standard]>=0.29" "python-multipart>=0.0.9" \
+       "redis>=5" "dramatiq[redis]>=1.16" "psycopg[binary]>=3.1" "minio>=7.2"
+
+EXPOSE 8000
+
+# 生产启动: 单 worker 进程(无状态, 可水平扩展); 连接数由 nginx 前置。
+CMD ["uvicorn", "forestds.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
