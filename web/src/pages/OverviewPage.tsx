@@ -1,54 +1,41 @@
+import { useState } from "react";
 import type { CSSProperties } from "react";
-import { Card, Statistic, Typography, Tag } from "antd";
-import { MapStage } from "../shared/ui/MapStage";
-import { useTracts } from "../entities/tract";
+import { Segmented } from "antd";
+import { DashboardPanel, OverviewMap } from "../features/overview";
 
-const { Text } = Typography;
+type View = "map" | "board";
 
-// 总览(驾驶舱 + 一张图): P0 先出全屏地图 + KPI 浮层。
-// P1 接入语义缩放(省市县 choropleth → 倒水滴地块 marker → 飞入工作台)。
+// 总览(一张图): 语义缩放地图 ⇄ 数据看板 双视图。
 export function OverviewPage() {
-  const { data: tracts, isLoading } = useTracts();
-  const count = tracts?.length ?? 0;
-
+  const [view, setView] = useState<View>("map");
   return (
-    <div style={STAGE_WRAP}>
-      <MapStage center={[113.3, 22.5]} zoom={7} />
-      <Card style={PANEL} styles={CARD_STYLES}>
-        <Text type="secondary">红树林监管驾驶舱</Text>
-        <Statistic title="入库地块" value={count} loading={isLoading} />
-        <div style={HINT}>
-          <Tag color="processing">P1</Tag>
-          <Text type="secondary">
-            语义缩放总览图 / 时相卷帘 / 变化检测即将接入
-          </Text>
-        </div>
-      </Card>
+    <div style={WRAP}>
+      <div style={TOGGLE}>
+        <Segmented
+          value={view}
+          onChange={(v) => setView(v as View)}
+          options={[
+            { label: "一张图", value: "map" },
+            { label: "数据看板", value: "board" },
+          ]}
+        />
+      </div>
+      {view === "map" ? <OverviewMap /> : <DashboardPanel />}
     </div>
   );
 }
 
-const STAGE_WRAP: CSSProperties = {
+const WRAP: CSSProperties = {
   position: "relative",
   flex: 1,
   minHeight: 0,
-};
-const PANEL: CSSProperties = {
-  position: "absolute",
-  top: 16,
-  left: 16,
-  width: 260,
-  boxShadow: "var(--shadow-2)",
-};
-const PANEL_BODY: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 8,
 };
-const CARD_STYLES = { body: PANEL_BODY };
-const HINT: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  marginTop: 4,
+const TOGGLE: CSSProperties = {
+  position: "absolute",
+  top: 16,
+  left: "50%",
+  transform: "translateX(-50%)",
+  zIndex: 6,
 };

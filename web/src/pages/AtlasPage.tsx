@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { useParams } from "react-router-dom";
 import { Button, Card, List, Segmented, Space, Spin, Tag } from "antd";
 import { MapStage } from "../shared/ui/MapStage";
 import { boundsOf, type MapController } from "../shared/map-core";
@@ -11,8 +12,9 @@ import { endpoints } from "../shared/api";
 const OBS_LAYER = "observations";
 
 // 地块工作台: 承接 v1.0 交互(地块列表 + 点/冠切换 + 报告/导出)到新 map-core 防腐层。
-// P1: 时相卷帘 + 时相选择滑块 + 单木 profile 悬停/点击。
+// 支持从总览图 /atlas/:tractId 丝滑飞入指定地块。
 export function AtlasPage() {
+  const { tractId } = useParams();
   const { data: tracts, isLoading: loadingTracts } = useTracts();
   const [selected, setSelected] = useState<Tract | null>(null);
   const [geometry, setGeometry] = useState<GeometryKind>("point");
@@ -22,10 +24,19 @@ export function AtlasPage() {
   );
   const mapRef = useRef<MapController | null>(null);
 
-  // 首条地块默认选中。
+  // 路由携带 tractId 时优先选中该地块(总览图点击进入)。
   useEffect(() => {
-    if (!selected && tracts && tracts.length > 0) setSelected(tracts[0]);
-  }, [tracts, selected]);
+    if (tractId && tracts) {
+      const found = tracts.find((t) => t.tract_id === tractId);
+      if (found) setSelected(found);
+    }
+  }, [tractId, tracts]);
+
+  // 无指定时首条地块默认选中。
+  useEffect(() => {
+    if (!selected && !tractId && tracts && tracts.length > 0)
+      setSelected(tracts[0]);
+  }, [tracts, selected, tractId]);
 
   const draw = useCallback(() => {
     const map = mapRef.current;
