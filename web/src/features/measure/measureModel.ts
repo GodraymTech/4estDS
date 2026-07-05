@@ -84,5 +84,5 @@ export function formatArea(m2: number): string {
   if (m2 <= 0) return "-";
   if (m2 >= 1000000) return (m2 / 1000000).toFixed(3) + " km\u00b2";
   const ha = m2 / 10000;
-  return ha >= 1 ? ha.toFixed(3) + " ha" : m2.toFixed(1) + " m\u00b2";
+  return ha >= 1 ? ha.toFixed(3) + " hm\u00b2" : m2.toFixed(1) + " m\u00b2";
 }

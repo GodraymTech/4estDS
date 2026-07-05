@@ -187,12 +187,18 @@ def compute_report(
             "rc": rc,
             "iv": iv,
             "fi": fi,
+            "density_per_ha": density_per_hectare(len(obs_list), area_m2),
+            "total_crown_area": sp_total_area,
             "total_volume": sum(volumes) if volumes else 0.0,
             "avg_height": avg_h,
             "max_height": max(heights) if heights else None,
             "avg_volume": avg_v,
             "max_volume": max(volumes) if volumes else None,
             "avg_crown_area": avg_a,
+            "crown_w_geo": summarize_distribution(_collect(obs_list, "crown_w_geo")),
+            "crown_h_geo": summarize_distribution(_collect(obs_list, "crown_h_geo")),
+            "crown_area_geo": summarize_distribution(_collect(obs_list, "crown_area_geo")),
+            "height": summarize_distribution(_collect(obs_list, "height")),
         }
 
     data = ReportData(

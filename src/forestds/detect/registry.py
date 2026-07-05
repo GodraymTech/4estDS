@@ -14,6 +14,7 @@ _REGISTRY: dict[str, type[BaseDetector]] = {}
 
 # 内置后端 -> 所在模块(延迟导入,避免未装重依赖时导入失败)
 _KNOWN: dict[str, str] = {
+    "mock": "forestds.detect.backends.mock",
     "ultralytics": "forestds.detect.backends.ultralytics",
 }
 
@@ -86,4 +87,3 @@ def get_detector(arch: str, **kwargs) -> BaseDetector:
     if arch not in _REGISTRY:
         raise RuntimeError(f"后端 {arch!r} 导入后仍未注册(检查 @register 装饰器)")
     return _REGISTRY[arch](**kwargs)
-

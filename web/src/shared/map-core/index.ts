@@ -2,19 +2,29 @@
 export type {
   BBox,
   Camera,
+  FitBoundsOptions,
+  FitPadding,
   GeoJson,
   GeoJsonLayerSpec,
   LngLat,
   MapCoreEvent,
   MapInitOptions,
   MarkerSpec,
+  RasterOverlaySpec,
   RasterBasemap,
   VectorLayerKind,
 } from "./types";
 export type { MapController } from "./MapController";
 export { MapLibreController } from "./MapLibreController";
-export { defaultBasemap, rasterBasemap } from "./basemap";
+export {
+  BASEMAPS,
+  ROAD_OVERLAY,
+  basemapById,
+  defaultBasemap,
+  rasterBasemap,
+} from "./basemap";
 export { boundsOf } from "./geo";
+export { provinceBoundaryByName, provinceBounds, provinceMask } from "./provinceBoundary";
 
 import { MapLibreController } from "./MapLibreController";
 import type { MapController } from "./MapController";

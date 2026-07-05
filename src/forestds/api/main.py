@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __codename__, __version__
-from .routers import health, jobs, tracts, uploads
+from .routers import health, jobs, tiles, tracts, uploads
 
 API_PREFIX = "/api/v1"
 
@@ -40,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(uploads.router, prefix=API_PREFIX)
     app.include_router(jobs.router, prefix=API_PREFIX)
     app.include_router(tracts.router, prefix=API_PREFIX)
+    app.include_router(tiles.router, prefix=API_PREFIX)
     return app
 
 

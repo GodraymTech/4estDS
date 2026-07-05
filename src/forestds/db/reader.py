@@ -24,6 +24,102 @@ def _rows_to_dicts(rows) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _parse_wkt_point(wkt: str | None) -> tuple[float, float] | None:
+    if not wkt or not isinstance(wkt, str) or "POINT" not in wkt.upper():
+        return None
+    try:
+        inner = wkt[wkt.index("(") + 1: wkt.rindex(")")]
+        parts = inner.replace(",", " ").split()
+        return float(parts[0]), float(parts[1])
+    except (ValueError, IndexError):
+        return None
+
+
+def _looks_like_lnglat(x: float, y: float) -> bool:
+    return -180 <= x <= 180 and -90 <= y <= 90
+
+
+def _to_wgs84(x: float, y: float, tract: dict) -> tuple[float, float] | None:
+    if tract.get("crs_epsg") == 4326 or _looks_like_lnglat(x, y):
+        return x, y
+
+    crs_epsg = tract.get("crs_epsg")
+    crs_wkt = tract.get("crs_wkt")
+    if not crs_epsg and not crs_wkt:
+        return None
+
+    try:
+        from rasterio.crs import CRS
+        from rasterio.warp import transform
+
+        src_crs = CRS.from_epsg(int(crs_epsg)) if crs_epsg else CRS.from_wkt(crs_wkt)
+        lngs, lats = transform(src_crs, "EPSG:4326", [x], [y])
+        lng, lat = float(lngs[0]), float(lats[0])
+        if _looks_like_lnglat(lng, lat):
+            return lng, lat
+    except Exception as exc:  # noqa: BLE001
+        log.debug("地块中心点坐标转换失败: tract={} err={}", tract.get("tract_id"), exc)
+    return None
+
+
+def _latest_run_for_tract_conn(conn: sqlite3.Connection, tract_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT o.run_id FROM tree_observations o "
+        "JOIN run_logs r ON r.run_id = o.run_id "
+        "WHERE o.tract_id=? AND r.status='succeeded' ORDER BY r.started_at DESC LIMIT 1",
+        (tract_id,),
+    ).fetchone()
+    return row["run_id"] if row else None
+
+
+def _mean_observation_center(
+    conn: sqlite3.Connection,
+    tract: dict,
+) -> tuple[float, float] | None:
+    tract_id = tract.get("tract_id")
+    if not tract_id:
+        return None
+    run_id = tract.get("active_run_id") or _latest_run_for_tract_conn(conn, tract_id)
+    sql = "SELECT center_geo FROM tree_observations WHERE tract_id=? AND center_geo IS NOT NULL"
+    params: list[str] = [tract_id]
+    if run_id:
+        sql += " AND run_id=?"
+        params.append(run_id)
+    points = []
+    for row in conn.execute(sql, params).fetchall():
+        pt = _parse_wkt_point(row["center_geo"])
+        if pt:
+            points.append(pt)
+    if not points:
+        return None
+    x = sum(p[0] for p in points) / len(points)
+    y = sum(p[1] for p in points) / len(points)
+    return _to_wgs84(x, y, tract)
+
+
+def _enrich_tracts(conn: sqlite3.Connection, tracts: list[dict]) -> list[dict]:
+    for tract in tracts:
+        tract_id = tract.get("tract_id")
+        run_id = None
+        if tract_id:
+            run_id = tract.get("active_run_id") or _latest_run_for_tract_conn(conn, tract_id)
+            if run_id and not tract.get("active_run_id"):
+                tract["active_run_id"] = run_id
+            row_count = conn.execute(
+                "SELECT COUNT(*) AS c FROM tree_observations WHERE tract_id=?"
+                + (" AND run_id=?" if run_id else ""),
+                (tract_id, run_id) if run_id else (tract_id,),
+            ).fetchone()
+            tract["observation_count"] = int(row_count["c"]) if row_count else 0
+        if tract.get("center_lng") is not None and tract.get("center_lat") is not None:
+            continue
+        center = _mean_observation_center(conn, tract)
+        if center:
+            tract["center_lng"] = center[0]
+            tract["center_lat"] = center[1]
+    return tracts
+
+
 def get_tract(tract_id: str, *, url: str | None = None) -> dict | None:
     """取单个地块元信息。"""
     conn = _connect(url)
@@ -31,9 +127,17 @@ def get_tract(tract_id: str, *, url: str | None = None) -> dict | None:
         row = conn.execute(
             "SELECT * FROM tracts WHERE tract_id=?", (tract_id,)
         ).fetchone()
+        tracts = _enrich_tracts(conn, [dict(row)]) if row else []
     finally:
         conn.close()
-    return dict(row) if row else None
+    return tracts[0] if tracts else None
+
+
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    return any(
+        row["name"] == column
+        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    )
 
 
 def resolve_tract_id(
@@ -127,9 +231,10 @@ def list_tracts(*, url: str | None = None) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM tracts ORDER BY acquisition_time DESC, location"
         ).fetchall()
+        tracts = _enrich_tracts(conn, _rows_to_dicts(rows))
     finally:
         conn.close()
-    return _rows_to_dicts(rows)
+    return tracts
 
 
 def find_cached_tiles(input_path: str, *, url: str | None = None) -> Path | None:
@@ -174,6 +279,8 @@ def active_run_for_tract(tract_id: str, *, url: str | None = None) -> str | None
     """返回地块当前激活/发布的 run_id。"""
     conn = _connect(url)
     try:
+        if not _has_column(conn, "tracts", "active_run_id"):
+            return None
         row = conn.execute(
             "SELECT active_run_id FROM tracts WHERE tract_id=?",
             (tract_id,),

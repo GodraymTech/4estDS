@@ -15,5 +15,8 @@ export function useObservations(
     queryKey: queryKeys.observations(tractId ?? "", geometry),
     queryFn: () => endpoints.getObservations(tractId as string, geometry),
     enabled: Boolean(tractId),
+    staleTime: 15_000,
+    gcTime: 45_000,
+    structuralSharing: false,
   });
 }

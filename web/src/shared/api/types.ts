@@ -8,8 +8,8 @@ export interface Tract {
   area_unit?: string;
   crs_epsg?: number;
   active_run_id?: string;
-  // 地块代表点经纬度(WGS84)。用于总览图倒水滴标记。
-  // TODO(后端契约): /tracts 应由存储的地块几何质心回填此两个字段(代价极低)。
+  observation_count?: number;
+  // 地块代表点经纬度(WGS84)。由 /tracts 从地理观测中心回填, 用于倒水滴标记。
   center_lng?: number;
   center_lat?: number;
   [k: string]: unknown;
@@ -76,4 +76,62 @@ export interface TractImagery {
   min_zoom?: number | null;
   max_zoom?: number | null;
   available: boolean;
+  source_path?: string | null;
+  source_format?: string | null;
+  tile_service?: string | null;
+}
+
+export interface DistributionSummary {
+  n?: number;
+  min?: number;
+  max?: number;
+  mean?: number;
+  median?: number;
+  p10?: number;
+  p90?: number;
+  std?: number;
+}
+
+export interface SpeciesAnalysis {
+  count?: number;
+  ratio?: number;
+  ra?: number;
+  rc?: number;
+  iv?: number;
+  fi?: number | null;
+  density_per_ha?: number | null;
+  total_crown_area?: number;
+  total_volume?: number;
+  avg_height?: number | null;
+  max_height?: number | null;
+  avg_volume?: number | null;
+  max_volume?: number | null;
+  avg_crown_area?: number | null;
+  crown_w_geo?: DistributionSummary;
+  crown_h_geo?: DistributionSummary;
+  crown_area_geo?: DistributionSummary;
+  height?: DistributionSummary;
+}
+
+export interface TractSummary {
+  tract_id?: string | null;
+  run_id?: string | null;
+  tree_count: number;
+  species: Record<string, number>;
+  density_per_ha?: number | null;
+  crown_w_geo?: DistributionSummary;
+  crown_h_geo?: DistributionSummary;
+  crown_area_geo?: DistributionSummary;
+  height?: DistributionSummary;
+  meta?: {
+    acquisition_time?: string | null;
+    location?: string | null;
+    area_m2?: number | null;
+    species_richness?: number;
+    species_analysis?: Record<string, SpeciesAnalysis>;
+    canopy_cover_rate?: number | null;
+    total_crown_area?: number;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
 }

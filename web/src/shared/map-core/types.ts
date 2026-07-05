@@ -4,9 +4,25 @@ export type LngLat = [number, number];
 /** 包围盒: [[minX, minY], [maxX, maxY]]。 */
 export type BBox = [LngLat, LngLat];
 
+export interface FitPadding {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+export interface FitBoundsOptions {
+  padding?: number | FitPadding;
+  maxZoom?: number;
+  duration?: number;
+}
+
 export interface GeoJson {
   type: string;
-  [k: string]: unknown;
+  features?: unknown[];
+  geometry?: unknown;
+  properties?: unknown;
+  coordinates?: unknown;
 }
 
 export interface RasterBasemap {
@@ -14,6 +30,12 @@ export interface RasterBasemap {
   tiles: string[];
   tileSize?: number;
   attribution?: string;
+  minZoom?: number;
+  maxZoom?: number;
+}
+
+export interface RasterOverlaySpec extends RasterBasemap {
+  opacity?: number;
 }
 
 export type VectorLayerKind = "point" | "polygon" | "line";
@@ -24,6 +46,9 @@ export interface GeoJsonLayerSpec {
   data: GeoJson;
   /** 颜色引用设计令牌语义值(由调用方传入), 维持单一真相。 */
   color?: string;
+  opacity?: number;
+  lineWidth?: number;
+  dashArray?: number[];
 }
 
 /**

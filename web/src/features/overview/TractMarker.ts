@@ -17,10 +17,11 @@ export function createTractMarkerElement(
   el.style.cursor = "pointer";
   el.style.width = "26px";
   el.style.height = "34px";
-  el.style.transition = "transform 120ms ease";
+  el.style.display = "grid";
+  el.style.placeItems = "center";
   const color = published ? PUBLISHED_COLOR : DRAFT_COLOR;
   el.innerHTML =
-    '<svg width="26" height="34" viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">' +
+    '<svg data-marker-glyph="true" width="26" height="34" viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg" style="transition: transform 120ms ease; transform-origin: 50% 100%;">' +
     '<path d="M12 0 C5.4 0 0 5.4 0 12 C0 21 12 32 12 32 C12 32 24 21 24 12 C24 5.4 18.6 0 12 0 Z" ' +
     'fill="' +
     color +
@@ -28,11 +29,13 @@ export function createTractMarkerElement(
     '<circle cx="12" cy="12" r="4.5" fill="#ffffff"/>' +
     "</svg>";
   el.addEventListener("mouseenter", () => {
-    el.style.transform = "scale(1.15)";
+    const glyph = el.querySelector<SVGElement>("[data-marker-glyph]");
+    if (glyph) glyph.style.transform = "scale(1.15)";
     handlers.onEnter(el.getBoundingClientRect());
   });
   el.addEventListener("mouseleave", () => {
-    el.style.transform = "scale(1)";
+    const glyph = el.querySelector<SVGElement>("[data-marker-glyph]");
+    if (glyph) glyph.style.transform = "scale(1)";
     handlers.onLeave();
   });
   el.addEventListener("click", (e) => {

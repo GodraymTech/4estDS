@@ -145,6 +145,25 @@ DDL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_canon_individual ON tract_trees(individual_id)",
 )
 
+OPTIONAL_COLUMNS: dict[str, dict[str, str]] = {
+    # 早期 SQLite 库已经存在时 CREATE TABLE IF NOT EXISTS 不会补新列。
+    # 这里仅做向前兼容的加列，不改写或重建用户数据。
+    "tracts": {
+        "active_run_id": "TEXT",
+    },
+}
+
+
+def _ensure_optional_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in OPTIONAL_COLUMNS.items():
+        existing = {
+            row[1]
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
 
 def resolve_db_path(url: str | None = None) -> Path:
     """解析 sqlite 文件路径(仅支持本地文件型 URL 或 None)。"""
@@ -164,7 +183,7 @@ def init_db(url: str | None = None) -> Path:
         conn.execute("PRAGMA foreign_keys = ON")
         for stmt in DDL:
             conn.execute(stmt)
-        # DDL contains all required column definitions. No migration checks needed.
+        _ensure_optional_columns(conn)
         conn.commit()
     finally:
         conn.close()

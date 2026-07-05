@@ -12,25 +12,18 @@ export interface NavItem {
 // 主导航(上部)。按业务优先级排序。
 export const primaryNav: NavItem[] = [
   {
-    key: "overview",
-    path: "/overview",
-    label: "总览",
+    key: "map",
+    path: "/map",
+    label: "一张图",
     icon: "GlobalOutlined",
     perm: "view:overview",
   },
   {
-    key: "atlas",
-    path: "/atlas",
-    label: "地块工作台",
-    icon: "EnvironmentOutlined",
-    perm: "view:atlas",
-  },
-  {
-    key: "change",
-    path: "/change",
-    label: "变化检测",
-    icon: "SwapOutlined",
-    perm: "view:change",
+    key: "dashboard",
+    path: "/dashboard",
+    label: "数据看板",
+    icon: "DashboardOutlined",
+    perm: "view:dashboard",
   },
   {
     key: "ledger",

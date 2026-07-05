@@ -5,6 +5,7 @@ import tempfile
 from PIL import Image
 
 from forestds.detect.base import BaseDetector, Detection, Detections, Window
+from forestds.detect import get_detector
 from forestds.engine.sources import InMemorySource, TiledDirectorySource
 from forestds.engine.infer import run_inference, InferenceConfig
 
@@ -30,6 +31,16 @@ class MockDetector(BaseDetector):
 
 
 class TestInferencePipeline(unittest.TestCase):
+    def test_builtin_mock_detector_registry(self):
+        detector = get_detector("mock")
+        detector.ensure_loaded()
+
+        dets = detector.predict(Window(x=0, y=0, w=100, h=100))
+
+        self.assertEqual(detector.name, "mock")
+        self.assertEqual(len(dets), 1)
+        self.assertEqual(dets.items[0].label, "tree")
+
     def test_in_memory_source_direct(self):
         # 建立一个 100x100x3 的全黑图像数组
         array = np.zeros((100, 100, 3), dtype=np.uint8)

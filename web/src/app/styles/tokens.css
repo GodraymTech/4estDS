@@ -45,8 +45,45 @@
   --space-8: 32px;
   --shadow-1: 0 1px 2px rgba(16, 48, 43, 0.06), 0 1px 3px rgba(16, 48, 43, 0.1);
   --shadow-2: 0 4px 12px rgba(16, 48, 43, 0.12);
+  --glass-bg: rgba(255, 255, 255, 0.68);
+  --glass-bg-strong: rgba(255, 255, 255, 0.82);
+  --glass-border: rgba(255, 255, 255, 0.72);
+  --glass-shadow: 0 18px 48px rgba(16, 48, 43, 0.18), 0 2px 8px rgba(16, 48, 43, 0.08);
+  --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  --glass-text: #10221e;
+  --glass-muted: #5c6b66;
+  --glass-chip: rgba(248, 250, 249, 0.72);
 
   /* 布局尺度 */
   --nav-rail-width: 72px;
   --header-height: 56px;
+}
+
+:root[data-theme="dark"] {
+  --ink: #071412;
+  --tide: #36b7a7;
+  --canopy: #60c47a;
+  --laterite: #e26d4a;
+  --silt: #d6b75b;
+  --carbon: #6aa7e8;
+  --haze: #0b1412;
+  --paper: #13211e;
+  --line: #28423b;
+  --muted: #9ab1aa;
+  --color-bg: var(--haze);
+  --color-surface: var(--paper);
+  --color-border: var(--line);
+  --color-text: #e6f0ed;
+  --color-text-muted: var(--muted);
+  --color-primary: var(--tide);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.42);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.42);
+  --glass-bg: rgba(20, 30, 28, 0.58);
+  --glass-bg-strong: rgba(20, 30, 28, 0.76);
+  --glass-border: rgba(255, 255, 255, 0.18);
+  --glass-shadow: 0 22px 58px rgba(0, 0, 0, 0.42), 0 2px 10px rgba(0, 0, 0, 0.28);
+  --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  --glass-text: #e6f0ed;
+  --glass-muted: #9ab1aa;
+  --glass-chip: rgba(255, 255, 255, 0.10);
 }

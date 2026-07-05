@@ -4,10 +4,9 @@ import { Tooltip } from "antd";
 import {
   AlertOutlined,
   CloudOutlined,
-  EnvironmentOutlined,
+  DashboardOutlined,
   FileTextOutlined,
   GlobalOutlined,
-  SwapOutlined,
   TableOutlined,
   RadarChartOutlined,
   ThunderboltOutlined,
@@ -20,8 +19,7 @@ import { useRole } from "../../shared/auth";
 // 图标名 → 组件映射(避免在数据里存组件, 保持 navItems 为纯数据)。
 const ICONS: Record<string, ComponentType> = {
   GlobalOutlined,
-  EnvironmentOutlined,
-  SwapOutlined,
+  DashboardOutlined,
   TableOutlined,
   ThunderboltOutlined,
   FileTextOutlined,

@@ -76,6 +76,25 @@ class TractImageryOut(BaseModel):
     min_zoom: Optional[int] = None
     max_zoom: Optional[int] = None
     available: bool = False
+    source_path: Optional[str] = None
+    source_format: Optional[str] = None
+    tile_service: Optional[str] = None
+
+
+class TractSummaryOut(BaseModel):
+    """地块统计摘要(复用 report.metrics 的结构化产物)。"""
+
+    model_config = {"extra": "allow"}
+
+    tract_id: Optional[str] = None
+    run_id: Optional[str] = None
+    tree_count: int = 0
+    species: dict[str, int] = Field(default_factory=dict)
+    density_per_ha: Optional[float] = None
+    crown_w_geo: dict[str, Any] = Field(default_factory=dict)
+    crown_h_geo: dict[str, Any] = Field(default_factory=dict)
+    crown_area_geo: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChangeCompareOut(BaseModel):

@@ -4,6 +4,7 @@ export type Role = "admin" | "regulator" | "analyst" | "viewer";
 
 export type Permission =
   | "view:overview"
+  | "view:dashboard"
   | "view:atlas"
   | "view:change"
   | "view:ledger"
@@ -17,6 +18,7 @@ export type Permission =
 
 export const ALL_PERMISSIONS: Permission[] = [
   "view:overview",
+  "view:dashboard",
   "view:atlas",
   "view:change",
   "view:ledger",
@@ -52,6 +54,7 @@ export const ROLE_META: Record<Role, RoleMeta> = {
 // 各视图的只读权限(四角色均具备)。
 const VIEW_ALL: Permission[] = [
   "view:overview",
+  "view:dashboard",
   "view:atlas",
   "view:change",
   "view:ledger",

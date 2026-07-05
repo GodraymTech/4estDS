@@ -43,7 +43,7 @@ export function UploadForm() {
       const ref = await endpoints.submitInfer({
         image_key: up.key,
         arch,
-        acquisition_time: acq ? acq.replaceAll("-", "") : undefined,
+        acquisition_time: acq ? acq.replace(/-/g, "") : undefined,
         location: location || undefined,
       });
       addJob({

@@ -11,14 +11,16 @@
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 
 from ..deps import get_db_url
 from ..geojson import rows_to_featurecollection
-from ..schemas import ChangeCompareOut, TractImageryOut, TractOut
+from ..schemas import ChangeCompareOut, TractImageryOut, TractOut, TractSummaryOut
 
 router = APIRouter(prefix="/tracts", tags=["tracts"])
 
@@ -39,6 +41,57 @@ def list_tracts(db_url: str | None = Depends(get_db_url)) -> list[TractOut]:
     from ...db import reader
 
     return [TractOut(**t) for t in reader.list_tracts(url=db_url)]
+
+
+def _tract_summary(tract_id: str, db_url: str | None) -> dict:
+    """用报告统计层生成轻量摘要，供地图卡片/看板直接读取。"""
+    from ...db import reader
+    from ...report.metrics import compute_report
+
+    rid = _resolve_run(tract_id, None, db_url)
+    if rid is None:
+        tract = reader.get_tract(tract_id, url=db_url) or {"tract_id": tract_id}
+        return {
+            "tract_id": tract_id,
+            "run_id": None,
+            "tree_count": 0,
+            "species": {},
+            "density_per_ha": None,
+            "crown_w_geo": {},
+            "crown_h_geo": {},
+            "crown_area_geo": {},
+            "meta": {
+                "acquisition_time": tract.get("acquisition_time"),
+                "location": tract.get("location"),
+                "area_m2": tract.get("geo_area"),
+                "species_richness": 0,
+                "species_analysis": {},
+                "canopy_cover_rate": None,
+                "total_crown_area": 0.0,
+            },
+        }
+    tract = reader.get_tract(tract_id, url=db_url) or {"tract_id": tract_id}
+    rows = reader.fetch_observations(run_id=rid, tract_id=tract_id, url=db_url)
+    data = compute_report(rows, tract=tract, run_id=rid).as_dict()
+    meta = data.get("meta")
+    if isinstance(meta, dict):
+        meta.pop("raw_observations", None)
+    return data
+
+
+@router.get("/summaries", response_model=list[TractSummaryOut], summary="全部地块统计摘要")
+def list_tract_summaries(db_url: str | None = Depends(get_db_url)) -> list[TractSummaryOut]:
+    from ...db import reader
+
+    return [TractSummaryOut(**_tract_summary(t["tract_id"], db_url)) for t in reader.list_tracts(url=db_url)]
+
+
+@router.get("/{tract_id}/summary", response_model=TractSummaryOut, summary="地块统计摘要")
+def get_tract_summary(
+    tract_id: str,
+    db_url: str | None = Depends(get_db_url),
+) -> TractSummaryOut:
+    return TractSummaryOut(**_tract_summary(tract_id, db_url))
 
 
 @router.get("/{tract_id}", response_model=TractOut, summary="地块详情")
@@ -71,6 +124,59 @@ def _derive_imagery(tract: dict) -> dict:
         "attribution": tract.get("imagery_attribution"),
         "min_zoom": tract.get("imagery_min_zoom"),
         "max_zoom": tract.get("imagery_max_zoom"),
+        "source_path": None,
+        "source_format": None,
+        "tile_service": None,
+    }
+
+
+def _latest_input_imagery(tract_id: str, db_url: str | None) -> dict:
+    """从最新成功 run 的 input_path 派生 TiTiler 瓦片模板。"""
+    from ...db import reader
+    from ...preprocess.cog import check_cog_format
+
+    run_id = reader.latest_run_for_tract(tract_id, url=db_url)
+    run = reader.get_run(run_id, url=db_url) if run_id else None
+    input_path = run.get("input_path") if run else None
+    if not input_path:
+        return {"tiles": None, "source_path": None, "source_format": None, "tile_service": None}
+
+    path = Path(input_path).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    fmt = check_cog_format(path)
+    if fmt not in {"cog", "tiled_tiff"}:
+        return {
+            "tiles": None,
+            "source_path": str(path),
+            "source_format": fmt,
+            "tile_service": None,
+        }
+
+    titiler = os.environ.get("FORESTDS_TITILER_URL") or os.environ.get("TITILER_BASE_URL")
+    if not titiler:
+        return {
+            "tiles": [f"/api/v1/tiles/tracts/{quote(tract_id, safe='')}/{{z}}/{{x}}/{{y}}"],
+            "source_path": str(path),
+            "source_format": fmt,
+            "tile_service": "forestds-inline",
+            "min_zoom": 12,
+            "max_zoom": 24,
+        }
+
+    file_url = "file://" + str(path.resolve())
+    tile_url = (
+        titiler.rstrip("/")
+        + "/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url="
+        + quote(file_url, safe="/:")
+    )
+    return {
+        "tiles": [tile_url],
+        "source_path": str(path),
+        "source_format": fmt,
+        "tile_service": titiler,
+        "min_zoom": None,
+        "max_zoom": None,
     }
 
 
@@ -82,15 +188,20 @@ def get_imagery(tract_id: str, db_url: str | None = Depends(get_db_url)) -> Trac
     if tract is None:
         raise HTTPException(status_code=404, detail=f"地块不存在: {tract_id}")
     d = _derive_imagery(tract)
+    if not d["tiles"]:
+        d.update(_latest_input_imagery(tract_id, db_url))
     return TractImageryOut(
         tract_id=tract_id,
         acquisition_time=tract.get("acquisition_time"),
         tiles=d["tiles"],
         tile_size=d["tile_size"],
         attribution=d["attribution"],
-        min_zoom=d["min_zoom"],
-        max_zoom=d["max_zoom"],
+        min_zoom=d.get("min_zoom"),
+        max_zoom=d.get("max_zoom"),
         available=bool(d["tiles"]),
+        source_path=d["source_path"],
+        source_format=d["source_format"],
+        tile_service=d["tile_service"],
     )
 
 
@@ -107,7 +218,15 @@ def get_observations(
     if rid is None:
         return JSONResponse({"type": "FeatureCollection", "features": []})
     rows = reader.fetch_observations(run_id=rid, tract_id=tract_id, url=db_url)
-    return JSONResponse(rows_to_featurecollection(rows, geometry=geometry))
+    tract = reader.get_tract(tract_id, url=db_url) or {}
+    return JSONResponse(
+        rows_to_featurecollection(
+            rows,
+            geometry=geometry,
+            crs_epsg=tract.get("crs_epsg"),
+            crs_wkt=tract.get("crs_wkt"),
+        )
+    )
 
 
 @router.get("/{tract_id}/report", summary="在线报告")

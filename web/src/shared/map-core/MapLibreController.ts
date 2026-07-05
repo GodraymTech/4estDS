@@ -1,7 +1,9 @@
 import maplibregl from "maplibre-gl";
+import { env } from "../config/env";
 import type {
   BBox,
   Camera,
+  FitBoundsOptions,
   GeoJson,
   GeoJsonLayerSpec,
   LngLat,
@@ -9,6 +11,7 @@ import type {
   MapCoreHandler,
   MapInitOptions,
   MarkerSpec,
+  RasterOverlaySpec,
   RasterBasemap,
 } from "./types";
 import type { MapController } from "./MapController";
@@ -16,6 +19,10 @@ import type { MapController } from "./MapController";
 const DEFAULT_POINT_COLOR = "#0e6e63";
 const DEFAULT_POLYGON_COLOR = "#3e8e5a";
 const DEFAULT_LINE_COLOR = "#b8472a";
+
+function toMapLibreGeoJson(data: GeoJson): GeoJSON.GeoJSON {
+  return data as unknown as GeoJSON.GeoJSON;
+}
 
 /**
  * MapController 的 MapLibre 实现。
@@ -53,11 +60,10 @@ export class MapLibreController implements MapController {
         style: this.rasterStyle(opts.basemap),
         center: opts.center,
         zoom: opts.zoom,
+        maxZoom: env.maxZoom,
         interactive,
         attributionControl: false,
       });
-      if (interactive)
-        map.addControl(new maplibregl.NavigationControl({}), "top-right");
       map.on("load", () => {
         this.ready = true;
         resolve();
@@ -82,7 +88,7 @@ export class MapLibreController implements MapController {
     if (!map.getSource(spec.id)) {
       map.addSource(spec.id, {
         type: "geojson",
-        data: spec.data as GeoJSON.GeoJSON,
+        data: toMapLibreGeoJson(spec.data),
       });
     } else {
       this.setData(spec.id, spec.data);
@@ -98,20 +104,22 @@ export class MapLibreController implements MapController {
           "circle-color": spec.color ?? DEFAULT_POINT_COLOR,
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 0.5,
-          "circle-opacity": 0.85,
+          "circle-opacity": spec.opacity ?? 0.85,
         },
       });
     } else if (spec.kind === "line") {
+      const paint: Record<string, string | number | number[]> = {
+        "line-color": spec.color ?? DEFAULT_LINE_COLOR,
+        "line-width": spec.lineWidth ?? 2.5,
+        "line-opacity": spec.opacity ?? 1,
+      };
+      if (spec.dashArray?.length) paint["line-dasharray"] = spec.dashArray;
       map.addLayer({
         id: spec.id,
         type: "line",
         source: spec.id,
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": spec.color ?? DEFAULT_LINE_COLOR,
-          "line-width": 2.5,
-          "line-dasharray": [2, 1],
-        },
+        paint,
       });
     } else {
       map.addLayer({
@@ -120,7 +128,7 @@ export class MapLibreController implements MapController {
         source: spec.id,
         paint: {
           "fill-color": spec.color ?? DEFAULT_POLYGON_COLOR,
-          "fill-opacity": 0.3,
+          "fill-opacity": spec.opacity ?? 0.3,
           "fill-outline-color": "#1a5c38",
         },
       });
@@ -137,7 +145,7 @@ export class MapLibreController implements MapController {
   setData(layerId: string, data: GeoJson): void {
     const src = this.map?.getSource(layerId) as
       maplibregl.GeoJSONSource | undefined;
-    src?.setData(data as GeoJSON.GeoJSON);
+    src?.setData(toMapLibreGeoJson(data));
   }
 
   setMarkers(markers: MarkerSpec[]): void {
@@ -159,12 +167,44 @@ export class MapLibreController implements MapController {
     this.markers.clear();
   }
 
-  fitBounds(bounds: BBox, padding = 40): void {
-    this.map?.fitBounds(bounds, { padding, maxZoom: 18, duration: 600 });
+  fitBounds(bounds: BBox, options: number | FitBoundsOptions = 40): void {
+    const opts = typeof options === "number" ? { padding: options } : options;
+    this.map?.fitBounds(bounds, {
+      padding: opts.padding ?? 40,
+      maxZoom: opts.maxZoom ?? 18,
+      duration: opts.duration ?? 600,
+    });
   }
 
   flyTo(center: LngLat, zoom: number): void {
     this.map?.flyTo({ center, zoom, duration: 800, essential: true });
+  }
+
+  zoomIn(): void {
+    this.map?.zoomIn({ duration: 180 });
+  }
+
+  zoomOut(): void {
+    this.map?.zoomOut({ duration: 180 });
+  }
+
+  getZoom(): number {
+    return this.map?.getZoom() ?? 0;
+  }
+
+  setMaxBounds(bounds: BBox | null): void {
+    if (!this.map) return;
+    if (!bounds) {
+      this.map.setMaxBounds(undefined);
+      return;
+    }
+    this.map.setMaxBounds(new maplibregl.LngLatBounds(bounds[0], bounds[1]));
+  }
+
+  setMinZoom(zoom: number | null): void {
+    if (!this.map) return;
+    if (zoom === null) return;
+    this.map.setMinZoom(zoom);
   }
 
   getCamera(): Camera {
@@ -197,6 +237,41 @@ export class MapLibreController implements MapController {
     const src = this.map?.getSource(this.basemapSourceId) as
       maplibregl.RasterTileSource | undefined;
     if (src && typeof src.setTiles === "function") src.setTiles(basemap.tiles);
+  }
+
+  setRasterOverlay(id: string, overlay: RasterOverlaySpec): void {
+    const map = this.requireMap();
+    if (!map.getSource(id)) {
+      const source: maplibregl.RasterSourceSpecification = {
+        type: "raster",
+        tiles: overlay.tiles,
+        tileSize: overlay.tileSize ?? 256,
+        attribution: overlay.attribution ?? "",
+      };
+      if (typeof overlay.minZoom === "number") source.minzoom = overlay.minZoom;
+      if (typeof overlay.maxZoom === "number") source.maxzoom = overlay.maxZoom;
+      map.addSource(id, {
+        ...source,
+        maxzoom: source.maxzoom ?? env.maxZoom,
+      } as maplibregl.RasterSourceSpecification);
+    } else {
+      const src = map.getSource(id) as maplibregl.RasterTileSource;
+      if (typeof src.setTiles === "function") src.setTiles(overlay.tiles);
+    }
+    if (!map.getLayer(id)) {
+      map.addLayer({
+        id,
+        type: "raster",
+        source: id,
+        paint: { "raster-opacity": overlay.opacity ?? 0.9 },
+      });
+      return;
+    }
+    map.setPaintProperty(id, "raster-opacity", overlay.opacity ?? 0.9);
+  }
+
+  removeRasterOverlay(id: string): void {
+    this.removeLayer(id);
   }
 
   on(event: MapCoreEvent, handler: MapCoreHandler): () => void {

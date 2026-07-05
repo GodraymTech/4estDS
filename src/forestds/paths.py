@@ -40,8 +40,10 @@ def home_dir() -> Path:
         if p.name != _DEFAULT_DIRNAME:
             p = p / _DEFAULT_DIRNAME
         return p
-    # 默认落在用户主目录下的 ~/.4estDS，容器内可用 forestds_HOME 覆盖(见 config)。
+    # # 默认落在用户主目录下的 ~/.4estDS，容器内可用 forestds_HOME 覆盖(见 config)。
     return (Path.home() / _DEFAULT_DIRNAME).resolve()
+    # return Path(__file__).resolve().parent.parent.parent / _DEFAULT_DIRNAME
+
 
 
 def ensure_home() -> Path:

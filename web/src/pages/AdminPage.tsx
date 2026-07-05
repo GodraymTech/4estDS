@@ -27,7 +27,8 @@ const { Text, Paragraph } = Typography;
 
 // 权限 → 中文名(展示用; 权限本体单一真相在 shared/auth)。
 const PERM_LABEL: Record<Permission, string> = {
-  "view:overview": "总览查看",
+  "view:overview": "一张图",
+  "view:dashboard": "数据看板",
   "view:atlas": "地块工作台",
   "view:change": "变化检测",
   "view:ledger": "台账查看",
