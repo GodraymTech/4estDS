@@ -19,6 +19,7 @@ import {
   InboxOutlined,
   PlayCircleOutlined,
   RightOutlined,
+  StopOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import { ApiError, endpoints, type InferSubmit, type InputInspectResult } from "../../shared/api";
@@ -132,14 +133,10 @@ export function UploadForm({
   }
 
   async function cancelActiveJob() {
-    if (!activeJobId) {
-      message.warning("当前没有可终止的作业");
-      return;
-    }
     setBusy(true);
     try {
-      const res = await endpoints.cancelJob(activeJobId);
-      onCancelled?.(activeJobId);
+      const res = await endpoints.cancelAllJobs();
+      if (activeJobId) onCancelled?.(activeJobId);
       message.success(res.message);
     } catch (e) {
       message.error(e instanceof ApiError ? e.message : "终止失败");
@@ -302,7 +299,7 @@ export function UploadForm({
 
       {busy && progress > 0 ? <Progress percent={progress} size="small" /> : null}
 
-      <Space.Compact block>
+      <div className="task-action-row">
         <Button
           type="primary"
           icon={<PlayCircleOutlined />}
@@ -315,13 +312,15 @@ export function UploadForm({
         </Button>
         <Button
           danger
-          disabled={!activeJobId || busy}
+          type="primary"
+          icon={<StopOutlined />}
+          disabled={busy}
           onClick={cancelActiveJob}
           className="task-action-danger"
         >
           一键终止
         </Button>
-      </Space.Compact>
+      </div>
     </div>
   );
 }

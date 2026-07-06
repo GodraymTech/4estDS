@@ -44,6 +44,10 @@ export interface JobHistoryItem {
   ended_at?: string | null;
   duration_s?: number | null;
   input_path?: string | null;
+  tract_id?: string | null;
+  geo_area?: number | null;
+  area_unit?: string | null;
+  observation_count: number;
   error?: string | null;
   metrics?: Record<string, unknown>;
 }
@@ -52,6 +56,36 @@ export interface CancelJobResult {
   job_id: string;
   status: JobState;
   message: string;
+}
+
+export interface CancelAllJobsResult {
+  cancelled: number;
+  purged_queues: string[];
+  message: string;
+}
+
+export interface ArtifactNode {
+  key: string;
+  name: string;
+  path: string;
+  type: "directory" | "file" | string;
+  size?: number | null;
+  previewable: boolean;
+  description?: string | null;
+  children?: ArtifactNode[];
+}
+
+export interface ArtifactTree {
+  run_id: string;
+  run_dir?: string | null;
+  available: boolean;
+  tree: ArtifactNode[];
+}
+
+export interface ArtifactExportResult {
+  run_id: string;
+  filename: string;
+  url: string;
 }
 
 // 上传响应(对应 schemas.UploadResponse)。key 回传给 /jobs/infer。

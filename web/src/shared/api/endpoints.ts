@@ -1,4 +1,4 @@
-import { apiGet, apiPostJson, apiUpload, apiUrl } from "./client";
+import { apiGet, apiGetText, apiPostJson, apiUpload, apiUrl } from "./client";
 import type {
   FeatureCollection,
   GeometryKind,
@@ -6,6 +6,9 @@ import type {
   InputInspectResult,
   InferSubmit,
   CancelJobResult,
+  CancelAllJobsResult,
+  ArtifactExportResult,
+  ArtifactTree,
   JobHistoryItem,
   JobLogs,
   JobRef,
@@ -62,6 +65,26 @@ export const endpoints = {
 
   cancelJob: (jobId: string): Promise<CancelJobResult> =>
     apiPostJson(`/jobs/${encodeURIComponent(jobId)}/cancel`, {}),
+
+  cancelAllJobs: (): Promise<CancelAllJobsResult> =>
+    apiPostJson("/jobs/cancel-all", {}),
+
+  getArtifacts: (jobId: string): Promise<ArtifactTree> =>
+    apiGet(`/jobs/${encodeURIComponent(jobId)}/artifacts`),
+
+  previewArtifactUrl: (jobId: string, path: string): string =>
+    apiUrl(`/jobs/${encodeURIComponent(jobId)}/artifacts/file?path=${encodeURIComponent(path)}`),
+
+  getArtifactText: (jobId: string, path: string): Promise<string> =>
+    apiGetText(`/jobs/${encodeURIComponent(jobId)}/artifacts/file?path=${encodeURIComponent(path)}`),
+
+  downloadArtifactPathUrl: (jobId: string, path: string): string =>
+    apiUrl(`/jobs/${encodeURIComponent(jobId)}/artifacts/download?path=${encodeURIComponent(path)}`),
+
+  exportArtifacts: (jobId: string, paths: string[]): Promise<ArtifactExportResult> =>
+    apiPostJson(`/jobs/${encodeURIComponent(jobId)}/artifacts/export`, { paths }),
+
+  downloadArtifactUrl: (url: string): string => apiUrl(url.replace(/^\/api\/v1/, "")),
 
   // 报告/导出为文件下载, 直接用链接打开。
   reportUrl: (tractId: string, fmt = "pdf"): string =>

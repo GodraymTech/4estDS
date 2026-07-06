@@ -118,12 +118,48 @@ def generate_report(
         except Exception as e:
             log.warning("压缩检测可视化图失败: {}", e)
 
+    multisource_charts: list[Path] = []
+    if used_run:
+        from .. import paths
+        run_dir = paths.find_run_dir(used_run, "infer")
+        multisource_dir = run_dir / "multisource" if run_dir else None
+        if multisource_dir and multisource_dir.is_dir():
+            assets_dir = reports_dir / "assets"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            for src in sorted(multisource_dir.iterdir()):
+                if src.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+                    continue
+                dest = assets_dir / f"multisource_{src.name}"
+                try:
+                    if not dest.exists() or src.stat().st_mtime > dest.stat().st_mtime:
+                        try:
+                            from PIL import Image
+
+                            with Image.open(src) as img:
+                                img = img.convert("RGB")
+                                max_width = 1400
+                                if img.width > max_width:
+                                    ratio = max_width / img.width
+                                    img = img.resize((max_width, int(img.height * ratio)), Image.Resampling.LANCZOS)
+                                dest = dest.with_suffix(".jpg")
+                                img.save(dest, "JPEG", quality=68, optimize=True)
+                        except Exception:
+                            dest.write_bytes(src.read_bytes())
+                    multisource_charts.append(dest)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("复制多源融合图件失败: {} -> {} ({})", src, dest, e)
+
     if fmt == "csv":
         out_path = reports_dir / f"{stem}.csv"
         out_path.write_text(to_csv(data), encoding="utf-8")
         result.update(format="csv", out_path=str(out_path))
     elif fmt == "pdf":
-        md_text = to_markdown(data, charts=charts, vis_chart=vis_chart_p)
+        md_text = to_markdown(
+            data,
+            charts=charts,
+            vis_chart=vis_chart_p,
+            multisource_charts=multisource_charts,
+        )
         # 保存并保留 Markdown 原始报告
         md_path = reports_dir / f"{stem}.md"
         md_path.write_text(md_text, encoding="utf-8")
@@ -137,7 +173,12 @@ def generate_report(
         else:
             result.update(format="pdf", out_path=str(out_path))
     else:  # md 默认
-        md_text = to_markdown(data, charts=charts, vis_chart=vis_chart_p)
+        md_text = to_markdown(
+            data,
+            charts=charts,
+            vis_chart=vis_chart_p,
+            multisource_charts=multisource_charts,
+        )
         md_path = reports_dir / f"{stem}.md"
         md_path.write_text(md_text, encoding="utf-8")
         result.update(format="md", out_path=str(md_path))

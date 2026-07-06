@@ -145,6 +145,20 @@ def outputs_infer_dir() -> Path:
     return run_dir()
 
 
+def find_run_dir(run_id: str, task_type: str | None = None) -> Path | None:
+    """Find a persisted outputs directory by run_id.
+
+    Runtime folders are named like ``YYYYmmdd_HHMM_<run_id>_<task>``. This helper
+    is intentionally read-only and returns the newest match when multiple runs
+    share a short id pattern in old data.
+    """
+    suffix = f"_{task_type}" if task_type else ""
+    matches = sorted(outputs_dir().glob(f"*_{run_id}{suffix}"))
+    if not matches and task_type:
+        matches = sorted(outputs_dir().glob(f"*_{run_id}_*"))
+    return matches[-1] if matches else None
+
+
 def models_dir() -> Path:
     return subdir("models")
 

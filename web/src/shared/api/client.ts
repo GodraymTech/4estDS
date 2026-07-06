@@ -35,6 +35,12 @@ export async function apiGet<T>(path: string): Promise<T> {
   );
 }
 
+export async function apiGetText(path: string): Promise<string> {
+  const res = await fetch(`${env.apiBase}${path}`, { headers: authHeaders() });
+  if (!res.ok) throw new ApiError(res.status, `请求失败 (${res.status}): ${res.statusText}`);
+  return res.text();
+}
+
 export async function apiPostJson<T>(path: string, body: unknown): Promise<T> {
   return parse<T>(
     await fetch(`${env.apiBase}${path}`, {

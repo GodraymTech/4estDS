@@ -118,13 +118,8 @@ def setup_logging(
             str(log_path), level=level, format=_formatter,
             filter=_filter, rotation="20 MB", retention=5, enqueue=True,
         )
-        if raw_file:
-            raw_log_filename = f"{_LAUNCH_TIME}__{_CURRENT_RUN_ID}__{task_type}.ui.log"
-            raw_log_path = paths.logs_dir() / raw_log_filename
-            _loguru_logger.add(
-                str(raw_log_path), level=level, format="{message}\n",
-                filter=_filter, rotation="20 MB", retention=5, enqueue=True,
-            )
+        # 前端日志展示直接读取主日志并实时清洗 formatter 前缀，不再额外落 .ui.log。
+        # raw_file 参数保留为兼容旧调用。
 
 
     class InterceptHandler(logging.Handler):

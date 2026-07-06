@@ -146,6 +146,7 @@ def run_batch_inference_job(
             las=request.las,
             export_fmt=request.export_fmt.value if request.export_fmt else None,
             publish=request.publish,
+            cancel_run_id=rid,
         )
     except Exception as exc:  # noqa: BLE001 - 顶层批量任务必须落 failed
         writer.finish_run_log(rid, "failed", error=str(exc), url=db_url)

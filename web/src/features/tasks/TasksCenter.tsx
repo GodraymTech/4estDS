@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Empty, Table, Tag } from "antd";
+import { Button, Empty, Table, Tag } from "antd";
 import type { TableProps } from "antd";
+import { ExportOutlined } from "@ant-design/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { endpoints, queryKeys, type JobHistoryItem, type JobState, type JobStatus } from "../../shared/api";
 import { useJob } from "../../entities/run";
 import { UploadForm } from "./UploadForm";
@@ -168,6 +170,7 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
 
 function RuntimeView({ jobId }: { jobId?: string }) {
   const { data } = useJob(jobId);
+  const navigate = useNavigate();
   const [cursor, setCursor] = useState(0);
   const [lines, setLines] = useState<string[]>([]);
 
@@ -221,6 +224,17 @@ function RuntimeView({ jobId }: { jobId?: string }) {
 
       <MetricsBoard status={data} />
       <LogConsole lines={lines} />
+      {data?.status === "succeeded" ? (
+        <div className="task-result-actions">
+          <Button
+            type="primary"
+            icon={<ExportOutlined />}
+            onClick={() => navigate("/ledger?run_id=" + encodeURIComponent(jobId))}
+          >
+            成果产出
+          </Button>
+        </div>
+      ) : null}
       <BatchItems status={data} />
     </>
   );

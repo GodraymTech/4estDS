@@ -70,12 +70,14 @@
   gap: 12px;
 }
 
-.task-action-primary {
-  width: 62%;
+.task-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(108px, 0.42fr);
+  gap: 8px;
 }
 
-.task-action-danger {
-  width: 38%;
+.task-action-row .ant-btn {
+  width: 100%;
 }
 
 .task-scroll-window {
@@ -257,6 +259,12 @@
 
 .task-log__empty {
   color: #9ab1aa;
+}
+
+.task-result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .task-batch {

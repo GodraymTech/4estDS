@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from ..deps import get_db_url
 from ..geojson import rows_to_featurecollection
@@ -246,14 +246,28 @@ def get_report(
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
         result = generate_report(
-            tract_id, rid, fmt=fmt, out_dir=str(out_dir), db_url=db_url, with_charts=True
+            tract_id=tract_id,
+            run_id=rid,
+            fmt=fmt,
+            out_dir=str(out_dir),
+            db_url=db_url,
+            with_charts=True,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"报告生成失败: {exc}")
     out_path = result.get("out_path") if isinstance(result, dict) else None
     if not out_path or not Path(out_path).exists():
         raise HTTPException(status_code=500, detail="报告生成失败: 未产出文件")
-    return FileResponse(out_path, filename=Path(out_path).name)
+    suffix = Path(out_path).suffix.lower()
+    media_type = {
+        ".pdf": "application/pdf",
+        ".md": "text/markdown; charset=utf-8",
+        ".csv": "text/csv; charset=utf-8",
+    }.get(suffix)
+    headers = {"Content-Disposition": f'inline; filename="{Path(out_path).name}"'}
+    if suffix in {".md", ".csv"}:
+        return Response(Path(out_path).read_text(encoding="utf-8"), media_type=media_type, headers=headers)
+    return FileResponse(out_path, media_type=media_type, headers=headers)
 
 
 @router.get("/{tract_id}/export", summary="GIS 图层导出")

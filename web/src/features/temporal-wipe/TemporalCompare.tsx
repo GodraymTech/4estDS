@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { Card, Empty } from "antd";
+import { Empty } from "antd";
 import { TemporalWipe, type WipeSide } from "../../shared/ui/TemporalWipe";
 import { MapStage } from "../../shared/ui/MapStage";
 import {
@@ -14,8 +14,8 @@ import { useTractImagery } from "../../entities/tract";
 import type { TractImagery } from "../../shared/api";
 import { PhaseTimeline } from "./PhaseTimeline";
 
-const COLOR_BEFORE = "#c9a24b"; // 滩泥(旧时相)
-const COLOR_AFTER = "#3e8e5a"; // 冠绿(新时相)
+const COLOR_BEFORE = "#f0b84f";
+const COLOR_AFTER = "#33b27b";
 
 // 时相卷帘编排器(受控): range 由父级持有, 与变化量化面板共用单一真相。
 // 根据选中的两个时相, 分别拉取树冠观测作为卷帘两侧叠加。
@@ -90,13 +90,13 @@ export function TemporalCompare({
   return (
     <div style={STAGE}>
       <TemporalWipe before={before} after={after} center={center} zoom={zoom} />
-      <Card style={TIMELINE_PANEL} styles={SLIDER_CARD_STYLES}>
+      <div style={TIMELINE_PANEL}>
         <PhaseTimeline
           phases={phases}
           range={range}
           onRangeChange={onRangeChange}
         />
-      </Card>
+      </div>
     </div>
   );
 }
@@ -118,7 +118,14 @@ function buildOverlay(
   color: string,
 ): GeoJsonLayerSpec | undefined {
   if (!phaseId || !data) return undefined;
-  return { id, kind: "polygon", data: data as GeoJsonLayerSpec["data"], color };
+  return {
+    id,
+    kind: "line",
+    data: data as GeoJsonLayerSpec["data"],
+    color,
+    opacity: 0.86,
+    lineWidth: 1.15,
+  };
 }
 
 const STAGE: CSSProperties = { position: "absolute", inset: 0 };
@@ -130,15 +137,17 @@ const CENTER: CSSProperties = {
 };
 const TIMELINE_PANEL: CSSProperties = {
   position: "absolute",
-  bottom: 24,
+  bottom: 18,
   left: "50%",
   transform: "translateX(-50%)",
-  width: "min(680px, calc(100% - 120px))",
+  width: "min(340px, calc(100% - 96px))",
   zIndex: 5,
-  boxShadow: "var(--shadow-2)",
+  borderRadius: 12,
+  background: "var(--glass-bg)",
+  border: "1px solid var(--glass-border)",
+  boxShadow: "var(--glass-shadow), var(--glass-inner)",
+  backdropFilter: "blur(16px) saturate(150%)",
 };
-const SLIDER_BODY: CSSProperties = { padding: "8px 4px 0" };
-const SLIDER_CARD_STYLES = { body: SLIDER_BODY };
 const SINGLE_HINT: CSSProperties = {
   position: "absolute",
   top: 16,

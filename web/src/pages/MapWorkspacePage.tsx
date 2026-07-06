@@ -6,7 +6,6 @@ import {
   Empty,
   Popover,
   Select,
-  Slider,
   Space,
   Spin,
   Switch,
@@ -14,7 +13,6 @@ import {
   Typography,
 } from "antd";
 import {
-  AimOutlined,
   BorderOutlined,
   CalendarOutlined,
   CompassOutlined,
@@ -71,6 +69,7 @@ import {
   type MeasureMode,
 } from "../features/measure/measureModel";
 import { buildChangeMetrics, toHectares } from "../features/change-metrics/metrics";
+import { TemporalCompare } from "../features/temporal-wipe";
 
 const { Text } = Typography;
 
@@ -440,6 +439,20 @@ export function MapWorkspacePage() {
         onReady={onReady}
       />
 
+      {compareMode && selectedGroup && phases.length > 1 ? (
+        <TemporalCompare
+          phases={phases}
+          range={range}
+          onRangeChange={(v) => {
+            setRange(v);
+            const next = selectedGroup.tracts[v[1]];
+            if (next) setSelectedId(next.tract_id);
+          }}
+          center={selectedGroup.center}
+          zoom={Math.max(zoom, 15)}
+        />
+      ) : null}
+
       {chromeHidden ? (
         <button
           type="button"
@@ -627,21 +640,6 @@ export function MapWorkspacePage() {
             ) : null}
           </Space>
         </div>
-      ) : null}
-
-      {!chromeHidden && compareMode && selectedGroup && phases.length > 1 ? (
-        <PhaseRangeCard
-          phases={phases}
-          range={range}
-          onRangeChange={(v) => {
-            setRange(v);
-            const next = selectedGroup.tracts[v[1]];
-            if (next) {
-              fittedTract.current = null;
-              setSelectedId(next.tract_id);
-            }
-          }}
-        />
       ) : null}
 
       {!chromeHidden && hovered ? <PlotHoverCard hovered={hovered} /> : null}
@@ -1060,7 +1058,7 @@ function buildProfileMetricSections(
         height: item.height,
       } satisfies ProfileMetricSectionData;
     });
-  return [total, ...species];
+  return species.length <= 1 ? species : [total, ...species];
 }
 
 function ChangeCompactCard({ phases, range }: { phases: Phase[]; range: [number, number] }) {
@@ -1089,40 +1087,6 @@ function ChangeCompactCard({ phases, range }: { phases: Phase[]; range: [number,
         <Kpi label="基准时相" value={before?.time || "-"} />
         <Kpi label="目标时相" value={after?.time || "-"} />
       </div>
-    </div>
-  );
-}
-
-function PhaseRangeCard({
-  phases,
-  range,
-  onRangeChange,
-}: {
-  phases: Phase[];
-  range: [number, number];
-  onRangeChange: (value: [number, number]) => void;
-}) {
-  const marks = phases.reduce<Record<number, string>>((acc, _phase, idx) => {
-    acc[idx] = "";
-    return acc;
-  }, {});
-  return (
-    <div style={PHASE_PANEL}>
-      <div style={PHASE_HEAD}>
-        <Text style={PANEL_TEXT}>{phases[range[0]]?.time || "-"}</Text>
-        <AimOutlined />
-        <Text style={PANEL_TEXT}>{phases[range[1]]?.time || "-"}</Text>
-      </div>
-      <Slider
-        range
-        min={0}
-        max={phases.length - 1}
-        step={1}
-        value={range}
-        marks={marks}
-        tooltip={{ formatter: (v) => phases[Number(v)]?.time || "" }}
-        onChange={(v) => onRangeChange(v as [number, number])}
-      />
     </div>
   );
 }
@@ -1695,23 +1659,6 @@ const SPECIES_DOT: CSSProperties = {
   height: 9,
   borderRadius: 3,
   marginRight: 5,
-};
-const PHASE_PANEL: CSSProperties = {
-  ...GLASS,
-  position: "absolute",
-  right: 76,
-  bottom: 16,
-  zIndex: 8,
-  width: "min(360px, calc(100vw - 112px))",
-  minWidth: 260,
-  borderRadius: 18,
-  padding: "12px 16px 4px",
-};
-const PHASE_HEAD: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  marginBottom: 2,
 };
 const MEASURE_READOUT: CSSProperties = {
   ...GLASS,

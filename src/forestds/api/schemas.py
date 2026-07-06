@@ -94,6 +94,10 @@ class JobHistoryItem(BaseModel):
     ended_at: Optional[str] = None
     duration_s: Optional[float] = None
     input_path: Optional[str] = None
+    tract_id: Optional[str] = None
+    geo_area: Optional[float] = None
+    area_unit: Optional[str] = None
+    observation_count: int = 0
     error: Optional[str] = None
     metrics: dict[str, Any] = Field(default_factory=dict)
 
@@ -102,6 +106,40 @@ class CancelJobOut(BaseModel):
     job_id: str
     status: JobStatus
     message: str
+
+
+class CancelAllJobsOut(BaseModel):
+    cancelled: int = 0
+    purged_queues: list[str] = Field(default_factory=list)
+    message: str
+
+
+class ArtifactNode(BaseModel):
+    key: str
+    name: str
+    path: str
+    type: str
+    size: Optional[int] = None
+    previewable: bool = False
+    description: Optional[str] = None
+    children: list["ArtifactNode"] = Field(default_factory=list)
+
+
+class ArtifactTreeOut(BaseModel):
+    run_id: str
+    run_dir: Optional[str] = None
+    available: bool = False
+    tree: list[ArtifactNode] = Field(default_factory=list)
+
+
+class ArtifactExportRequest(BaseModel):
+    paths: list[str] = Field(default_factory=list, description="相对 run_dir 的文件或目录路径；空列表表示全量导出")
+
+
+class ArtifactExportOut(BaseModel):
+    run_id: str
+    filename: str
+    url: str
 
 
 class TractOut(BaseModel):

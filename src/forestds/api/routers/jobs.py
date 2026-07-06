@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import json
 import re
+import zipfile
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from ...contracts import BatchInferenceRequest, InferenceRequest, JobStatus
 from ...utils.input_inspect import (
@@ -20,7 +23,12 @@ from ...utils.input_inspect import (
 )
 from ..deps import get_db_url, get_storage_dep
 from ..schemas import (
+    CancelAllJobsOut,
     CancelJobOut,
+    ArtifactExportOut,
+    ArtifactExportRequest,
+    ArtifactNode,
+    ArtifactTreeOut,
     InferSubmit,
     InputInspectImage,
     InputInspectOut,
@@ -75,6 +83,10 @@ def list_jobs(
             ended_at=row.get("ended_at"),
             duration_s=row.get("duration_s"),
             input_path=row.get("input_path"),
+            tract_id=row.get("tract_id"),
+            geo_area=row.get("geo_area"),
+            area_unit=row.get("area_unit"),
+            observation_count=int(row.get("observation_count") or 0),
             error=row.get("error"),
             metrics=_metrics_from_run(row),
         )
@@ -274,6 +286,115 @@ def cancel_job(job_id: str, db_url: str | None = Depends(get_db_url)) -> CancelJ
     return CancelJobOut(job_id=job_id, status=JobStatus.failed, message="已请求终止，worker 将在最近检查点停止")
 
 
+@router.post("/cancel-all", response_model=CancelAllJobsOut, summary="终止全部推理作业")
+def cancel_all_jobs(db_url: str | None = Depends(get_db_url)) -> CancelAllJobsOut:
+    from ...cancellation import request_cancel
+    from ...db import reader, writer
+    from ...worker.broker import broker
+    from ...worker.actors import GPU_QUEUE
+
+    purged: list[str] = []
+    try:
+        broker.flush(GPU_QUEUE)
+        purged.append(GPU_QUEUE)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"清空推理队列失败: {exc}") from exc
+
+    cancelled = 0
+    for row in reader.list_runs(url=db_url, limit=200):
+        if row.get("task_type") not in {"infer", "batch"}:
+            continue
+        if _job_status(row.get("status")) not in {JobStatus.queued, JobStatus.running}:
+            continue
+        run_id = str(row["run_id"])
+        request_cancel(run_id)
+        writer.finish_run_log(
+            run_id,
+            "failed",
+            url=db_url,
+            metrics=_metrics_from_run(row),
+            duration_s=row.get("duration_s"),
+            error="用户一键终止全部推理作业",
+        )
+        cancelled += 1
+
+    return CancelAllJobsOut(
+        cancelled=cancelled,
+        purged_queues=purged,
+        message=f"已终止全部推理作业：清空队列 {', '.join(purged)}，标记 {cancelled} 个运行中/排队作业",
+    )
+
+
+@router.get("/{job_id}/artifacts", response_model=ArtifactTreeOut, summary="读取运行成果目录树")
+def get_artifacts(job_id: str) -> ArtifactTreeOut:
+    from ... import paths
+
+    run_dir = paths.find_run_dir(job_id, "infer")
+    if run_dir is None:
+        return ArtifactTreeOut(run_id=job_id, available=False)
+    return ArtifactTreeOut(
+        run_id=job_id,
+        run_dir=str(run_dir),
+        available=True,
+        tree=_artifact_nodes(run_dir, run_dir),
+    )
+
+
+@router.get("/{job_id}/artifacts/file", summary="预览运行成果文件")
+def preview_artifact(job_id: str, path: str = Query(...)) -> Response:
+    root = _require_run_dir(job_id)
+    target = _safe_artifact_path(root, path)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    suffix = target.suffix.lower()
+    if suffix in {".txt", ".log", ".md", ".csv", ".json", ".geojson", ".xml", ".prj", ".cpg"}:
+        return PlainTextResponse(target.read_text(encoding="utf-8", errors="replace"))
+    if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf"}:
+        return FileResponse(target)
+    raise HTTPException(status_code=415, detail="该文件类型暂不支持浏览器预览，请使用选择导出")
+
+
+@router.post("/{job_id}/artifacts/export", response_model=ArtifactExportOut, summary="打包选择的运行成果")
+def export_artifacts(job_id: str, body: ArtifactExportRequest) -> ArtifactExportOut:
+    root = _require_run_dir(job_id)
+    selected = body.paths or ["."]
+    zip_dir = root / "exports"
+    zip_dir.mkdir(exist_ok=True)
+    zip_path = zip_dir / f"{job_id}_selected_artifacts.zip"
+    added: set[str] = set()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel in selected:
+            target = _safe_artifact_path(root, rel)
+            if _is_ignored_artifact(root, target):
+                continue
+            if target.is_dir():
+                for child in target.rglob("*"):
+                    if child.is_file() and not _is_ignored_artifact(root, child):
+                        arcname = str(child.relative_to(root))
+                        if arcname not in added:
+                            zf.write(child, arcname)
+                            added.add(arcname)
+            elif target.is_file():
+                arcname = str(target.relative_to(root))
+                if arcname not in added:
+                    zf.write(target, arcname)
+                    added.add(arcname)
+    return ArtifactExportOut(
+        run_id=job_id,
+        filename=zip_path.name,
+        url=f"/api/v1/jobs/{job_id}/artifacts/download?path={zip_path.relative_to(root)}",
+    )
+
+
+@router.get("/{job_id}/artifacts/download", summary="下载已打包成果")
+def download_artifact(job_id: str, path: str = Query(...)) -> FileResponse:
+    root = _require_run_dir(job_id)
+    target = _safe_artifact_path(root, path)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(target, filename=target.name)
+
+
 def _resolve_aux_path(raw: str | None, label: str) -> str | None:
     try:
         return resolve_optional_user_path(raw)
@@ -287,14 +408,73 @@ def _find_job_log(job_id: str):
     from ... import paths
 
     logs_dir = paths.logs_dir()
-    raw_matches = sorted(logs_dir.glob(f"*__{job_id}__*.ui.log"))
-    if raw_matches:
-        return raw_matches[-1]
     formatted_matches = sorted(p for p in logs_dir.glob(f"*__{job_id}__*.log") if not p.name.endswith(".ui.log"))
     if formatted_matches:
         return formatted_matches[-1]
+    raw_matches = sorted(logs_dir.glob(f"*__{job_id}__*.ui.log"))
+    if raw_matches:
+        return raw_matches[-1]
     return None
 
 
 def _strip_log_prefix(line: str) -> str:
     return _FORMAT_PREFIX_RE.sub("", line)
+
+
+_PREVIEW_SUFFIXES = {
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf",
+    ".txt", ".log", ".md", ".csv", ".json", ".geojson", ".xml", ".prj", ".cpg",
+}
+
+_TOP_DESCRIPTIONS = {
+    "multisource": "多源融合成果：点云/DSM/DEM 生成的高程热力图、剖面图、等高线和矢量结果。",
+    "reports": "报告成果：Markdown 原始报告、PDF 正式报告与报告图表资源。",
+    "vectors_bbox": "空间矢量成果：最终单木检测框/冠幅的 GIS 图层文件。",
+}
+
+
+def _require_run_dir(job_id: str) -> Path:
+    from ... import paths
+
+    run_dir = paths.find_run_dir(job_id, "infer")
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail=f"未找到运行成果目录: {job_id}")
+    return run_dir
+
+
+def _safe_artifact_path(root: Path, rel: str) -> Path:
+    candidate = (root / rel).resolve()
+    root_resolved = root.resolve()
+    if candidate != root_resolved and root_resolved not in candidate.parents:
+        raise HTTPException(status_code=400, detail="非法成果路径")
+    return candidate
+
+
+def _is_ignored_artifact(root: Path, path: Path) -> bool:
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return True
+    parts = rel.parts
+    return bool(parts and parts[0] in {"preprocess", "exports"})
+
+
+def _artifact_nodes(root: Path, base: Path) -> list[ArtifactNode]:
+    nodes: list[ArtifactNode] = []
+    for child in sorted(base.iterdir(), key=lambda p: (p.is_file(), p.name.lower())):
+        if _is_ignored_artifact(root, child):
+            continue
+        rel = child.relative_to(root)
+        suffix = child.suffix.lower()
+        node = ArtifactNode(
+            key=str(rel),
+            name=child.name,
+            path=str(rel),
+            type="directory" if child.is_dir() else "file",
+            size=child.stat().st_size if child.is_file() else None,
+            previewable=child.is_file() and suffix in _PREVIEW_SUFFIXES,
+            description=_TOP_DESCRIPTIONS.get(child.name) if base == root else None,
+            children=_artifact_nodes(root, child) if child.is_dir() else [],
+        )
+        nodes.append(node)
+    return nodes

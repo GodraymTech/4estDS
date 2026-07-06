@@ -94,6 +94,7 @@ def run_batch_pipeline(
     draw_box: bool | None = None,
     export_fmt: str | None = None,
     publish: bool = False,
+    cancel_run_id: str | None = None,
 ) -> BatchSummary:
     """带完整预处理与后处理的批量串行推理。
 
@@ -134,7 +135,7 @@ def run_batch_pipeline(
     stem_seen: dict[str, int] = {}
 
     for idx, path in track_progress(list(enumerate(valid_paths, 1)), desc="批量影像推理"):
-        check_cancelled(None)
+        check_cancelled(cancel_run_id)
         image_str = str(path)
         location_key = path.stem if not location else f"{location.strip()}_{path.stem}"
         stem_seen[location_key] = stem_seen.get(location_key, 0) + 1

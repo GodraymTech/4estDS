@@ -234,20 +234,41 @@ def list_runs(
     conn = _connect(url)
     try:
         bounded_limit = max(1, min(int(limit), 200))
+        select_sql = (
+            "SELECT r.*, "
+            "(SELECT COUNT(*) FROM tree_observations o WHERE o.run_id=r.run_id) AS observation_count, "
+            "(SELECT o.tract_id FROM tree_observations o WHERE o.run_id=r.run_id LIMIT 1) AS tract_id, "
+            "(SELECT t.geo_area FROM tracts t WHERE t.tract_id = "
+            "(SELECT o.tract_id FROM tree_observations o WHERE o.run_id=r.run_id LIMIT 1)) AS geo_area, "
+            "(SELECT t.area_unit FROM tracts t WHERE t.tract_id = "
+            "(SELECT o.tract_id FROM tree_observations o WHERE o.run_id=r.run_id LIMIT 1)) AS area_unit "
+            "FROM run_logs r "
+        )
         if task_type:
             rows = conn.execute(
-                "SELECT * FROM run_logs WHERE task_type=? "
-                "ORDER BY started_at DESC LIMIT ?",
+                select_sql + "WHERE r.task_type=? ORDER BY r.started_at DESC LIMIT ?",
                 (task_type, bounded_limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM run_logs ORDER BY started_at DESC LIMIT ?",
+                select_sql + "ORDER BY r.started_at DESC LIMIT ?",
                 (bounded_limit,),
             ).fetchall()
     finally:
         conn.close()
     return _rows_to_dicts(rows)
+
+
+def tract_for_run(run_id: str, *, url: str | None = None) -> str | None:
+    conn = _connect(url)
+    try:
+        row = conn.execute(
+            "SELECT tract_id FROM tree_observations WHERE run_id=? LIMIT 1",
+            (run_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row["tract_id"] if row else None
 
 
 def list_tracts(*, url: str | None = None) -> list[dict]:

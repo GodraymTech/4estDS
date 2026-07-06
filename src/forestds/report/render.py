@@ -40,7 +40,12 @@ def _format_table_row(label: str, d: dict, unit: str = "") -> str:
     )
 
 
-def to_markdown(data: ReportData, charts: list[str | Path] | None = None, vis_chart: Path | None = None) -> str:
+def to_markdown(
+    data: ReportData,
+    charts: list[str | Path] | None = None,
+    vis_chart: Path | None = None,
+    multisource_charts: list[Path] | None = None,
+) -> str:
     """将报告数据渲染为高标准排版的 Markdown 文本。"""
     m = data.meta
     lines: list[str] = []
@@ -55,7 +60,7 @@ def to_markdown(data: ReportData, charts: list[str | Path] | None = None, vis_ch
                 return f"\n![{caption}](./assets/{p.name})\n"
         return ""
 
-    lines.append("# 红树林AI检测统计报告")
+    lines.append("# 红树林单木智能解译成果报告")
     lines.append("")
     lines.append("---")
     lines.append(f"- **地块 (Tract)**: `{data.tract_id or '-'}`  **位置 (Location)**: {m.get('location') or '-'}  "
@@ -254,7 +259,30 @@ def to_markdown(data: ReportData, charts: list[str | Path] | None = None, vis_ch
         lines.append(f"\n![单木空间分布检出可视化图](./assets/{vis_chart.name})\n")
         lines.append("")
 
+    if multisource_charts:
+        lines.append("## 七、多源数据融合成果说明 (Multi-source Evidence)")
+        lines.append("")
+        lines.append("本次推理接入了 DSM/DEM/LAS 等多源数据，用于为单木检测结果补充树高、冠层体积、地形基准与空间剖面证据。多源成果图件来自本次运行目录的 `multisource/` 子目录，可作为监管复核、成果汇交和技术审查的辅助材料。")
+        lines.append("")
+        for chart in multisource_charts:
+            title = _multisource_caption(chart.name)
+            lines.append(f"### {title}")
+            lines.append("")
+            lines.append(f"![{title}](./assets/{chart.name})")
+            lines.append("")
+
     return "\n".join(lines)
+
+
+def _multisource_caption(filename: str) -> str:
+    name = filename.lower()
+    if "profile" in name:
+        return "点云垂直剖面与冠层结构"
+    if "heatmap" in name:
+        return "冠层高度模型热力图"
+    if "contour" in name:
+        return "高程等值线与地形结构"
+    return Path(filename).stem.replace("_", " ")
 
 
 def to_csv(data: ReportData) -> str:
@@ -607,12 +635,23 @@ def to_pdf(data: ReportData, out_path: Path, *, charts: list[Path] | None = None
         
         # 将 Markdown 图片替换为 Base64 嵌入的 HTML img 标签，100% 解决绝对/相对路径渲染故障及跨目录安全加载限制
         def get_image_base64(p: Path) -> str:
-            with open(p, "rb") as f:
-                content = f.read()
-            ext = p.suffix.lower().replace(".", "")
-            mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+            try:
+                from PIL import Image
+
+                with Image.open(p) as img:
+                    img = img.convert("RGB")
+                    max_width = 1400
+                    if img.width > max_width:
+                        ratio = max_width / img.width
+                        img = img.resize((max_width, int(img.height * ratio)), Image.Resampling.LANCZOS)
+                    buf = io.BytesIO()
+                    img.save(buf, "JPEG", quality=68, optimize=True)
+                    content = buf.getvalue()
+            except Exception as ex:  # noqa: BLE001
+                log.warning("压缩 PDF 图片失败，回退原图: {} ({})", p, ex)
+                content = p.read_bytes()
             b64_data = base64.b64encode(content).decode("utf-8")
-            return f"data:{mime};base64,{b64_data}"
+            return f"data:image/jpeg;base64,{b64_data}"
 
         absolute_md = md_content
         # 正则匹配 Markdown 中的图片：![caption](path)

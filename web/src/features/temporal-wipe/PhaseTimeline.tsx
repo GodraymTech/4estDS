@@ -1,31 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import type { CSSProperties } from "react";
-import { Button, Space, Tooltip, Typography } from "antd";
-import {
-  CaretRightOutlined,
-  PauseOutlined,
-  RedoOutlined,
-  StepBackwardOutlined,
-  StepForwardOutlined,
-} from "@ant-design/icons";
+import { Tooltip, Typography } from "antd";
 import type { Phase } from "../../entities/phase";
-import { pickLatestTwo } from "../../entities/phase";
 import { phasePositions } from "./phaseTime";
-import { useReducedMotion } from "../../shared/lib/useReducedMotion";
 
 const { Text } = Typography;
 
-const PLAY_INTERVAL_MS = 1400;
 const COLOR_BEFORE = "#c9a24b";
 const COLOR_AFTER = "#3e8e5a";
-const COLOR_IDLE = "#d8e0dd";
+const COLOR_IDLE = "var(--glass-muted)";
 
 const pct = (x: number) => `${Math.max(0, Math.min(1, x)) * 100}%`;
 
 type Role = "before" | "after" | "idle";
 
-// 多时相时间轴: 按真实获取日期布点，选任意两期对比，并可播放时序演变。
-// 播放语义: 固定基线(before)，after 指针沿时间轴逐期推进，直观累积“相对基线的变化”。
+// 紧凑时相轴: 只做两期选择，不做播放器式控件。
 export function PhaseTimeline({
   phases,
   range,
@@ -35,54 +24,15 @@ export function PhaseTimeline({
   range: [number, number];
   onRangeChange: (v: [number, number]) => void;
 }) {
-  const [playing, setPlaying] = useState(false);
-  const reduced = useReducedMotion();
   const positions = phasePositions(phases);
-  const last = phases.length - 1;
-
-  // 用 ref 读取最新 range，避免 setInterval 闭包读到过期值。
   const rangeRef = useRef(range);
   rangeRef.current = range;
-
-  useEffect(() => {
-    if (!playing || reduced) return;
-    const id = window.setInterval(() => {
-      const [lo, hi] = rangeRef.current;
-      if (hi >= last) {
-        setPlaying(false);
-        return;
-      }
-      onRangeChange([lo, hi + 1]);
-    }, PLAY_INTERVAL_MS);
-    return () => window.clearInterval(id);
-  }, [playing, reduced, last, onRangeChange]);
-
-  const togglePlay = useCallback(() => {
-    if (reduced) return;
-    setPlaying((p) => {
-      if (p) return false;
-      // 已到末期时再次播放: 从基线下一期重新开始。
-      const [lo, hi] = rangeRef.current;
-      if (hi >= last) onRangeChange([lo, Math.min(lo + 1, last)]);
-      return true;
-    });
-  }, [reduced, last, onRangeChange]);
 
   const setNearer = (i: number) => {
     const [lo, hi] = rangeRef.current;
     const pick: [number, number] =
       Math.abs(i - lo) <= Math.abs(i - hi) ? [i, hi] : [lo, i];
     onRangeChange([Math.min(pick[0], pick[1]), Math.max(pick[0], pick[1])]);
-  };
-
-  const step = (dir: -1 | 1) => {
-    const [lo, hi] = rangeRef.current;
-    onRangeChange([lo, Math.min(last, Math.max(lo, hi + dir))]);
-  };
-
-  const reset = () => {
-    setPlaying(false);
-    onRangeChange(pickLatestTwo(phases));
   };
 
   const [lo, hi] = range;
@@ -95,55 +45,8 @@ export function PhaseTimeline({
   return (
     <div style={WRAP}>
       <div style={HEAD}>
-        <Space size={4}>
-          <Tooltip title="上一期">
-            <Button
-              size="small"
-              type="text"
-              icon={<StepBackwardOutlined />}
-              onClick={() => step(-1)}
-              disabled={playing || hi <= lo}
-            />
-          </Tooltip>
-          <Tooltip
-            title={
-              reduced
-                ? "已按系统“减少动效”关闭自动播放(可手动逐期切换)"
-                : playing
-                  ? "暂停"
-                  : "播放时序"
-            }
-          >
-            <Button
-              size="small"
-              type="primary"
-              shape="circle"
-              icon={playing ? <PauseOutlined /> : <CaretRightOutlined />}
-              onClick={togglePlay}
-              disabled={reduced}
-            />
-          </Tooltip>
-          <Tooltip title="下一期">
-            <Button
-              size="small"
-              type="text"
-              icon={<StepForwardOutlined />}
-              onClick={() => step(1)}
-              disabled={playing || hi >= last}
-            />
-          </Tooltip>
-          <Tooltip title="重置为最新两期">
-            <Button
-              size="small"
-              type="text"
-              icon={<RedoOutlined />}
-              onClick={reset}
-            />
-          </Tooltip>
-        </Space>
-        <Text style={RANGE_LABEL}>
-          {phases[lo]?.time || "-"} → {phases[hi]?.time || "-"}
-        </Text>
+        <Text style={RANGE_LABEL}>{phases[lo]?.time || "-"}</Text>
+        <Text style={RANGE_LABEL}>{phases[hi]?.time || "-"}</Text>
       </div>
 
       <div style={TRACK}>
@@ -175,7 +78,7 @@ function nodeStyle(pos: number, role: Role, active: boolean): CSSProperties {
       : role === "after"
         ? COLOR_AFTER
         : COLOR_IDLE;
-  const size = active ? 16 : 10;
+  const size = active ? 12 : 7;
   return {
     position: "absolute",
     left: pct(pos),
@@ -186,7 +89,7 @@ function nodeStyle(pos: number, role: Role, active: boolean): CSSProperties {
     marginTop: -(size / 2),
     borderRadius: "50%",
     background: color,
-    border: active ? "2px solid #10302b" : "1px solid #b7c4bf",
+    border: active ? "1px solid var(--glass-text)" : "1px solid var(--glass-border)",
     cursor: "pointer",
     padding: 0,
     zIndex: active ? 3 : 2,
@@ -194,22 +97,22 @@ function nodeStyle(pos: number, role: Role, active: boolean): CSSProperties {
   };
 }
 
-const WRAP: CSSProperties = { padding: "8px 16px 12px" };
+const WRAP: CSSProperties = { padding: "6px 10px 8px" };
 const HEAD: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  marginBottom: 12,
+  marginBottom: 4,
 };
 const RANGE_LABEL: CSSProperties = {
   fontVariantNumeric: "tabular-nums",
-  color: "var(--color-text, #10302b)",
-  fontSize: 13,
+  color: "var(--glass-text)",
+  fontSize: 12,
 };
 const TRACK: CSSProperties = {
   position: "relative",
-  height: 24,
-  margin: "0 8px",
+  height: 18,
+  margin: "0 5px",
 };
 const BASELINE: CSSProperties = {
   position: "absolute",
@@ -217,14 +120,14 @@ const BASELINE: CSSProperties = {
   left: 0,
   right: 0,
   height: 2,
-  background: COLOR_IDLE,
+  background: "var(--glass-border)",
   transform: "translateY(-50%)",
 };
 const SPAN: CSSProperties = {
   position: "absolute",
   top: "50%",
-  height: 4,
-  background: "rgba(62, 142, 90, 0.35)",
+  height: 3,
+  background: "color-mix(in srgb, var(--glass-text) 28%, transparent)",
   transform: "translateY(-50%)",
   borderRadius: 2,
 };
