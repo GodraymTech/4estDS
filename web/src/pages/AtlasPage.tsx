@@ -140,7 +140,9 @@ export function AtlasPage() {
 function itemStyle(active: boolean): CSSProperties {
   return {
     cursor: "pointer",
-    background: active ? "#e6f4f1" : undefined,
+    background: active
+      ? "color-mix(in srgb, var(--color-primary) 16%, var(--color-surface))"
+      : undefined,
     borderRadius: 6,
   };
 }

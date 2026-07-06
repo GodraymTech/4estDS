@@ -5,6 +5,7 @@ import { create } from "zustand";
 export interface SubmittedJob {
   jobId: string;
   filename: string;
+  sourceKind?: "file" | "directory" | "upload";
   location?: string;
   acquisitionTime?: string;
   submittedAt: number;

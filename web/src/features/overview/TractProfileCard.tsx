@@ -63,12 +63,13 @@ const CARD: CSSProperties = {
   zIndex: 1000,
   pointerEvents: "none",
   width: 220,
-  background: "#ffffff",
+  background: "var(--color-surface)",
   borderRadius: 10,
   border: "1px solid var(--color-border, #d8e0dd)",
-  boxShadow: "0 6px 20px rgba(16,48,43,0.18)",
+  boxShadow: "var(--shadow-2)",
   padding: "10px 12px",
   fontSize: 12,
+  color: "var(--color-text)",
 };
 const TITLE: CSSProperties = {
   fontWeight: 600,

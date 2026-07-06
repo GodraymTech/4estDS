@@ -152,6 +152,7 @@ def run_scope_calibration(
 
     if detector is None:
         raise ValueError("SCOPE self-calibration requires a valid detector instance. No detector was provided or initialization failed.")
+    from ..cancellation import check_cancelled
 
     # 临时禁用自标定推理时的 verbose 输出，避免日志污染
     orig_verbose = detector.kwargs.get("verbose", True)
@@ -198,6 +199,7 @@ def run_scope_calibration(
 
     try:
         # 阶段 1: 分层网格种子窗口选择与序贯停止
+        check_cancelled(run_id)
         # 动态计算网格步长，等于种子窗口物理边长，以确保候选窗口尽可能不重叠
         step = seed_window_size
         grid_cols = min(max(1, W // step), 8)
@@ -314,6 +316,7 @@ def run_scope_calibration(
                 detector.ensure_loaded()
                 res_list = []
                 for idx in range(0, len(windows_to_infer), scope_batch_size):
+                    check_cancelled(run_id)
                     sub_batch = windows_to_infer[idx:idx + scope_batch_size]
                     sub_res = detector.predict_batch([item[0] for item in sub_batch])
                     res_list.extend(sub_res)

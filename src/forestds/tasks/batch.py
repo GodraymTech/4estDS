@@ -62,6 +62,20 @@ def resolve_images(inputs: list[str]) -> list[Path]:
     return sorted(resolved_paths)
 
 
+def build_batch_location(path: Path, prefix: str | None, duplicate_index: int | None = None) -> str:
+    """生成批量推理单图 location。
+
+    未指定前缀时使用图像文件名 stem；指定前缀时把 stem 作为后缀，确保用户输入
+    的地理标识在批量任务中成为“前缀”而非所有影像的同一个 location。
+    """
+    base = path.stem
+    if prefix and prefix.strip():
+        base = f"{prefix.strip()}_{base}"
+    if duplicate_index is not None and duplicate_index > 1:
+        base = f"{base}_{duplicate_index}"
+    return base
+
+
 def run_batch_pipeline(
     images: list[str],
     *,
@@ -79,6 +93,7 @@ def run_batch_pipeline(
     dem_default: float | None = None,
     draw_box: bool | None = None,
     export_fmt: str | None = None,
+    publish: bool = False,
 ) -> BatchSummary:
     """带完整预处理与后处理的批量串行推理。
 
@@ -87,6 +102,7 @@ def run_batch_pipeline(
     """
     from ..db import writer
     from ..detect import get_detector
+    from ..cancellation import check_cancelled
     from .infer import run_infer_pipeline
     from .. import paths
 
@@ -107,7 +123,7 @@ def run_batch_pipeline(
         conf=float(settings.get("detect.conf_threshold", 0.25)),
         iou=float(settings.get("detect.iou_threshold", 0.6)),
         imgsz=int(settings.get("model_input", 1024)),
-        device=settings.get("device", None),
+        device=settings.get("detect.device", settings.get("device", None)),
         verbose=settings.get("detect.verbose", False),
     )
 
@@ -115,10 +131,14 @@ def run_batch_pipeline(
 
     from ..utils.progress import track_progress
 
+    stem_seen: dict[str, int] = {}
+
     for idx, path in track_progress(list(enumerate(valid_paths, 1)), desc="批量影像推理"):
+        check_cancelled(None)
         image_str = str(path)
-        # 若用户指定地块，则使用之；否则默认以影像名称（stem）为地块 location
-        curr_location = location or path.stem
+        location_key = path.stem if not location else f"{location.strip()}_{path.stem}"
+        stem_seen[location_key] = stem_seen.get(location_key, 0) + 1
+        curr_location = build_batch_location(path, location, stem_seen[location_key])
         run_id = new_run_id()
         paths.set_run_context(run_id, "infer")
         
@@ -167,6 +187,11 @@ def run_batch_pipeline(
 
             summary.succeeded += 1
             summary.total_trees += item.tree_count
+            if publish:
+                try:
+                    writer.promote_run(run_id, url=settings.get("url", None))
+                except Exception as promote_err:
+                    log.warning("批量推理发布失败，结果已入库但未激活: run_id={} {}", run_id, promote_err)
             log.info("【批量调度】[{}/{}] 推理成功: {} (单图检出单木数={})", idx, len(valid_paths), image_str, item.tree_count)
         except Exception as e:
             item.error = str(e)

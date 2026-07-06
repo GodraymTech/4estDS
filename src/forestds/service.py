@@ -17,7 +17,7 @@ from typing import Optional
 
 from loguru import logger as log
 
-from .contracts import InferenceRequest, InferenceResult, JobStatus
+from .contracts import BatchInferenceRequest, InferenceRequest, InferenceResult, JobStatus
 
 
 class InferenceError(RuntimeError):
@@ -99,3 +99,82 @@ def run_inference_job(
             log.warning("发布(promote_run)失败，结果已入库但未激活: run_id={} {}", rid, exc)
 
     return InferenceResult.from_metrics(metrics, status=JobStatus.succeeded, published=published)
+
+
+def run_batch_inference_job(
+    request: BatchInferenceRequest,
+    *,
+    settings=None,
+    run_id: Optional[str] = None,
+) -> dict:
+    """执行一次批量推理作业，并用一个顶层 run_log 表示目录级任务状态。"""
+    from . import paths
+    from .config import load_settings
+    from .db import writer
+    from .logging_setup import new_run_id
+    from .tasks.batch import run_batch_pipeline
+
+    if settings is None:
+        paths.ensure_home()
+        settings = load_settings()
+
+    rid = run_id or new_run_id()
+    paths.set_run_context(rid, "batch")
+    db_url = settings.get("url", None)
+    arch_val = request.arch or settings.get("detect.arch", "ultralytics")
+
+    writer.start_run_log(
+        rid,
+        "batch",
+        model_arch=arch_val,
+        input_path=request.input_path,
+        params=request.model_dump(mode="json"),
+        url=db_url,
+    )
+
+    try:
+        summary = run_batch_pipeline(
+            [request.input_path],
+            settings=settings,
+            arch=arch_val,
+            acquisition_time=request.acquisition_time,
+            location=request.location,
+            tile_size=request.tile_size,
+            overlap_rate=request.overlap_rate,
+            dsm=request.dsm,
+            dem=request.dem,
+            las=request.las,
+            export_fmt=request.export_fmt.value if request.export_fmt else None,
+            publish=request.publish,
+        )
+    except Exception as exc:  # noqa: BLE001 - 顶层批量任务必须落 failed
+        writer.finish_run_log(rid, "failed", error=str(exc), url=db_url)
+        log.opt(exception=False).error("批量推理作业失败: run_id={} {} — {}", rid, type(exc).__name__, exc)
+        raise InferenceError(str(exc), run_id=rid, cause=exc) from exc
+
+    metrics = {
+        "job_type": "batch",
+        "total": summary.total,
+        "succeeded": summary.succeeded,
+        "failed": summary.failed,
+        "total_trees": summary.total_trees,
+        "duration_s": summary.elapsed_s,
+        "items": [
+            {
+                "path": item.path,
+                "location": item.location,
+                "status": item.status,
+                "run_id": item.run_id,
+                "tract_id": item.tract_id,
+                "tree_count": item.tree_count,
+                "raw_count": item.raw_count,
+                "fused_count": item.fused_count,
+                "report_path": item.report_path,
+                "export_path": item.export_path,
+                "error": item.error,
+            }
+            for item in summary.items
+        ],
+    }
+    writer.finish_run_log(rid, "succeeded", metrics=metrics, duration_s=summary.elapsed_s, url=db_url)
+    return metrics

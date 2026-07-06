@@ -505,57 +505,57 @@ export function MapWorkspacePage() {
       ) : null}
 
       {!chromeHidden ? (
-      <div style={TOP_TOOLBAR}>
-        <div style={LAYER_PANEL}>
-          <Select
-            size="small"
-            value={basemapId}
-            onChange={setBasemapId}
-            options={BASEMAPS.map((b) => ({ value: b.id, label: b.label }))}
-            style={BASEMAP_SELECT}
-          />
-          <Space size={8}>
-            <Text style={PANEL_TEXT}>路网</Text>
-            <Switch size="small" checked={roadVisible} onChange={setRoadVisible} />
-          </Space>
-        </div>
+        <div style={TOP_TOOLBAR}>
+          <div style={LAYER_PANEL}>
+            <Select
+              size="small"
+              value={basemapId}
+              onChange={setBasemapId}
+              options={BASEMAPS.map((b) => ({ value: b.id, label: b.label }))}
+              style={BASEMAP_SELECT}
+            />
+            <Space size={8}>
+              <Text style={PANEL_TEXT}>路网</Text>
+              <Switch size="small" checked={roadVisible} onChange={setRoadVisible} />
+            </Space>
+          </div>
 
-        <div style={RIGHT_TOOLS}>
-          <ToolButton title="放大" icon={<PlusOutlined />} onClick={() => map?.zoomIn()} />
-          <div style={ZOOM_BADGE}>{zoom.toFixed(1)}</div>
-          <ToolButton title="缩小" icon={<MinusOutlined />} onClick={() => map?.zoomOut()} />
-          <ToolButton title="回到总观视野" icon={<HomeOutlined />} onClick={returnOverview} />
-          <ToolButton
-            title="测长度"
-            active={measureMode === "distance"}
-            icon={<LineChartOutlined />}
-            onClick={() => {
-              setMeasureMode((m) => (m === "distance" ? "idle" : "distance"));
-              setMeasureCoords([]);
-            }}
-          />
-          <ToolButton
-            title="测面积"
-            active={measureMode === "area"}
-            icon={<BorderOutlined />}
-            onClick={() => {
-              setMeasureMode((m) => (m === "area" ? "idle" : "area"));
-              setMeasureCoords([]);
-            }}
-          />
-          <ToolButton
-            title="隐藏浮动模块"
-            icon={<MenuFoldOutlined />}
-            onClick={() => setChromeHidden(true)}
-          />
+          <div style={RIGHT_TOOLS}>
+            <ToolButton title="放大" icon={<PlusOutlined />} onClick={() => map?.zoomIn()} />
+            <div style={ZOOM_BADGE}>{zoom.toFixed(1)}</div>
+            <ToolButton title="缩小" icon={<MinusOutlined />} onClick={() => map?.zoomOut()} />
+            <ToolButton title="回到总观视野" icon={<HomeOutlined />} onClick={returnOverview} />
+            <ToolButton
+              title="测长度"
+              active={measureMode === "distance"}
+              icon={<LineChartOutlined />}
+              onClick={() => {
+                setMeasureMode((m) => (m === "distance" ? "idle" : "distance"));
+                setMeasureCoords([]);
+              }}
+            />
+            <ToolButton
+              title="测面积"
+              active={measureMode === "area"}
+              icon={<BorderOutlined />}
+              onClick={() => {
+                setMeasureMode((m) => (m === "area" ? "idle" : "area"));
+                setMeasureCoords([]);
+              }}
+            />
+            <ToolButton
+              title="隐藏浮动模块"
+              icon={<MenuFoldOutlined />}
+              onClick={() => setChromeHidden(true)}
+            />
+          </div>
         </div>
-      </div>
       ) : null}
 
       {!chromeHidden ? (
-      <div style={COMPASS_PANEL}>
-        <ToolButton title="指北" icon={<CompassOutlined />} onClick={resetNorth} />
-      </div>
+        <div style={COMPASS_PANEL}>
+          <ToolButton title="指北" icon={<CompassOutlined />} onClick={resetNorth} />
+        </div>
       ) : null}
 
       {!chromeHidden && measureMode !== "idle" ? (

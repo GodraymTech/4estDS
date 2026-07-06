@@ -15,8 +15,8 @@ import dramatiq
 from loguru import logger as log
 
 from . import broker as _broker  # noqa: F401  确保 broker 先于 actor 装配
-from ..contracts import InferenceRequest
-from ..service import InferenceError, run_inference_job
+from ..contracts import BatchInferenceRequest, InferenceRequest
+from ..service import InferenceError, run_batch_inference_job, run_inference_job
 
 # GPU 专用队列名；worker 以 --processes 1 --threads 1 消费该队列以实现 concurrency=1。
 GPU_QUEUE = os.environ.get("forestds_GPU_QUEUE", "gpu")
@@ -52,12 +52,22 @@ def _get_detector(arch: str, settings):
             conf=float(settings.get("detect.conf_threshold", 0.25)),
             iou=float(settings.get("detect.iou_threshold", 0.6)),
             imgsz=int(settings.get("model_input", 1024)),
-            device=settings.get("device", None),
+            device=settings.get("detect.device", settings.get("device", None)),
             verbose=settings.get("detect.verbose", False),
         )
         _detector_cache[arch] = det
         log.info("GPU worker 预热检测器(常驻): arch={}", arch)
     return det
+
+
+def _setup_actor_logging(settings, run_id: str, task_type: str) -> None:
+    """为异步任务安装带 run_id 的日志 sink。GPU 队列单并发，重配全局 logger 可控。"""
+    from .. import paths
+    from ..logging_setup import setup_logging
+
+    level = str(settings.get("level", "INFO"))
+    setup_logging(level=level, run_id=run_id, task_type=task_type, to_file=True, raw_file=True)
+    paths.set_run_context(run_id, task_type)
 
 
 @dramatiq.actor(queue_name=GPU_QUEUE, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
@@ -67,6 +77,7 @@ def infer_actor(run_id: str, request_dict: dict) -> None:
     状态不在此返回；由 run_logs 表记录(running/succeeded/failed)，API 轮询获取。
     """
     settings = _get_settings()
+    _setup_actor_logging(settings, run_id, "infer")
     request = InferenceRequest.model_validate(request_dict)
     arch = request.arch or settings.get("detect.arch", "ultralytics")
     detector = _get_detector(arch, settings)
@@ -81,3 +92,21 @@ def infer_actor(run_id: str, request_dict: dict) -> None:
     except InferenceError:
         # 状态已落 run_logs=failed；不重试(max_retries=0)，吹掉异常避免框架重入。
         log.warning("作业失败已记录: run_id={}", run_id)
+
+
+@dramatiq.actor(queue_name=GPU_QUEUE, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
+def batch_actor(run_id: str, request_dict: dict) -> None:
+    """批量推理作业(GPU 串行)。"""
+    settings = _get_settings()
+    _setup_actor_logging(settings, run_id, "batch")
+    request = BatchInferenceRequest.model_validate(request_dict)
+
+    try:
+        metrics = run_batch_inference_job(request, settings=settings, run_id=run_id)
+        log.info(
+            "批量作业完成: run_id={} 总数={} 成功={} 失败={} 累计单木={}",
+            run_id, metrics.get("total"), metrics.get("succeeded"),
+            metrics.get("failed"), metrics.get("total_trees"),
+        )
+    except InferenceError:
+        log.warning("批量作业失败已记录: run_id={}", run_id)

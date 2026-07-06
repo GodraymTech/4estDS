@@ -5,6 +5,7 @@ export const queryKeys = {
   tracts: ["tracts"] as const,
   observations: (tractId: string, geometry: GeometryKind) =>
     ["observations", tractId, geometry] as const,
+  jobs: (taskType = "infer") => ["jobs", taskType] as const,
   job: (jobId: string) => ["job", jobId] as const,
   imagery: (tractId: string) => ["imagery", tractId] as const,
   tractSummary: (tractId: string) => ["tract-summary", tractId] as const,

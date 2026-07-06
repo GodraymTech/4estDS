@@ -42,6 +42,8 @@ const OUTER: CSSProperties = {
   flexDirection: "column",
   height: "100%",
   overflow: "auto",
+  background: "var(--color-bg)",
+  color: "var(--color-text)",
 };
 const BODY: CSSProperties = { flex: 1, padding: 24 };
 const TITLE: CSSProperties = { fontFamily: "var(--font-display)" };

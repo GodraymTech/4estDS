@@ -19,20 +19,59 @@ class UploadResponse(BaseModel):
 
 
 class InferSubmit(BaseModel):
-    """提交推理作业的请求体。image_key 来自 /uploads 返回。"""
+    """提交推理作业的请求体。
 
-    image_key: str = Field(..., description="已上传影像的存储 key")
+    ``image_key`` 来自 /uploads；``input_path`` 是后端/Worker 可访问的本地路径。
+    二者二选一，路由层负责进一步校验存在性与批量路由。
+    """
+
+    image_key: Optional[str] = Field(None, description="已上传影像的存储 key")
+    input_path: Optional[str] = Field(None, description="本地影像文件或目录路径")
     arch: Optional[str] = None
     acquisition_time: Optional[str] = Field(None, description="地块时相 YYYYmmdd")
     location: Optional[str] = None
     tile_size: Optional[int] = Field(None, ge=1)
     overlap_rate: Optional[float] = Field(None, ge=0.0, le=0.5)
+    dsm: Optional[str] = None
+    dem: Optional[str] = None
+    las: Optional[str] = None
     export_fmt: Optional[ExportFormat] = None
+
+
+class InputInspectRequest(BaseModel):
+    input_path: str = Field(..., description="本地影像文件或目录路径")
+
+
+class InputInspectImage(BaseModel):
+    path: str
+    stem: str
+    width: Optional[int] = None
+    height: Optional[int] = None
+    crs_epsg: Optional[int] = None
+    acquisition_time: Optional[str] = None
+    acquisition_time_source: Optional[str] = None
+
+
+class InputInspectOut(BaseModel):
+    input_path: str
+    normalized_path: str
+    input_kind: str
+    image_count: int
+    suggested_location: Optional[str] = None
+    suggested_acquisition_time: Optional[str] = None
+    images: list[InputInspectImage] = Field(default_factory=list)
 
 
 class JobRef(BaseModel):
     job_id: str = Field(..., description="作业标识(即 run_id)")
     status: JobStatus
+
+
+class JobLogsOut(BaseModel):
+    job_id: str
+    cursor: int = 0
+    lines: list[str] = Field(default_factory=list)
+    available: bool = False
 
 
 class JobStatusOut(BaseModel):
@@ -44,6 +83,25 @@ class JobStatusOut(BaseModel):
     duration_s: Optional[float] = None
     error: Optional[str] = None
     metrics: dict[str, Any] = Field(default_factory=dict)
+
+
+class JobHistoryItem(BaseModel):
+    run_id: str
+    task_type: str
+    status: JobStatus
+    model_arch: Optional[str] = None
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    duration_s: Optional[float] = None
+    input_path: Optional[str] = None
+    error: Optional[str] = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
+class CancelJobOut(BaseModel):
+    job_id: str
+    status: JobStatus
+    message: str
 
 
 class TractOut(BaseModel):

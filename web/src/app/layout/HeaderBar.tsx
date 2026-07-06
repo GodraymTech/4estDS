@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 import { Button, Dropdown, Space, Typography } from "antd";
 import { BulbOutlined, MoonOutlined, QuestionCircleOutlined, UserOutlined } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { AboutModal } from "./AboutModal";
+import { useAppTheme } from "../providers";
 
 const { Text } = Typography;
 
@@ -11,7 +12,7 @@ const { Text } = Typography;
 // 商业外围(关于/隐私/联系)收进右上菜单, 不占主导航。
 export function HeaderBar() {
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [dark, setDark] = useState(() => localStorage.getItem("forestds-theme") === "dark");
+  const { dark, toggleMode } = useAppTheme();
 
   const helpMenu: MenuProps["items"] = [
     { key: "about", label: "关于 4estDS" },
@@ -34,11 +35,6 @@ export function HeaderBar() {
   const helpMenuProps: MenuProps = { items: helpMenu, onClick: onHelp };
   const userMenuProps: MenuProps = { items: userMenu };
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
-    localStorage.setItem("forestds-theme", dark ? "dark" : "light");
-  }, [dark]);
-
   return (
     <div style={WRAP}>
       <Text style={CONTEXT}>红树林生态监测与监管平台</Text>
@@ -56,7 +52,7 @@ export function HeaderBar() {
           style={ACTION}
           icon={dark ? <BulbOutlined /> : <MoonOutlined />}
           aria-label={dark ? "切换亮色" : "切换暗黑"}
-          onClick={() => setDark((v) => !v)}
+          onClick={toggleMode}
         />
         <Dropdown menu={userMenuProps} placement="bottomRight">
           <Button

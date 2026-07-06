@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from ..contracts import InferenceRequest
+from ..contracts import BatchInferenceRequest, InferenceRequest
 from ..logging_setup import new_run_id
 
 
@@ -26,4 +26,13 @@ def enqueue_inference(request: InferenceRequest) -> str:
     return run_id
 
 
-__all__ = ["enqueue_inference"]
+def enqueue_batch_inference(request: BatchInferenceRequest) -> str:
+    """投递一个批量推理作业。返回顶层 run_id(即 job_id)。"""
+    from .actors import batch_actor
+
+    run_id = new_run_id()
+    batch_actor.send(run_id, request.model_dump(mode="json"))
+    return run_id
+
+
+__all__ = ["enqueue_batch_inference", "enqueue_inference"]

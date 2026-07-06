@@ -7,6 +7,9 @@ body,
 #root {
   height: 100%;
 }
+html {
+  background: var(--color-bg);
+}
 body {
   margin: 0;
   font-family: var(--font-body);
@@ -14,6 +17,152 @@ body {
   background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+.ant-app {
+  min-height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.ant-layout,
+.ant-layout-content {
+  background: var(--color-bg) !important;
+  color: var(--color-text);
+}
+
+.ant-layout-header {
+  background: var(--ink) !important;
+}
+
+.ant-card,
+.ant-table-wrapper,
+.ant-table,
+.ant-table-container,
+.ant-table-content,
+.ant-modal-content,
+.ant-popover-inner,
+.ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-picker-dropdown .ant-picker-panel-container,
+.ant-list {
+  background: var(--color-surface) !important;
+  color: var(--color-text);
+}
+
+.ant-card,
+.ant-card-head,
+.ant-table-wrapper .ant-table,
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number,
+.ant-input-number-group-addon,
+.ant-select-selector,
+.ant-picker,
+.ant-segmented,
+.ant-upload-wrapper .ant-upload-drag {
+  border-color: var(--color-border) !important;
+}
+
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number,
+.ant-input-number-input,
+.ant-input-number-group-addon,
+.ant-select-selector,
+.ant-picker,
+.ant-segmented {
+  background: var(--color-surface) !important;
+  color: var(--color-text) !important;
+}
+
+.ant-input::placeholder,
+.ant-input-affix-wrapper input::placeholder,
+.ant-input-number-input::placeholder,
+.ant-picker-input > input::placeholder,
+.ant-select-selection-placeholder {
+  color: var(--color-text-muted) !important;
+  opacity: 0.72;
+}
+
+.ant-input-affix-wrapper > input.ant-input,
+.ant-picker-input > input {
+  background: transparent !important;
+  color: var(--color-text) !important;
+}
+
+.ant-typography,
+.ant-typography-secondary,
+.ant-statistic-title,
+.ant-statistic-content,
+.ant-card-head-title,
+.ant-table,
+.ant-table-cell,
+.ant-empty-description,
+.ant-list-item,
+.ant-list-item-meta-title,
+.ant-list-item-meta-description,
+.ant-select-item,
+.ant-select-selection-item,
+.ant-select-arrow,
+.ant-input-prefix,
+.ant-progress-text {
+  color: var(--color-text);
+}
+
+.ant-typography-secondary,
+.ant-list-item-meta-description {
+  color: var(--color-text-muted) !important;
+}
+
+.ant-card-head {
+  background: var(--color-surface) !important;
+  border-bottom-color: var(--color-border) !important;
+}
+
+.ant-table-thead > tr > th {
+  background: color-mix(in srgb, var(--color-surface) 84%, var(--color-bg)) !important;
+  color: var(--color-text) !important;
+  border-bottom-color: var(--color-border) !important;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom-color: var(--color-border) !important;
+}
+
+.ant-table-tbody > tr.ant-table-row:hover > td {
+  background: color-mix(in srgb, var(--color-surface) 76%, var(--color-bg)) !important;
+}
+
+.ant-select-item-option-active:not(.ant-select-item-option-disabled),
+.ant-dropdown-menu-item:hover,
+.ant-dropdown-menu-submenu-title:hover,
+.ant-list-item:hover,
+.ant-segmented-item:hover {
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface)) !important;
+}
+
+.ant-select-item-option-selected:not(.ant-select-item-option-disabled),
+.ant-segmented-item-selected {
+  background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface)) !important;
+  color: var(--color-text) !important;
+}
+
+.ant-btn-default {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.ant-btn-default:hover {
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface)) !important;
+  border-color: var(--color-primary) !important;
+}
+
+.ant-tag:not([class*="ant-tag-"]) {
+  background: color-mix(in srgb, var(--color-surface) 72%, var(--color-bg));
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
 }
 
 /* 地理量等宽排版: 坐标/面积/株数/时间戳/运行号 —— 仪器面板美学(可信/可追溯)。 */

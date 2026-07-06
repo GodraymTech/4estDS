@@ -88,7 +88,7 @@ def _mean_observation_center(
     points = []
     for row in conn.execute(sql, params).fetchall():
         pt = _parse_wkt_point(row["center_geo"])
-        if pt:
+        if isinstance(pt, tuple) and len(pt) == 2:
             points.append(pt)
     if not points:
         return None
@@ -223,6 +223,31 @@ def get_run(run_id: str, *, url: str | None = None) -> dict | None:
     finally:
         conn.close()
     return dict(row) if row else None
+
+
+def list_runs(
+    *,
+    url: str | None = None,
+    task_type: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    conn = _connect(url)
+    try:
+        bounded_limit = max(1, min(int(limit), 200))
+        if task_type:
+            rows = conn.execute(
+                "SELECT * FROM run_logs WHERE task_type=? "
+                "ORDER BY started_at DESC LIMIT ?",
+                (task_type, bounded_limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM run_logs ORDER BY started_at DESC LIMIT ?",
+                (bounded_limit,),
+            ).fetchall()
+    finally:
+        conn.close()
+    return _rows_to_dicts(rows)
 
 
 def list_tracts(*, url: str | None = None) -> list[dict]:

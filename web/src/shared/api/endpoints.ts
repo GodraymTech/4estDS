@@ -2,7 +2,12 @@ import { apiGet, apiPostJson, apiUpload, apiUrl } from "./client";
 import type {
   FeatureCollection,
   GeometryKind,
+  InputInspectRequest,
+  InputInspectResult,
   InferSubmit,
+  CancelJobResult,
+  JobHistoryItem,
+  JobLogs,
   JobRef,
   JobStatus,
   Tract,
@@ -26,6 +31,15 @@ export const endpoints = {
   getJob: (jobId: string): Promise<JobStatus> =>
     apiGet(`/jobs/${encodeURIComponent(jobId)}`),
 
+  listJobs: (taskType = "infer", limit = 50): Promise<JobHistoryItem[]> =>
+    apiGet(`/jobs?task_type=${encodeURIComponent(taskType)}&limit=${limit}`),
+
+  getJobLogs: (jobId: string, cursor = 0): Promise<JobLogs> =>
+    apiGet(`/jobs/${encodeURIComponent(jobId)}/logs?cursor=${cursor}`),
+
+  inspectInput: (body: InputInspectRequest): Promise<InputInspectResult> =>
+    apiPostJson("/jobs/inspect-input", body),
+
   // 地块多时相真影像瓦片(时相卷帘刷开真影像)。
   getImagery: (tractId: string): Promise<TractImagery> =>
     apiGet(`/tracts/${encodeURIComponent(tractId)}/imagery`),
@@ -45,6 +59,9 @@ export const endpoints = {
   // 提交异步推理作业 -> 202 + job_id。
   submitInfer: (body: InferSubmit): Promise<JobRef> =>
     apiPostJson("/jobs/infer", body),
+
+  cancelJob: (jobId: string): Promise<CancelJobResult> =>
+    apiPostJson(`/jobs/${encodeURIComponent(jobId)}/cancel`, {}),
 
   // 报告/导出为文件下载, 直接用链接打开。
   reportUrl: (tractId: string, fmt = "pdf"): string =>

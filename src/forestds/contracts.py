@@ -90,6 +90,30 @@ class InferenceRequest(BaseModel):
         }
 
 
+class BatchInferenceRequest(BaseModel):
+    """批量推理请求。``input_path`` 可为影像目录或多个入口上层收敛后的目录路径。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_path: str = Field(..., description="输入影像目录或单个影像路径")
+    arch: Optional[str] = Field(None, description="模型架构，默认读配置 detect.arch")
+    acquisition_time: Optional[str] = Field(
+        None,
+        description="显式地块时相 YYYYmmdd；为空时每张影像各自读取元数据默认值",
+    )
+    location: Optional[str] = Field(
+        None,
+        description="批量地理标识前缀；为空时每张影像使用自己的文件名 stem",
+    )
+    tile_size: Optional[int] = Field(None, ge=1, description="手动切片边长，缺省自适应")
+    overlap_rate: Optional[float] = Field(None, ge=0.0, le=0.5, description="重叠率 0~0.5")
+    dsm: Optional[str] = Field(None, description="DSM 地表高程路径")
+    dem: Optional[str] = Field(None, description="DEM 裸地高程路径")
+    las: Optional[str] = Field(None, description="激光点云 LAS/LAZ 路径")
+    export_fmt: Optional[ExportFormat] = Field(None, description="推理后自动导出的 GIS 格式")
+    publish: bool = Field(False, description="成功后是否发布各单图运行结果")
+
+
 class InferenceResult(BaseModel):
     """单图推理结果。是 ``run_infer_pipeline`` 返回 metrics dict 的强类型化。"""
 

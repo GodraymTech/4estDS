@@ -155,8 +155,8 @@ def prepare_inference_image(
                 scope_detector = detector
             else:
                 from ..detect import get_detector
-                arch_val = settings.get("arch", "ultralytics")
-                weights_val = settings.get(f"detect.models.{arch_val}.weights")
+                arch_val = settings.get("detect.arch", "ultralytics")
+                weights_val = settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights"))
                 conf_thr = float(settings.get("detect.conf_threshold", 0.25))
                 iou_thr = float(settings.get("detect.iou_threshold", 0.6))
                 
@@ -165,8 +165,8 @@ def prepare_inference_image(
                     weights=weights_val,
                     conf=conf_thr,
                     iou=iou_thr,
-                    imgsz=int(settings.get("model_input", 1024)),
-                    device=None,
+                    imgsz=int(settings.get("detect.model_input", settings.get("model_input", 1024))),
+                    device=settings.get("detect.device", settings.get("device", None)),
                     verbose=settings.get("detect.verbose", True),
                 )
             scope_tile, scope_overlap = run_scope_calibration(

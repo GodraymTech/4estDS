@@ -71,6 +71,7 @@ def run_inference(
     image_source,
     detector: BaseDetector,
     config: InferenceConfig,
+    run_id: str | None = None,
 ) -> InferenceResult:
     """对一幅影像执行切片->推理->去重全流程（引擎核心）。
 
@@ -106,10 +107,12 @@ def run_inference(
     
     total_raw_predicts = 0
     from ..utils.progress import track_progress
+    from ..cancellation import check_cancelled
     
     # 2. 分批调度前向推理
     chunks = [coords[i : i + bs] for i in range(0, len(coords), bs)]
     for chunk in track_progress(chunks, desc="动态读窗推理中"):
+        check_cancelled(run_id)
         windows = []
         for (x, y, w, h) in chunk:
             pixels = read(x, y, w, h) if callable(read) else None

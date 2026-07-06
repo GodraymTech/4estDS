@@ -8,6 +8,7 @@ from __future__ import annotations
 from ..base import BaseDetector, Detections, Window
 from ..registry import register
 from .ultralytics_common import build_detections_from_result, ensure_bgr
+from loguru import logger as log
 
 
 @register("ultralytics")
@@ -76,6 +77,10 @@ class UltralyticsDetector(BaseDetector):
         half_val = bool(self.kwargs.get("half", False))
         if device == "cuda" and "half" not in self.kwargs:
             half_val = True
+
+        if self.kwargs.get("_last_device") != device:
+            self.kwargs["_last_device"] = device
+            log.info("Ultralytics 推理设备: device={} half={}", device, half_val)
 
         predict_kwargs = {
             "conf": float(self.kwargs.get("conf", 0.25)),

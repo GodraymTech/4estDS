@@ -28,6 +28,32 @@ export interface JobStatus {
   metrics?: Record<string, unknown>;
 }
 
+export interface JobLogs {
+  job_id: string;
+  cursor: number;
+  lines: string[];
+  available: boolean;
+}
+
+export interface JobHistoryItem {
+  run_id: string;
+  task_type: string;
+  status: JobState;
+  model_arch?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_s?: number | null;
+  input_path?: string | null;
+  error?: string | null;
+  metrics?: Record<string, unknown>;
+}
+
+export interface CancelJobResult {
+  job_id: string;
+  status: JobState;
+  message: string;
+}
+
 // 上传响应(对应 schemas.UploadResponse)。key 回传给 /jobs/infer。
 export interface UploadResponse {
   key: string;
@@ -37,12 +63,16 @@ export interface UploadResponse {
 
 // 提交推理作业的请求体(对应 schemas.InferSubmit)。
 export interface InferSubmit {
-  image_key: string;
+  image_key?: string;
+  input_path?: string;
   arch?: string;
   acquisition_time?: string; // YYYYmmdd
   location?: string;
   tile_size?: number;
   overlap_rate?: number;
+  dsm?: string;
+  dem?: string;
+  las?: string;
   export_fmt?: string;
 }
 
@@ -50,6 +80,30 @@ export interface InferSubmit {
 export interface JobRef {
   job_id: string;
   status: JobState;
+}
+
+export interface InputInspectRequest {
+  input_path: string;
+}
+
+export interface InputInspectImage {
+  path: string;
+  stem: string;
+  width?: number | null;
+  height?: number | null;
+  crs_epsg?: number | null;
+  acquisition_time?: string | null;
+  acquisition_time_source?: string | null;
+}
+
+export interface InputInspectResult {
+  input_path: string;
+  normalized_path: string;
+  input_kind: "file" | "directory" | string;
+  image_count: number;
+  suggested_location?: string | null;
+  suggested_acquisition_time?: string | null;
+  images: InputInspectImage[];
 }
 
 export type GeometryKind = "point" | "crown";

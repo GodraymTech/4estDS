@@ -47,7 +47,13 @@ def current_run_id() -> str:
     return _CURRENT_RUN_ID
 
 
-def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool = True, task_type: str | None = None):
+def setup_logging(
+    level: str = "INFO",
+    run_id: str | None = None,
+    to_file: bool = True,
+    task_type: str | None = None,
+    raw_file: bool = False,
+):
     """配置 loguru 日志，并拦截标准库日志。返回 (logger, run_id)。"""
     global _CURRENT_RUN_ID
     run_id = run_id or new_run_id()
@@ -112,6 +118,13 @@ def setup_logging(level: str = "INFO", run_id: str | None = None, to_file: bool 
             str(log_path), level=level, format=_formatter,
             filter=_filter, rotation="20 MB", retention=5, enqueue=True,
         )
+        if raw_file:
+            raw_log_filename = f"{_LAUNCH_TIME}__{_CURRENT_RUN_ID}__{task_type}.ui.log"
+            raw_log_path = paths.logs_dir() / raw_log_filename
+            _loguru_logger.add(
+                str(raw_log_path), level=level, format="{message}\n",
+                filter=_filter, rotation="20 MB", retention=5, enqueue=True,
+            )
 
 
     class InterceptHandler(logging.Handler):
@@ -216,4 +229,3 @@ def log_distribution(log, label: str, values, *, unit: str = "", level: str | in
     summary = summarize_distribution(values)
     log.log(level, "{} 分布: {}", label, format_distribution(values, unit=unit))
     return summary
-

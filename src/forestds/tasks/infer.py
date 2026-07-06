@@ -63,6 +63,7 @@ def run_infer_pipeline(
     """
     from ..db import writer
     from ..detect import get_detector
+    from ..cancellation import check_cancelled
 
     arch_val = arch or settings.get("detect.arch", "ultralytics")
     db_url = settings.get("url", None)
@@ -84,11 +85,12 @@ def run_infer_pipeline(
             conf=float(settings.get("detect.conf_threshold", 0.25)),
             iou=float(settings.get("detect.iou_threshold", 0.6)),
             imgsz=int(settings.get("model_input", 1024)),
-            device=settings.get("device", None),
+            device=settings.get("detect.device", settings.get("device", None)),
             verbose=settings.get("detect.verbose", False),
         )
 
     # ── 2. 核心推理 ────────────────────────────────────────────────────────────
+    check_cancelled(run_id)
     t0 = time.time()
     from ..preprocess import prepare_inference_image
     from ..engine import InferenceConfig, run_inference
@@ -109,6 +111,7 @@ def run_infer_pipeline(
         run_id=run_id,
         detector=detector,
     )
+    check_cancelled(run_id)
     
     width = prep["width"]
     height = prep["height"]
@@ -137,9 +140,11 @@ def run_infer_pipeline(
         source = InMemorySource(pixels)
 
     try:
-        result = run_inference(source, detector, config)
+        result = run_inference(source, detector, config, run_id=run_id)
     finally:
         source.close()
+
+    check_cancelled(run_id)
 
     # 2.4 为了跟以前的返回值元数据兼容，将 tiles_dir 相对于 home_dir() 记录到 meta 中
     if mode == "physical_slice" and tiles_dir:
@@ -152,44 +157,19 @@ def run_infer_pipeline(
     # ── 3. GIS 投影 & 地块登记 ─────────────────────────────────────────────────
     from ..geo import compute_tract_geometry
     transform_obj = crs_obj = None
-    tiff_date = tiff_ul = None
+    default_acquisition_time = None
     if image_path.lower().endswith((".tif", ".tiff")):
         try:
             import rasterio
             with rasterio.open(image_path) as src:
                 transform_obj = src.transform
                 crs_obj = src.crs
-                
-                # 尝试提取 TIFF 时间标签
-                tags = src.tags()
-                date_candidates = [
-                    tags.get("TIFFTAG_DATETIME"),
-                    tags.get("DateTime"),
-                    tags.get("datetime"),
-                ]
-                for c in date_candidates:
-                    if c and isinstance(c, str):
-                        digits = "".join(filter(str.isdigit, c))
-                        if len(digits) >= 8:
-                            tiff_date = digits[:8]
-                            break
-                
-                # 提取左上角地理坐标作为位置候选
-                if crs_obj and transform_obj:
-                    x_ul, y_ul = transform_obj * (0, 0)
-                    tiff_ul = f"UL_{x_ul:.4f}_{y_ul:.4f}"
         except Exception:
             pass
 
-    # 如果无法从 TIFF tag 中读取时间，尝试读取文件修改时间作为备选
-    if not tiff_date:
-        try:
-            import os
-            import datetime
-            mtime = os.path.getmtime(image_path)
-            tiff_date = datetime.datetime.fromtimestamp(mtime).strftime("%Y%m%d")
-        except Exception:
-            pass
+    from ..utils.input_inspect import extract_image_acquisition_time
+
+    default_acquisition_time, _ = extract_image_acquisition_time(image_path)
 
     geo = compute_tract_geometry(
         image_path, result.meta.get("width"), result.meta.get("height"),
@@ -200,8 +180,8 @@ def run_infer_pipeline(
             "输入图像未包含地理空间元数据，地理面积/林木密度等指标在报告和 DB 中将缺失。"
         )
 
-    final_acquisition_time = acquisition_time or tiff_date or "000000"
-    final_location = location or tiff_ul or "default"
+    final_acquisition_time = acquisition_time or default_acquisition_time or "00000000"
+    final_location = location or Path(image_path).stem
 
     tract_id = writer.ensure_tract(
         final_acquisition_time,
