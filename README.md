@@ -222,7 +222,7 @@ REDIS_URL=redis://localhost:6379/0
 - [docs/快速开始.md](docs/快速开始.md): 最短上手
 - [docs/完整教程.md](docs/完整教程.md): 端到端教程
 - [docs/项目工作原理.md](docs/项目工作原理.md): 当前代码的数据流与架构说明
-- [docs/数据表设计与工作机制.md](docs/数据表设计与工作机制.md): 数据库表与发布机制
+- [docs/数据库设计.md](docs/数据库设计.md): 新一代数据库表结构与层级设计
 - [docs/实时方案.md](docs/实时方案.md): 当前技术方案快照
 
 ## 开发验证

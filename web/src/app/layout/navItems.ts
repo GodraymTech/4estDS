@@ -26,6 +26,13 @@ export const primaryNav: NavItem[] = [
     perm: "view:dashboard",
   },
   {
+    key: "change",
+    path: "/change",
+    label: "时相对比",
+    icon: "SwapOutlined",
+    perm: "view:overview",
+  },
+  {
     key: "ledger",
     path: "/ledger",
     label: "台账",

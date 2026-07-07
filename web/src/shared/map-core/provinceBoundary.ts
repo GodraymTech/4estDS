@@ -1,4 +1,5 @@
 import guangdong from "./province-boundaries/guangdong.json";
+import guangdongBuffered from "./province-boundaries/guangdong_buffered.json";
 import type { BBox, GeoJson, LngLat } from "./types";
 
 type Ring = LngLat[];
@@ -8,6 +9,11 @@ const BOUNDARIES: Record<string, GeoJson> = {
   guangdong: guangdong as GeoJson,
   "广东": guangdong as GeoJson,
   "广东省": guangdong as GeoJson,
+  "广东含海域": guangdongBuffered as GeoJson,
+  "广东含海域省": guangdongBuffered as GeoJson,
+  "广东省含海域": guangdongBuffered as GeoJson,
+  "广东省(含海域)": guangdongBuffered as GeoJson,
+  "guangdong_buffered": guangdongBuffered as GeoJson,
 };
 
 const WORLD_RING: Ring = [

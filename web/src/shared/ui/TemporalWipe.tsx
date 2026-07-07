@@ -8,7 +8,15 @@ import {
   type LngLat,
   type MapController,
   type RasterBasemap,
+  type RasterOverlaySpec,
 } from "../map-core";
+
+export interface TemporalWipeApi {
+  zoomIn(): void;
+  zoomOut(): void;
+  fitToData(): void;
+  resetNorth(): void;
+}
 
 // 卷帘一侧: 可选的矢量叠加图层 + 可选的该时相真影像底图。
 export interface WipeSide {
@@ -25,12 +33,16 @@ export function TemporalWipe({
   center,
   zoom,
   basemap,
+  roadOverlay,
+  onApi,
 }: {
   before: WipeSide;
   after: WipeSide;
   center: LngLat;
   zoom: number;
   basemap?: RasterBasemap;
+  roadOverlay?: RasterOverlaySpec | null;
+  onApi?: (api: TemporalWipeApi | null) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const beforeElRef = useRef<HTMLDivElement>(null);
@@ -67,6 +79,7 @@ export function TemporalWipe({
     });
     return () => {
       disposed = true;
+      onApi?.(null);
       b.destroy();
       a.destroy();
       beforeCtrl.current = null;
@@ -76,34 +89,41 @@ export function TemporalWipe({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 旧时相叠加(主图): 同时负责 fitBounds, 跟随图经 move 同步。
   useEffect(() => {
-    const c = beforeCtrl.current;
-    if (!c || !ready || !before.overlay) return;
-    c.setGeoJsonLayer(before.overlay);
-    const b = boundsOf(before.overlay.data);
-    if (b) c.fitBounds(b, 48);
-  }, [ready, before.overlay]);
-
-  // 新时相叠加(跟随图): 仅设数据, 不单独 fit。
-  useEffect(() => {
-    const c = afterCtrl.current;
-    if (!c || !ready || !after.overlay) return;
-    c.setGeoJsonLayer(after.overlay);
-  }, [ready, after.overlay]);
-
-  // 各时相真影像底图热替换(就绪后按侧刷开)。
-  useEffect(() => {
-    const c = beforeCtrl.current;
-    if (!c || !ready || !before.basemap) return;
-    c.setBasemap(before.basemap);
-  }, [ready, before.basemap]);
+    if (!ready) return;
+    const bm = basemap ?? defaultBasemap();
+    beforeCtrl.current?.setBasemap(bm);
+    afterCtrl.current?.setBasemap(bm);
+  }, [ready, basemap]);
 
   useEffect(() => {
-    const c = afterCtrl.current;
-    if (!c || !ready || !after.basemap) return;
-    c.setBasemap(after.basemap);
-  }, [ready, after.basemap]);
+    if (!ready) return;
+    onApi?.({
+      zoomIn: () => beforeCtrl.current?.zoomIn(),
+      zoomOut: () => beforeCtrl.current?.zoomOut(),
+      fitToData: () => {
+        const data = before.overlay?.data ?? after.overlay?.data;
+        const b = data ? boundsOf(data) : null;
+        if (b) beforeCtrl.current?.fitBounds(b, 48);
+        else beforeCtrl.current?.flyTo(center, zoom);
+      },
+      resetNorth: () => {
+        const leader = beforeCtrl.current;
+        const follower = afterCtrl.current;
+        if (!leader) return;
+        const camera = { ...leader.getCamera(), bearing: 0, pitch: 0 };
+        leader.jumpTo(camera);
+        follower?.jumpTo(camera);
+      },
+    });
+  }, [after.overlay?.data, before.overlay?.data, center, onApi, ready, zoom]);
+
+  // 固定图层顺序: 底图 -> 时相影像 -> 路网 -> 检测框。
+  useEffect(() => {
+    if (!ready) return;
+    syncSide(beforeCtrl.current, before, roadOverlay, true, center, zoom);
+    syncSide(afterCtrl.current, after, roadOverlay, false, center, zoom);
+  }, [after, before, center, ready, roadOverlay, zoom]);
 
   // 分隔把手拖动: 基于容器宽度换算比例。
   useEffect(() => {
@@ -162,10 +182,32 @@ export function TemporalWipe({
       >
         ⇄
       </div>
-      <span style={LABEL_BEFORE}>旧时相</span>
-      <span style={LABEL_AFTER}>新时相</span>
     </div>
   );
+}
+
+function syncSide(
+  controller: MapController | null,
+  side: WipeSide,
+  roadOverlay: RasterOverlaySpec | null | undefined,
+  fit: boolean,
+  center: LngLat,
+  zoom: number,
+) {
+  if (!controller) return;
+  if (side.basemap) controller.setRasterOverlay("phase-imagery", { ...side.basemap, opacity: 0.88 });
+  else controller.removeRasterOverlay("phase-imagery");
+  if (roadOverlay) controller.setRasterOverlay("road-overlay", roadOverlay);
+  else controller.removeRasterOverlay("road-overlay");
+
+  if (!side.overlay) return;
+  controller.removeLayer(side.overlay.id);
+  controller.setGeoJsonLayer(side.overlay);
+  const b = boundsOf(side.overlay.data);
+  if (fit) {
+    if (b) controller.fitBounds(b, 48);
+    else controller.flyTo(center, zoom);
+  }
 }
 
 const ROOT: CSSProperties = {
@@ -200,24 +242,4 @@ const HANDLE: CSSProperties = {
   zIndex: 4,
   boxShadow: "0 2px 8px rgba(16,48,43,0.35)",
   userSelect: "none",
-};
-const LABEL_BASE: CSSProperties = {
-  position: "absolute",
-  top: 12,
-  padding: "2px 10px",
-  borderRadius: 999,
-  fontSize: 12,
-  color: "#ffffff",
-  zIndex: 3,
-  pointerEvents: "none",
-};
-const LABEL_BEFORE: CSSProperties = {
-  ...LABEL_BASE,
-  left: 12,
-  background: "rgba(201,162,75,0.92)",
-};
-const LABEL_AFTER: CSSProperties = {
-  ...LABEL_BASE,
-  right: 12,
-  background: "rgba(62,142,90,0.92)",
 };

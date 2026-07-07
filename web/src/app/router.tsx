@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { MapWorkspacePage } from "../pages/MapWorkspacePage";
 import { DashboardPage } from "../pages/DashboardPage";
+import { ChangePage } from "../pages/ChangePage";
 import { LedgerPage } from "../pages/LedgerPage";
 import { TasksPage } from "../pages/TasksPage";
 import { ReportsPage } from "../pages/ReportsPage";
@@ -30,7 +31,7 @@ export const router = createBrowserRouter([
       { path: "overview", element: <Navigate to="/map" replace /> },
       { path: "atlas", element: <Navigate to="/map" replace /> },
       { path: "atlas/:tractId", element: <AtlasRedirect /> },
-      { path: "change", element: <Navigate to="/map" replace /> },
+      { path: "change", element: <ChangePage /> },
       { path: "dashboard", element: <DashboardPage /> },
       { path: "ledger", element: <LedgerPage /> },
       {

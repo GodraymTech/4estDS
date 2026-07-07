@@ -39,7 +39,7 @@ export const env = {
   roadOverlayTiles: (import.meta.env.VITE_ROAD_OVERLAY_TILES as string) || "",
   roadOverlayAttr: (import.meta.env.VITE_ROAD_OVERLAY_ATTR as string) || "",
   /** 总观视野: 默认广东省。region 决定省界遮罩，center/bounds 可覆盖默认相机。 */
-  overviewRegion: (import.meta.env.VITE_OVERVIEW_REGION as string) || "广东省",
+  overviewRegion: (import.meta.env.VITE_OVERVIEW_REGION as string) || "广东含海域",
   overviewCenter: parseLngLat(
     import.meta.env.VITE_OVERVIEW_CENTER as string | undefined,
     [113.27, 23.13],

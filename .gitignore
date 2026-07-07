@@ -41,3 +41,4 @@ yolo26n.pt
 # Tauri 桌面壳(Rust 构建产物 / 生成物)
 web/src-tauri/target/
 web/src-tauri/gen/
+.tokensave/

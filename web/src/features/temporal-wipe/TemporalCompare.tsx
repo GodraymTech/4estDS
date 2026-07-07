@@ -1,12 +1,13 @@
 import type { CSSProperties } from "react";
 import { Empty } from "antd";
-import { TemporalWipe, type WipeSide } from "../../shared/ui/TemporalWipe";
+import { TemporalWipe, type TemporalWipeApi, type WipeSide } from "../../shared/ui/TemporalWipe";
 import { MapStage } from "../../shared/ui/MapStage";
 import {
   rasterBasemap,
   type GeoJsonLayerSpec,
   type LngLat,
   type RasterBasemap,
+  type RasterOverlaySpec,
 } from "../../shared/map-core";
 import type { Phase } from "../../entities/phase";
 import { useObservations } from "../../entities/observation";
@@ -26,12 +27,18 @@ export function TemporalCompare({
   onRangeChange,
   center,
   zoom,
+  basemap,
+  roadOverlay,
+  onWipeApi,
 }: {
   phases: Phase[];
   range: [number, number];
   onRangeChange: (v: [number, number]) => void;
   center: LngLat;
   zoom: number;
+  basemap?: RasterBasemap;
+  roadOverlay?: RasterOverlaySpec | null;
+  onWipeApi?: (api: TemporalWipeApi | null) => void;
 }) {
   const beforePhase = phases[range[0]];
   const afterPhase = phases[range[1]];
@@ -89,7 +96,15 @@ export function TemporalCompare({
 
   return (
     <div style={STAGE}>
-      <TemporalWipe before={before} after={after} center={center} zoom={zoom} />
+      <TemporalWipe
+        before={before}
+        after={after}
+        center={center}
+        zoom={zoom}
+        basemap={basemap}
+        roadOverlay={roadOverlay}
+        onApi={onWipeApi}
+      />
       <div style={TIMELINE_PANEL}>
         <PhaseTimeline
           phases={phases}

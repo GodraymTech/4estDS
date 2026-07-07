@@ -4,6 +4,7 @@ trigger: always_on
 
 # 工作区规则 (Workspace Rules)
 
+- DO NOT send optional commentary.
 - 代码编写原则: 
   - 符合第一性原理、KISS、YAGNI、高内聚低耦合原则、SOLID 原则、DRY；
   - Error能处理完善
@@ -19,6 +20,7 @@ trigger: always_on
     - 当出于debug的需要时: 你可以直自己创建/删除辅助代码文件, 而无需征得我的同意!
   - 善用web search
 - 命令执行原则:
-  - 执行前确认项目虚拟环境, 如uv
+  - 项目中, Python虚拟环境用uv; 前端环境用mise和pnpm
+  - 当某个命令需要沙箱外的资源, 且你没有沙箱外的权限时, 别着急降级执行, 先主动问我是否同意
   - 风险预评估: 所有命令都尽量自主执行, 仅当你评估其风险性过大时, 才交由我审查执行
-  - 禁止污染环境: 你因为调试生成的中间文件产物，务必自行shan chu
+  - 禁止污染环境: 你因为调试生成的中间文件产物，务必自行删除

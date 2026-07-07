@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { Link } from "react-router-dom";
 
 // 产品铭牌(标志 + 名称)。标志为内联 SVG: 一滴潮水与树冠(潮间带意象)。
 export function BrandMark({ size = 28 }: { size?: number }) {
@@ -27,10 +28,10 @@ export function BrandMark({ size = 28 }: { size?: number }) {
 
 export function Brand({ collapsed = false }: { collapsed?: boolean }) {
   return (
-    <div style={WRAP}>
+    <Link to="/map" style={WRAP} aria-label="返回一张图" title="返回一张图">
       <BrandMark />
       {collapsed ? null : <span style={NAME}>4estDS</span>}
-    </div>
+    </Link>
   );
 }
 
@@ -40,6 +41,7 @@ const WRAP: CSSProperties = {
   gap: 8,
   padding: "12px 8px",
   justifyContent: "center",
+  textDecoration: "none",
 };
 const NAME: CSSProperties = {
   color: "#f7f9f8",

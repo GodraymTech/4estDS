@@ -9,6 +9,7 @@ import {
   GlobalOutlined,
   TableOutlined,
   RadarChartOutlined,
+  SwapOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import type { ComponentType } from "react";
@@ -20,6 +21,7 @@ import { useRole } from "../../shared/auth";
 const ICONS: Record<string, ComponentType> = {
   GlobalOutlined,
   DashboardOutlined,
+  SwapOutlined,
   TableOutlined,
   ThunderboltOutlined,
   FileTextOutlined,

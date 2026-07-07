@@ -8,29 +8,24 @@ import {
   Select,
   Space,
   Spin,
-  Switch,
   Tooltip,
   Typography,
 } from "antd";
 import {
   BorderOutlined,
   CalendarOutlined,
-  CompassOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
-  HomeOutlined,
   LineChartOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  MinusOutlined,
-  PlusOutlined,
   SearchOutlined,
   SwapOutlined,
 } from "@ant-design/icons";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
 import { MapStage } from "../shared/ui/MapStage";
 import {
-  BASEMAPS,
   ROAD_OVERLAY,
   basemapById,
   boundsOf,
@@ -56,7 +51,6 @@ import {
   type Tract,
   type TractSummary,
 } from "../entities/tract";
-import { pickLatestTwo, type Phase } from "../entities/phase";
 import { createTractMarkerElement } from "../features/overview/TractMarker";
 import { tractCenter } from "../features/overview/tractGeo";
 import {
@@ -68,8 +62,6 @@ import {
   formatLength,
   type MeasureMode,
 } from "../features/measure/measureModel";
-import { buildChangeMetrics, toHectares } from "../features/change-metrics/metrics";
-import { TemporalCompare } from "../features/temporal-wipe";
 
 const { Text } = Typography;
 
@@ -138,6 +130,7 @@ interface HoveredPlot {
 
 export function MapWorkspacePage() {
   const { tractId } = useParams();
+  const navigate = useNavigate();
   const { data: tracts, error: tractsError, isError: tractsFailed, isLoading } = useTracts();
   const [map, setMap] = useState<MapController | null>(null);
   const [ready, setReady] = useState(false);
@@ -147,8 +140,6 @@ export function MapWorkspacePage() {
   const [roadVisible, setRoadVisible] = useState(true);
   const [showDetections, setShowDetections] = useState(true);
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
-  const [compareMode, setCompareMode] = useState(false);
-  const [range, setRange] = useState<[number, number]>([0, 0]);
   const [zoom, setZoom] = useState(env.overviewZoom);
   const [searchOpen, setSearchOpen] = useState(false);
   const [measureMode, setMeasureMode] = useState<MeasureMode>("idle");
@@ -179,13 +170,7 @@ export function MapWorkspacePage() {
     [list, selectedId],
   );
   const selectedGroup = selected ? groupByTract.get(selected.tract_id) : undefined;
-  const phases = useMemo(
-    () => (selectedGroup ? toPhases(selectedGroup) : []),
-    [selectedGroup],
-  );
-  const activeTract = compareMode && selectedGroup
-    ? selectedGroup.tracts[range[1]] ?? selectedGroup.latest
-    : selected;
+  const activeTract = selected;
 
   const observations = useObservations(activeTract?.tract_id, "crown");
   const imagery = useTractImagery(activeTract?.tract_id);
@@ -202,18 +187,32 @@ export function MapWorkspacePage() {
   const missingCoords = Math.max(0, list.length - plotGroups.reduce((n, g) => n + g.tracts.length, 0));
 
   useEffect(() => {
-    if (tractId && list.some((t) => t.tract_id === tractId)) {
-      setSelectedId(tractId);
+    if (!tractId) {
+      if (selectedId) {
+        setSelectedId(undefined);
+        setMeasureMode("idle");
+        setMeasureCoords([]);
+        fittedTract.current = null;
+        if (map && ready) {
+          clearDetectionLayers(map, detectionLayerIds.current);
+          detectionLayerIds.current = [];
+          clearMeasureLayers(map);
+          map.removeRasterOverlay(IMAGERY_LAYER);
+          map.fitBounds(overviewBounds, OVERVIEW_FIT);
+        }
+      }
+      return;
     }
-  }, [tractId, list]);
+    if (list.some((t) => t.tract_id === tractId)) {
+      setSelectedId(tractId);
+    } else if (list.length > 0) {
+      navigate("/map", { replace: true });
+    }
+  }, [tractId, list, map, navigate, overviewBounds, ready, selectedId]);
 
   useEffect(() => {
     setSelectedSpecies(speciesList);
   }, [speciesList.join("|")]);
-
-  useEffect(() => {
-    if (selectedGroup) setRange(pickLatestTwo(toPhases(selectedGroup)));
-  }, [selectedGroup]);
 
   const syncMask = useCallback((ctl: MapController) => {
     ctl.removeLayer(MASK_LAYER);
@@ -380,15 +379,15 @@ export function MapWorkspacePage() {
 
   function selectGroup(group: PlotGroup) {
     setSelectedId(group.latest.tract_id);
-    setCompareMode(false);
     fittedTract.current = null;
+    navigate(`/map/${encodeURIComponent(group.latest.tract_id)}`);
     map?.flyTo(group.center, 15);
   }
 
   function selectPhaseTract(tract: Tract) {
     setSelectedId(tract.tract_id);
-    setCompareMode(false);
     fittedTract.current = null;
+    navigate(`/map/${encodeURIComponent(tract.tract_id)}`);
   }
 
   function selectSearch(key: string) {
@@ -400,8 +399,8 @@ export function MapWorkspacePage() {
     const place = GUANGDONG_PLACES.find((p) => "place:" + p.name === key);
     if (place) {
       setSelectedId(undefined);
-      setCompareMode(false);
       fittedTract.current = null;
+      navigate("/map");
       map?.flyTo(place.center, place.zoom);
     }
   }
@@ -412,8 +411,8 @@ export function MapWorkspacePage() {
   }
 
   function returnOverview() {
+    navigate("/map");
     setSelectedId(undefined);
-    setCompareMode(false);
     setMeasureMode("idle");
     setMeasureCoords([]);
     fittedTract.current = null;
@@ -438,20 +437,6 @@ export function MapWorkspacePage() {
         zoom={env.overviewZoom}
         onReady={onReady}
       />
-
-      {compareMode && selectedGroup && phases.length > 1 ? (
-        <TemporalCompare
-          phases={phases}
-          range={range}
-          onRangeChange={(v) => {
-            setRange(v);
-            const next = selectedGroup.tracts[v[1]];
-            if (next) setSelectedId(next.tract_id);
-          }}
-          center={selectedGroup.center}
-          zoom={Math.max(zoom, 15)}
-        />
-      ) : null}
 
       {chromeHidden ? (
         <button
@@ -506,11 +491,10 @@ export function MapWorkspacePage() {
           style={{
             ...COMPARE_FLOAT_BUTTON,
             left: searchOpen ? 234 : 60,
-            ...(compareMode ? COMPARE_FLOAT_BUTTON_ACTIVE : null),
             opacity: selectedGroup.tracts.length < 2 ? 0.54 : 1,
           }}
           disabled={selectedGroup.tracts.length < 2}
-          onClick={() => setCompareMode((v) => !v)}
+          onClick={() => navigate(`/change?location=${encodeURIComponent(selectedGroup.key)}`)}
         >
           <SwapOutlined />
           <span>时相对比</span>
@@ -518,26 +502,19 @@ export function MapWorkspacePage() {
       ) : null}
 
       {!chromeHidden ? (
-        <div style={TOP_TOOLBAR}>
-          <div style={LAYER_PANEL}>
-            <Select
-              size="small"
-              value={basemapId}
-              onChange={setBasemapId}
-              options={BASEMAPS.map((b) => ({ value: b.id, label: b.label }))}
-              style={BASEMAP_SELECT}
-            />
-            <Space size={8}>
-              <Text style={PANEL_TEXT}>路网</Text>
-              <Switch size="small" checked={roadVisible} onChange={setRoadVisible} />
-            </Space>
-          </div>
-
-          <div style={RIGHT_TOOLS}>
-            <ToolButton title="放大" icon={<PlusOutlined />} onClick={() => map?.zoomIn()} />
-            <div style={ZOOM_BADGE}>{zoom.toFixed(1)}</div>
-            <ToolButton title="缩小" icon={<MinusOutlined />} onClick={() => map?.zoomOut()} />
-            <ToolButton title="回到总观视野" icon={<HomeOutlined />} onClick={returnOverview} />
+        <MapFloatingToolbar
+          basemapId={basemapId}
+          onBasemapChange={setBasemapId}
+          roadVisible={roadVisible}
+          onRoadVisibleChange={setRoadVisible}
+          zoomLabel={zoom.toFixed(1)}
+          homeTitle="回到总观视野"
+          onZoomIn={() => map?.zoomIn()}
+          onZoomOut={() => map?.zoomOut()}
+          onHome={returnOverview}
+          onResetNorth={resetNorth}
+          extraActions={
+            <>
             <ToolButton
               title="测长度"
               active={measureMode === "distance"}
@@ -561,14 +538,9 @@ export function MapWorkspacePage() {
               icon={<MenuFoldOutlined />}
               onClick={() => setChromeHidden(true)}
             />
-          </div>
-        </div>
-      ) : null}
-
-      {!chromeHidden ? (
-        <div style={COMPASS_PANEL}>
-          <ToolButton title="指北" icon={<CompassOutlined />} onClick={resetNorth} />
-        </div>
+            </>
+          }
+        />
       ) : null}
 
       {!chromeHidden && measureMode !== "idle" ? (
@@ -589,19 +561,15 @@ export function MapWorkspacePage() {
       ) : null}
 
       {!chromeHidden && selectedGroup && activeTract ? (
-        compareMode ? (
-          <ChangeCompactCard phases={phases} range={range} />
-        ) : (
-          <ProfilePanel
-            tract={activeTract}
-            group={selectedGroup}
-            imagery={imagery.data}
-            summary={summary.data}
-            speciesColors={speciesColors}
-            onSelectPhase={selectPhaseTract}
-            loading={observations.isFetching || imagery.isFetching || summary.isFetching}
-          />
-        )
+        <ProfilePanel
+          tract={activeTract}
+          group={selectedGroup}
+          imagery={imagery.data}
+          summary={summary.data}
+          speciesColors={speciesColors}
+          onSelectPhase={selectPhaseTract}
+          loading={observations.isFetching || imagery.isFetching || summary.isFetching}
+        />
       ) : null}
 
       {!chromeHidden && !selectedGroup ? <OverviewProfileCard stats={overviewStats} /> : null}
@@ -738,14 +706,6 @@ function buildOverviewStats(tracts: Tract[], groups: PlotGroup[]) {
 
 function compareTractTime(a: Tract, b: Tract): number {
   return String(a.acquisition_time || "").localeCompare(String(b.acquisition_time || ""));
-}
-
-function toPhases(group: PlotGroup): Phase[] {
-  return group.tracts.map((tract) => ({
-    id: tract.tract_id,
-    label: group.label + " · " + (tract.acquisition_time || "未知时相"),
-    time: tract.acquisition_time || "",
-  }));
 }
 
 function extractSpecies(fc?: FeatureCollection): string[] {
@@ -1061,36 +1021,6 @@ function buildProfileMetricSections(
   return species.length <= 1 ? species : [total, ...species];
 }
 
-function ChangeCompactCard({ phases, range }: { phases: Phase[]; range: [number, number] }) {
-  const before = phases[range[0]];
-  const after = phases[range[1]];
-  const beforeObs = useObservations(before?.id, "crown");
-  const afterObs = useObservations(after?.id, "crown");
-  const metrics = useMemo(
-    () => buildChangeMetrics(beforeObs.data, afterObs.data),
-    [beforeObs.data, afterObs.data],
-  );
-  const loading = beforeObs.isFetching || afterObs.isFetching;
-  return (
-    <div style={PROFILE_PANEL}>
-      <div style={PANEL_HEAD}>
-        <span style={PANEL_TITLE}>变化量</span>
-        {loading ? <Spin size="small" /> : <SwapOutlined />}
-      </div>
-      <div style={CHANGE_GRID}>
-        <Kpi label="株数变化" value={signed(metrics.countDelta, "株")} accent={metrics.countDelta >= 0 ? "up" : "down"} />
-        <Kpi
-          label="冠幅变化"
-          value={signed(toHectares(metrics.areaDelta), "ha")}
-          accent={metrics.areaDelta >= 0 ? "up" : "down"}
-        />
-        <Kpi label="基准时相" value={before?.time || "-"} />
-        <Kpi label="目标时相" value={after?.time || "-"} />
-      </div>
-    </div>
-  );
-}
-
 function PlotHoverCard({ hovered }: { hovered: HoveredPlot }) {
   const { group, x, y } = hovered;
   const style: CSSProperties = { ...HOVER_CARD, left: x, top: y };
@@ -1113,24 +1043,6 @@ function PlotHoverCard({ hovered }: { hovered: HoveredPlot }) {
         <span>面积</span>
         <strong>{formatTractArea(group.latest)}</strong>
       </div>
-    </div>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: ReactNode;
-  accent?: "up" | "down";
-}) {
-  const color = accent === "up" ? "#18794e" : accent === "down" ? "#b42318" : undefined;
-  return (
-    <div style={KPI}>
-      <span style={KPI_LABEL}>{label}</span>
-      <span style={{ ...KPI_VALUE, color }}>{value}</span>
     </div>
   );
 }
@@ -1210,11 +1122,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function signed(value: number, unit: string): string {
-  const sign = value >= 0 ? "+" : "-";
-  return sign + Math.abs(value).toLocaleString() + " " + unit;
-}
-
 const FULL: CSSProperties = { width: "100%" };
 const ROOT: CSSProperties = { position: "relative", flex: 1, minHeight: 0 };
 const GLASS: CSSProperties = {
@@ -1274,59 +1181,6 @@ const COMPARE_FLOAT_BUTTON: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
-const COMPARE_FLOAT_BUTTON_ACTIVE: CSSProperties = {
-  color: "#ffffff",
-  background: "var(--color-primary)",
-};
-const TOP_TOOLBAR: CSSProperties = {
-  position: "absolute",
-  top: 12,
-  right: 64,
-  zIndex: 8,
-  maxWidth: "calc(100% - 370px)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "flex-end",
-  gap: 8,
-  overflowX: "auto",
-  scrollbarWidth: "none",
-};
-const LAYER_PANEL: CSSProperties = {
-  ...GLASS,
-  borderRadius: 14,
-  padding: "6px 8px",
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  flex: "0 0 auto",
-};
-const BASEMAP_SELECT: CSSProperties = { width: 76 };
-const PANEL_TEXT: CSSProperties = { fontSize: 12, color: "var(--glass-text)" };
-const RIGHT_TOOLS: CSSProperties = {
-  ...GLASS,
-  height: 42,
-  borderRadius: 15,
-  padding: 4,
-  display: "flex",
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 2,
-  flex: "0 0 auto",
-};
-const COMPASS_PANEL: CSSProperties = {
-  ...GLASS,
-  position: "absolute",
-  right: 12,
-  top: 12,
-  zIndex: 8,
-  width: 42,
-  height: 42,
-  borderRadius: 15,
-  padding: 3,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
 const TOOL_BUTTON: CSSProperties = {
   width: 34,
   height: 34,
@@ -1354,18 +1208,6 @@ const RESTORE_TRIGGER: CSSProperties = {
   color: "var(--glass-text)",
   fontWeight: 700,
   cursor: "pointer",
-};
-const ZOOM_BADGE: CSSProperties = {
-  width: 38,
-  height: 28,
-  borderRadius: 10,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontSize: 12,
-  fontVariantNumeric: "tabular-nums",
-  color: "var(--glass-text)",
-  background: "var(--glass-chip)",
 };
 const PROFILE_PANEL: CSSProperties = {
   ...GLASS,
@@ -1447,34 +1289,6 @@ const PROFILE_TITLE_GROUP: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 1,
-};
-const PROFILE_GRID: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 8,
-  marginBottom: 8,
-};
-const CHANGE_GRID: CSSProperties = { ...PROFILE_GRID, marginBottom: 0 };
-const KPI: CSSProperties = {
-  minWidth: 0,
-  padding: "7px 9px",
-  borderRadius: 12,
-  background: "var(--glass-chip)",
-};
-const KPI_LABEL: CSSProperties = {
-  display: "block",
-  color: "var(--glass-muted)",
-  fontSize: 12,
-  marginBottom: 2,
-};
-const KPI_VALUE: CSSProperties = {
-  display: "block",
-  color: "var(--glass-text)",
-  fontWeight: 700,
-  fontVariantNumeric: "tabular-nums",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
 };
 const PROFILE_PRIMARY_GRID: CSSProperties = {
   display: "grid",
