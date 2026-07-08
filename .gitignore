@@ -8,6 +8,9 @@ dist/
 .venv/
 venv/
 .uv/
+.env
+.env.*
+!.env.example
 
 # Test / type / lint caches
 .pytest_cache/

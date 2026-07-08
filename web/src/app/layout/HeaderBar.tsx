@@ -37,7 +37,7 @@ export function HeaderBar() {
 
   return (
     <div style={WRAP}>
-      <Text style={CONTEXT}>红树林生态监测与监管平台</Text>
+      <Text style={CONTEXT}>红树林生态资产监管平台</Text>
       <Space size={4}>
         <Dropdown menu={helpMenuProps} placement="bottomRight">
           <Button
@@ -75,5 +75,5 @@ const WRAP: CSSProperties = {
   height: "100%",
   paddingInline: 16,
 };
-const CONTEXT: CSSProperties = { color: "#c7e0d8", fontSize: 14 };
+const CONTEXT: CSSProperties = { color: "#c7e0d8", fontSize: 20 };
 const ACTION: CSSProperties = { color: "#edf1ef", fontSize: 18 };

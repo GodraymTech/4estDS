@@ -51,6 +51,25 @@ export async function apiPostJson<T>(path: string, body: unknown): Promise<T> {
   );
 }
 
+export async function apiPatchJson<T>(path: string, body: unknown): Promise<T> {
+  return parse<T>(
+    await fetch(`${env.apiBase}${path}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  return parse<T>(
+    await fetch(`${env.apiBase}${path}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    }),
+  );
+}
+
 /**
  * multipart 上传(带进度)。大 TIFF 上传需确定进度, fetch 不支持上传进度, 故用 XHR。
  * 字段名 "file" 与后端 UploadFile 参数对应。

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { Card, Empty, Select, Space, Spin, Typography } from "antd";
+import { Empty, Select, Space, Spin, Typography } from "antd";
 import { useSearchParams } from "react-router-dom";
 import { useTracts, type Tract } from "../entities/tract";
 import { pickLatestTwo, type Phase } from "../entities/phase";
@@ -14,6 +14,7 @@ import {
   type LngLat,
 } from "../shared/map-core";
 import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
+import { MapGlassPanel } from "../shared/ui/MapGlassPanel";
 import type { TemporalWipeApi } from "../shared/ui/TemporalWipe";
 
 const { Text } = Typography;
@@ -31,7 +32,7 @@ export function ChangePage() {
   const groups = useMemo(() => buildCompareGroups(tracts ?? []), [tracts]);
   const [tractId, setTractId] = useState<string | undefined>(undefined);
   const [basemapId, setBasemapId] = useState(env.defaultBasemapId);
-  const [roadVisible, setRoadVisible] = useState(true);
+  const [roadVisible, setRoadVisible] = useState(false);
   const [wipeApi, setWipeApi] = useState<TemporalWipeApi | null>(null);
 
   const active = useMemo(() => {
@@ -86,7 +87,7 @@ export function ChangePage() {
         </div>
       )}
 
-      <Card style={PANEL} styles={CARD_STYLES} title="时相对比">
+      <MapGlassPanel style={PANEL} title="时相对比">
         <Space direction="vertical" size={8} style={FULL}>
           <Select
             style={FULL}
@@ -98,7 +99,7 @@ export function ChangePage() {
           />
           <Text type="secondary">{active ? active.phases.length + " 个时相" : "无时相"}</Text>
         </Space>
-      </Card>
+      </MapGlassPanel>
 
       <MapFloatingToolbar
         basemapId={basemapId}
@@ -180,8 +181,5 @@ const PANEL: CSSProperties = {
   left: 16,
   width: 300,
   zIndex: 6,
-  boxShadow: "var(--shadow-2)",
 };
-const PANEL_BODY: CSSProperties = { paddingTop: 4 };
-const CARD_STYLES = { body: PANEL_BODY };
 const FULL: CSSProperties = { width: "100%" };

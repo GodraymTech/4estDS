@@ -1,6 +1,13 @@
-import { apiGet, apiGetText, apiPostJson, apiUpload, apiUrl } from "./client";
+import { apiDelete, apiGet, apiGetText, apiPatchJson, apiPostJson, apiUpload, apiUrl } from "./client";
 import type {
   FeatureCollection,
+  AssetInspectRequest,
+  AssetInspectResult,
+  AssetPatch,
+  AssetRow,
+  AssetTiffCreate,
+  GeoReverseResult,
+  GeoSearchResult,
   GeometryKind,
   InputInspectRequest,
   InputInspectResult,
@@ -22,6 +29,29 @@ import type {
 // 端点定义集中一处(DRY)。承接 v1.0 api.ts 的契约, 重构为 FSD shared 层。
 export const endpoints = {
   listTracts: (): Promise<Tract[]> => apiGet("/tracts"),
+
+  listAssets: (): Promise<AssetRow[]> => apiGet("/assets"),
+
+  inspectAssetImage: (body: AssetInspectRequest): Promise<AssetInspectResult> =>
+    apiPostJson("/assets/inspect-image", body),
+
+  searchGeo: (q: string, city = "广东", limit = 10): Promise<GeoSearchResult> =>
+    apiGet(`/geo/search?q=${encodeURIComponent(q)}&city=${encodeURIComponent(city)}&limit=${limit}`),
+
+  reverseGeo: (lng: number, lat: number): Promise<GeoReverseResult> =>
+    apiGet(`/geo/reverse?lng=${encodeURIComponent(lng)}&lat=${encodeURIComponent(lat)}`),
+
+  createAssetTiff: (body: AssetTiffCreate): Promise<AssetRow[]> =>
+    apiPostJson("/assets/tiffs", body),
+
+  patchAssetTract: (tractPk: string, body: AssetPatch): Promise<AssetRow[]> =>
+    apiPatchJson(`/assets/tracts/${encodeURIComponent(tractPk)}`, body),
+
+  patchAssetTiff: (phaseId: string, tiffId: string, body: AssetPatch): Promise<AssetRow[]> =>
+    apiPatchJson(`/assets/tiffs/${encodeURIComponent(phaseId)}/${encodeURIComponent(tiffId)}`, body),
+
+  deleteAssetTiff: (phaseId: string, tiffId: string, force = false): Promise<AssetRow[]> =>
+    apiDelete(`/assets/tiffs/${encodeURIComponent(phaseId)}/${encodeURIComponent(tiffId)}?force=${force ? "true" : "false"}`),
 
   getObservations: (
     tractId: string,

@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { Card, Spin, Tag } from "antd";
+import { Spin, Tag } from "antd";
 import type { Phase } from "../../entities/phase";
 import { useObservations } from "../../entities/observation";
+import { MapGlassPanel } from "../../shared/ui/MapGlassPanel";
 import { buildChangeMetrics, toHectares } from "./metrics";
 
 const UP = "#3e8e5a"; // 扩张(好)
@@ -31,7 +32,7 @@ export function ChangeMetricsPanel({
   const single = range[0] === range[1];
 
   return (
-    <Card style={PANEL} styles={CARD_STYLES} title="变化量化">
+    <MapGlassPanel style={PANEL} title="变化量化">
       {single ? (
         <div style={HINT}>选择两个不同时相以对比。</div>
       ) : loading ? (
@@ -57,6 +58,14 @@ export function ChangeMetricsPanel({
             unit="ha"
             deltaText={toHectares(Math.abs(m.areaDelta)).toLocaleString()}
           />
+          <Metric
+            label="死亡植株"
+            before={String(m.deadCountBefore)}
+            after={String(m.deadCountAfter)}
+            delta={m.deadCountDelta}
+            pct={null}
+            unit="株"
+          />
           <div style={FOOT}>
             <Tag color={m.areaDelta >= 0 ? "green" : "red"}>
               {m.areaDelta >= 0 ? "冠幅扩张" : "冠幅退化"}
@@ -65,7 +74,7 @@ export function ChangeMetricsPanel({
           </div>
         </div>
       )}
-    </Card>
+    </MapGlassPanel>
   );
 }
 
@@ -114,10 +123,7 @@ const PANEL: CSSProperties = {
   bottom: 16,
   width: 260,
   zIndex: 6,
-  boxShadow: "var(--shadow-2)",
 };
-const PANEL_BODY: CSSProperties = { paddingTop: 8 };
-const CARD_STYLES = { body: PANEL_BODY };
 const GRID: CSSProperties = {
   display: "flex",
   flexDirection: "column",

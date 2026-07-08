@@ -1,285 +1,407 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Key } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Empty, Input, Modal, Space, Table, Tag, Tree, Typography, message } from "antd";
+import { useNavigate } from "react-router-dom";
+import {
+  Alert,
+  Button,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Segmented,
+  Space,
+  Table,
+  Tag,
+  Tooltip,
+  Tree,
+  Typography,
+  message,
+} from "antd";
 import type { DataNode } from "antd/es/tree";
 import type { TableProps } from "antd";
 import {
-  ControlOutlined,
-  DownloadOutlined,
+  ApartmentOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
+  FileAddOutlined,
   FileSearchOutlined,
-  FileTextOutlined,
   FolderOpenOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
-import { useQuery } from "@tanstack/react-query";
-import { endpoints, queryKeys, type ArtifactNode, type JobHistoryItem } from "../../shared/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { endpoints, queryKeys, type ArtifactNode, type AssetRow } from "../../shared/api";
 
 const { Text } = Typography;
 
-// 监管台账: 面向 infer run 的成果陈设、预览与选择性导出。
+type ViewMode = "list" | "tree";
+type ModalMode = "create" | "edit" | null;
+
 export function LedgerTable() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const targetRun = searchParams.get("run_id") ?? undefined;
-  const { data = [], isLoading } = useQuery({
-    queryKey: queryKeys.jobs("infer"),
-    queryFn: () => endpoints.listJobs("infer", 120),
-    refetchInterval: 6000,
-  });
+  const queryClient = useQueryClient();
+  const [form] = Form.useForm();
   const [q, setQ] = useState("");
+  const [mode, setMode] = useState<ViewMode>("list");
+  const [modalMode, setModalMode] = useState<ModalMode>(null);
+  const [editing, setEditing] = useState<AssetRow | null>(null);
   const [expanded, setExpanded] = useState<readonly string[]>([]);
-  const [exportRun, setExportRun] = useState<string | undefined>(undefined);
+  const lastInspectedPath = useRef("");
 
-  useEffect(() => {
-    if (targetRun) setExpanded([targetRun]);
-  }, [targetRun]);
+  const assets = useQuery({
+    queryKey: queryKeys.assets,
+    queryFn: endpoints.listAssets,
+  });
+  const inspect = useMutation({
+    mutationFn: endpoints.inspectAssetImage,
+    onSuccess: (data) => {
+      form.setFieldsValue({
+        city: data.city,
+        county: data.county,
+        town: data.town,
+        tract_id: data.suggested_tract_id,
+        phase_id: data.suggested_phase_id,
+        image_name: data.image_name,
+      });
+        if (data.inspect_error) {
+        message.warning("路径无法读取，已保留可推断默认值");
+      } else if (data.geo_error) {
+        message.warning(data.geo_error);
+      } else {
+        message.success("已读取影像默认属性");
+      }
+    },
+    onError: (e) => message.error(e instanceof Error ? e.message : "影像检查失败"),
+  });
+
+  const createTiff = useMutation({
+    mutationFn: endpoints.createAssetTiff,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.assets });
+      setModalMode(null);
+      form.resetFields();
+      message.success("TIFF 已写入资产库");
+    },
+    onError: (e) => message.error(e instanceof Error ? e.message : "录入失败"),
+  });
+
+  const patchTract = useMutation({
+    mutationFn: ({ tractPk, values }: { tractPk: string; values: Record<string, unknown> }) =>
+      endpoints.patchAssetTract(tractPk, values),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.assets });
+      setModalMode(null);
+      setEditing(null);
+      message.success("资产信息已更新");
+    },
+    onError: (e) => message.error(e instanceof Error ? e.message : "更新失败"),
+  });
+
+  const patchTiff = useMutation({
+    mutationFn: ({ row, values }: { row: AssetRow; values: Record<string, unknown> }) =>
+      endpoints.patchAssetTiff(row.phase_id as string, row.tiff_id as string, values),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.assets });
+      setModalMode(null);
+      setEditing(null);
+      message.success("影像信息已更新");
+    },
+    onError: (e) => message.error(e instanceof Error ? e.message : "更新失败"),
+  });
+
+  const deleteTiff = useMutation({
+    mutationFn: ({ row, force }: { row: AssetRow; force: boolean }) =>
+      endpoints.deleteAssetTiff(row.phase_id as string, row.tiff_id as string, force),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.assets });
+      message.success("TIFF 已删除");
+    },
+    onError: (e, vars) => {
+      const msg = e instanceof Error ? e.message : "删除失败";
+      if (msg.includes("409") && !vars.force) {
+        Modal.confirm({
+          title: "确认删除已检测 TIFF",
+          content: msg + "。该操作不可恢复。",
+          okText: "确认删除",
+          okButtonProps: { danger: true },
+          cancelText: "取消",
+          onOk: () => deleteTiff.mutate({ row: vars.row, force: true }),
+        });
+        return;
+      }
+      message.error(msg);
+    },
+  });
 
   const rows = useMemo(() => {
     const kw = q.trim().toLowerCase();
+    const data = assets.data ?? [];
     if (!kw) return data;
     return data.filter((r) =>
-      [r.run_id, r.tract_id, r.input_path, r.model_arch]
+      [r.city, r.county, r.town, r.tract_id, r.phase_id, r.image_name, r.run_id, r.status, r.source_path]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(kw)),
     );
-  }, [data, q]);
+  }, [assets.data, q]);
 
-  const columns: TableProps<JobHistoryItem>["columns"] = [
-    {
-      title: "run_id",
-      dataIndex: "run_id",
-      key: "run_id",
-      width: 94,
-      render: (v: string) => <Text code>{v}</Text>,
-    },
-    {
-      title: "地块",
-      dataIndex: "tract_id",
-      key: "tract_id",
-      ellipsis: true,
-      render: (v?: string | null) => v || "-",
-    },
+  const inputPath = Form.useWatch("input_path", form);
+
+  useEffect(() => {
+    if (modalMode !== "create") return;
+    const value = String(inputPath || "").trim();
+    if (!value || value.length < 3 || value === lastInspectedPath.current) return;
+    const timer = window.setTimeout(() => {
+      lastInspectedPath.current = value;
+      inspect.mutate({ input_path: value });
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [inputPath, inspect, modalMode]);
+
+  const columns: TableProps<AssetRow>["columns"] = [
+    { title: "市", dataIndex: "city", key: "city", width: 92, render: empty },
+    { title: "县", dataIndex: "county", key: "county", width: 106, render: empty },
+    { title: "地块", dataIndex: "tract_id", key: "tract_id", width: 120, ellipsis: true, render: empty },
+    { title: "时相", dataIndex: "phase_id", key: "phase_id", width: 96, render: empty },
+    { title: "影像名", dataIndex: "image_name", key: "image_name", ellipsis: true, render: empty },
+    { title: "运行ID", dataIndex: "run_id", key: "run_id", width: 86, render: (v?: string | null) => (v ? <Text code>{v}</Text> : "") },
+    { title: "状态", dataIndex: "status", key: "status", width: 96, render: statusTag },
     {
       title: "面积",
       dataIndex: "geo_area",
       key: "geo_area",
-      width: 120,
+      width: 112,
       align: "right",
-      render: (v: number | null | undefined, r: JobHistoryItem) => formatArea(v, r.area_unit),
-      sorter: (a, b) => (a.geo_area ?? 0) - (b.geo_area ?? 0),
+      render: (v?: number | null, r?: AssetRow) => (typeof v === "number" ? formatArea(v, r?.area_unit) : ""),
     },
     {
-      title: "检测株数",
+      title: "株数",
       dataIndex: "observation_count",
       key: "observation_count",
-      width: 110,
+      width: 86,
       align: "right",
-      render: (v: number) => v.toLocaleString(),
-      sorter: (a, b) => a.observation_count - b.observation_count,
+      render: (v?: number) => (v ? v.toLocaleString() : ""),
     },
-    {
-      title: "状态",
-      dataIndex: "status",
-      key: "status",
-      width: 92,
-      render: (v: JobHistoryItem["status"]) => (
-        <Tag color={v === "succeeded" ? "success" : v === "failed" ? "error" : "processing"}>
-          {v === "succeeded" ? "已完成" : v === "failed" ? "失败" : "运行中"}
-        </Tag>
-      ),
-    },
-    {
-      title: "开始时间",
-      dataIndex: "started_at",
-      key: "started_at",
-      width: 184,
-      render: (v?: string | null) => (v ? new Date(v).toLocaleString() : "-"),
-    },
+    { title: "检测时间", dataIndex: "detected_at", key: "detected_at", width: 170, render: formatTime },
     {
       title: "操作",
       key: "actions",
-      width: 280,
-      render: (_: unknown, r) => (
-        <Space size={4}>
-          <Button
-            size="small"
-            type="link"
-            icon={<ControlOutlined />}
-            disabled={!r.tract_id}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (r.tract_id) navigate(`/map/${encodeURIComponent(r.tract_id)}`);
-            }}
-          >
-            操作台
+      width: 230,
+      render: (_: unknown, row) => (
+        <Space size={2}>
+          <Tooltip title="地块视野">
+            <Button type="link" size="small" icon={<EyeOutlined />} disabled={!row.tract_id} onClick={() => openMap(row)}>
+              操作台
+            </Button>
+          </Tooltip>
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
+            编辑
           </Button>
-          <Button
-            size="small"
-            type="link"
-            icon={<FileTextOutlined />}
-            disabled={!r.tract_id}
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/reports?run_id=${encodeURIComponent(r.run_id)}`);
-            }}
-          >
-            报告
-          </Button>
-          <Button
-            size="small"
-            type="link"
-            icon={<DownloadOutlined />}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (exportRun === r.run_id) {
-                setExportRun(undefined);
-              } else {
-                setExpanded((old) => (old.includes(r.run_id) ? old : [...old, r.run_id]));
-                setExportRun(r.run_id);
-              }
-            }}
-          >
-            选择导出
-          </Button>
+          {row.tiff_id && row.phase_id ? (
+            <Popconfirm
+              title="删除 TIFF"
+              description={row.status === "已检测" ? "该 TIFF 已检测，下一步会要求危险确认。" : "确认删除该未检测 TIFF？"}
+              okText="删除"
+              cancelText="取消"
+              onConfirm={() => deleteTiff.mutate({ row, force: false })}
+            >
+              <Button danger type="link" size="small" icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          ) : null}
         </Space>
       ),
     },
   ];
 
+  function openMap(row: AssetRow) {
+    if (!row.tract_id) return;
+    const params = new URLSearchParams();
+    if (row.phase_id) params.set("phase_id", row.phase_id);
+    if (row.tiff_id) params.set("tiff_id", row.tiff_id);
+    const suffix = params.toString() ? "?" + params.toString() : "";
+    navigate(`/map/${encodeURIComponent(row.tract_id)}${suffix}`);
+  }
+
+  function openCreate() {
+    setEditing(null);
+    setModalMode("create");
+    form.resetFields();
+  }
+
+  function openEdit(row: AssetRow) {
+    setEditing(row);
+    setModalMode("edit");
+    form.setFieldsValue({
+      city: row.city,
+      county: row.county,
+      town: row.town,
+      tract_id: row.tract_id,
+      phase_id: row.phase_id,
+      image_name: row.image_name,
+      new_path: row.source_path,
+    });
+  }
+
+  async function submitModal() {
+    const values = await form.validateFields();
+    if (modalMode === "create") {
+      createTiff.mutate(values);
+      return;
+    }
+    if (!editing) return;
+    if (editing.tract_pk) {
+      patchTract.mutate({ tractPk: editing.tract_pk, values });
+    }
+    if (editing.tiff_id && editing.phase_id) {
+      patchTiff.mutate({ row: editing, values });
+    }
+  }
+
   return (
     <Space direction="vertical" size={12} style={FULL}>
-      <Input.Search
-        placeholder="搜索 run_id / 地块 / 输入路径 / 模型"
-        allowClear
-        onChange={(e) => setQ(e.target.value)}
-        style={SEARCH}
-      />
-      <Table<JobHistoryItem>
-        rowKey="run_id"
-        size="small"
-        loading={isLoading}
-        columns={columns}
-        dataSource={rows}
-        pagination={PAGINATION}
-        onRow={(r) => ({
-          onClick: () => {
-            setExpanded((old) => {
-              const closing = old.includes(r.run_id);
-              if (closing && exportRun === r.run_id) setExportRun(undefined);
-              return closing ? old.filter((id) => id !== r.run_id) : [...old, r.run_id];
-            });
-          },
-        })}
-        expandable={{
-          expandedRowKeys: expanded,
-          onExpandedRowsChange: (keys) => setExpanded(keys.map(String)),
-          expandedRowRender: (r) => (
-            <RunArtifacts
-              runId={r.run_id}
-              exportMode={exportRun === r.run_id}
-              onCloseExport={() => setExportRun(undefined)}
-            />
-          ),
-        }}
-      />
+      <div style={TOOL_ROW}>
+        <Input.Search
+          placeholder="搜索市 / 县 / 乡镇 / 地块 / 时相 / 影像 / 运行"
+          allowClear
+          onChange={(e) => setQ(e.target.value)}
+          style={SEARCH}
+        />
+        <Space wrap size={8}>
+          <Segmented
+            value={mode}
+            onChange={(v) => setMode(v as ViewMode)}
+            options={[
+              { label: "列表展示", value: "list", icon: <DatabaseOutlined /> },
+              { label: "树状展示", value: "tree", icon: <ApartmentOutlined /> },
+            ]}
+          />
+          <Button icon={<FileAddOutlined />} type="primary" onClick={openCreate}>
+            录入 TIFF
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.assets })}>
+            刷新
+          </Button>
+        </Space>
+      </div>
+
+      {mode === "list" ? (
+        <Table<AssetRow>
+          rowKey={rowKey}
+          size="small"
+          loading={assets.isLoading}
+          columns={columns}
+          dataSource={rows}
+          pagination={PAGINATION}
+          expandable={{
+            expandedRowKeys: expanded,
+            onExpandedRowsChange: (keys) => setExpanded(keys.map(String)),
+            rowExpandable: (row) => Boolean(row.run_id),
+            expandedRowRender: (row) => (row.run_id ? <RunArtifacts runId={row.run_id} /> : null),
+          }}
+        />
+      ) : (
+        <div style={TREE_PANEL}>
+          {rows.length ? <Tree showLine defaultExpandAll treeData={buildAssetTree(rows, openMap, openEdit)} /> : <Empty description="暂无资产" />}
+        </div>
+      )}
+
+      <Modal
+        open={Boolean(modalMode)}
+        title={modalMode === "create" ? "录入 TIFF" : "编辑资产"}
+        onCancel={() => setModalMode(null)}
+        onOk={submitModal}
+        confirmLoading={createTiff.isPending || patchTract.isPending || patchTiff.isPending}
+        width={760}
+        destroyOnHidden
+      >
+        <Form form={form} layout="vertical">
+          {modalMode === "create" ? (
+            <>
+              <Form.Item name="input_path" label="TIFF 路径" rules={[{ required: true, message: "请输入 TIFF 路径" }]}>
+                <Input.Search
+                  placeholder="输入本机 TIFF 路径"
+                  enterButton="读取属性"
+                  loading={inspect.isPending}
+                  onSearch={(value) => {
+                    const trimmed = value.trim();
+                    if (!trimmed) return;
+                    lastInspectedPath.current = trimmed;
+                    inspect.mutate({ input_path: trimmed });
+                  }}
+                />
+              </Form.Item>
+              {inspect.data ? (
+                <div style={INSPECT_PANEL}>
+                  <div><Text type="secondary">规范路径：</Text><Text code>{inspect.data.normalized_path || "-"}</Text></div>
+                  <div><Text type="secondary">读取状态：</Text>{inspect.data.inspect_error ? <Text type="danger">{inspect.data.inspect_error}</Text> : <Text type="success">可读取</Text>}</div>
+                </div>
+              ) : null}
+              <Alert type="info" showIcon message="确认后会写入地块、时相和 TIFF 表；未检测影像也会出现在资产库。" style={ALERT} />
+            </>
+          ) : null}
+          <div style={FORM_GRID}>
+            <Form.Item name="city" label="市">
+              <Input placeholder="默认识别市" />
+            </Form.Item>
+            <Form.Item name="county" label="县 / 区">
+              <Input placeholder="默认识别县/区" />
+            </Form.Item>
+            <Form.Item name="town" label="乡镇">
+              <Input placeholder="默认识别乡镇" />
+            </Form.Item>
+            <Form.Item name="tract_id" label="地块名">
+              <Input placeholder="默认使用影像文件名" />
+            </Form.Item>
+            <Form.Item name="phase_id" label="时相">
+              <Input placeholder="YYYYMMDD" />
+            </Form.Item>
+            <Form.Item name="image_name" label="影像名">
+              <Input placeholder="默认使用文件名" />
+            </Form.Item>
+            {modalMode === "edit" ? (
+              <Form.Item name="new_path" label="新路径">
+                <Input placeholder="追加到路径版本" />
+              </Form.Item>
+            ) : null}
+          </div>
+        </Form>
+      </Modal>
     </Space>
   );
 }
 
-function RunArtifacts({
-  runId,
-  exportMode,
-  onCloseExport,
-}: {
-  runId: string;
-  exportMode: boolean;
-  onCloseExport: () => void;
-}) {
+function RunArtifacts({ runId }: { runId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ["artifacts", runId],
     queryFn: () => endpoints.getArtifacts(runId),
   });
-  const [checked, setChecked] = useState<Key[]>([]);
-  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [preview, setPreview] = useState<ArtifactNode | null>(null);
-  const [exportPath, setExportPath] = useState("");
-
-  const treeData = useMemo(() => toTreeData(data?.tree ?? [], exportMode, setPreview), [data?.tree, exportMode]);
-  const allKeys = useMemo(() => collectKeys(data?.tree ?? []), [data?.tree]);
-  const topKeys = useMemo(() => (data?.tree ?? []).map((n) => n.path), [data?.tree]);
-
-  useEffect(() => {
-    if (exportMode) {
-      setChecked(allKeys);
-      setExpandedKeys(allKeys);
-    } else {
-      setExpandedKeys(topKeys);
-    }
-  }, [exportMode, allKeys.join("|"), topKeys.join("|")]);
-
-  async function runExport() {
-    try {
-      const selected = checked.map(String);
-      const res = await endpoints.exportArtifacts(runId, selected);
-      window.location.href = endpoints.downloadArtifactUrl(res.url);
-      message.success(exportPath.trim() ? "已打包，浏览器将下载；自定义位置请在保存对话框中选择。" : "已打包，浏览器将下载。");
-      onCloseExport();
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : "导出失败");
-    }
-  }
-
+  const treeData = useMemo(() => toTreeData(data?.tree ?? [], setPreview), [data?.tree]);
   if (isLoading) return <div style={ARTIFACT_PANEL}>正在读取成果目录...</div>;
   if (!data?.available) return <Empty description="未找到运行成果目录" />;
-
   return (
     <div style={ARTIFACT_PANEL}>
       <div style={RUN_DIR_LINE}>
         <FolderOpenOutlined />
         <Text type="secondary" ellipsis>{data.run_dir}</Text>
       </div>
-      <Tree
-        showLine
-        checkable={exportMode}
-        checkedKeys={checked}
-        expandedKeys={expandedKeys}
-        onExpand={(keys) => setExpandedKeys(keys)}
-        onCheck={(keys) => setChecked(Array.isArray(keys) ? keys : keys.checked)}
-        treeData={treeData}
-      />
-      {exportMode ? (
-        <div style={EXPORT_BAR}>
-          <Input
-            value={exportPath}
-            onChange={(e) => setExportPath(e.target.value)}
-            placeholder="默认全量导出至桌面'forestDS'文件夹"
-          />
-          <Button onClick={() => message.info("Web 版使用浏览器保存位置；桌面版文件夹选择后续接入。")}>
-            选择位置
-          </Button>
-          <Button type="primary" icon={<DownloadOutlined />} onClick={runExport}>
-            执行导出
-          </Button>
-        </div>
-      ) : null}
+      <Tree showLine treeData={treeData} />
       <PreviewModal runId={runId} node={preview} onClose={() => setPreview(null)} />
     </div>
   );
 }
 
-function toTreeData(
-  nodes: ArtifactNode[],
-  exportMode: boolean,
-  setPreview: (node: ArtifactNode) => void,
-): DataNode[] {
+function toTreeData(nodes: ArtifactNode[], setPreview: (node: ArtifactNode) => void): DataNode[] {
   return nodes.map((n) => ({
     key: n.path,
     title: (
       <span>
         {n.description ? <Text strong>{n.name}</Text> : n.name}
         {n.description ? <Text type="secondary"> - {n.description}</Text> : null}
-        {!exportMode && n.type === "file" ? (
+        {n.type === "file" ? (
           <Button
             size="small"
             type="link"
@@ -295,12 +417,8 @@ function toTreeData(
         ) : null}
       </span>
     ),
-    children: n.children ? toTreeData(n.children, exportMode, setPreview) : undefined,
+    children: n.children ? toTreeData(n.children, setPreview) : undefined,
   }));
-}
-
-function collectKeys(nodes: ArtifactNode[]): string[] {
-  return nodes.flatMap((n) => [n.path, ...collectKeys(n.children ?? [])]);
 }
 
 function PreviewModal({ runId, node, onClose }: { runId: string; node: ArtifactNode | null; onClose: () => void }) {
@@ -312,40 +430,130 @@ function PreviewModal({ runId, node, onClose }: { runId: string; node: ArtifactN
     <Modal open={Boolean(node)} title={node?.name} onCancel={onClose} footer={null} width={920}>
       {!node ? null : image ? (
         <img src={url} alt={node.name} style={PREVIEW_IMAGE} />
-      ) : text ? (
-        <iframe src={url} title={node.name} style={PREVIEW_FRAME} />
-      ) : suffix === "pdf" ? (
+      ) : text || suffix === "pdf" ? (
         <iframe src={url} title={node.name} style={PREVIEW_FRAME} />
       ) : (
-        <Empty description="该文件类型不支持浏览器预览，请使用选择导出。" />
+        <Empty description="该文件类型不支持浏览器预览" />
       )}
     </Modal>
   );
 }
 
+function buildAssetTree(rows: AssetRow[], openMap: (row: AssetRow) => void, openEdit: (row: AssetRow) => void): DataNode[] {
+  const root = new Map<string, Map<string, Map<string, Map<string, AssetRow[]>>>>();
+  for (const row of rows) {
+    const city = row.city || "未知";
+    const county = row.county || "未知";
+    const tract = row.tract_id || "未知";
+    const phase = row.phase_id || "未知";
+    const counties = root.get(city) ?? new Map();
+    const tracts = counties.get(county) ?? new Map();
+    const phases = tracts.get(tract) ?? new Map();
+    const leaves = phases.get(phase) ?? [];
+    leaves.push(row);
+    phases.set(phase, leaves);
+    tracts.set(tract, phases);
+    counties.set(county, tracts);
+    root.set(city, counties);
+  }
+  return [...root.entries()].map(([city, counties]) => ({
+    key: "city:" + city,
+    title: city,
+    children: [...counties.entries()].map(([county, tracts]) => ({
+      key: "county:" + city + ":" + county,
+      title: county,
+      children: [...tracts.entries()].map(([tract, phases]) => ({
+        key: "tract:" + city + ":" + county + ":" + tract,
+        title: tract,
+        children: [...phases.entries()].map(([phase, leaves]) => ({
+          key: "phase:" + city + ":" + county + ":" + tract + ":" + phase,
+          title: phase,
+          children: leaves.map((row) => ({
+            key: rowKey(row),
+            title: <TreeLeaf row={row} openMap={openMap} openEdit={openEdit} />,
+          })),
+        })),
+      })),
+    })),
+  }));
+}
+
+function TreeLeaf({ row, openMap, openEdit }: { row: AssetRow; openMap: (row: AssetRow) => void; openEdit: (row: AssetRow) => void }) {
+  return (
+    <Space size={8} wrap>
+      <Text>{row.image_name || row.tiff_id || "未知影像"}</Text>
+      {statusTag(row.status)}
+      {row.run_id ? <Text code>{row.run_id}</Text> : null}
+      <Text type="secondary">{row.observation_count ? row.observation_count.toLocaleString() + " 株" : ""}</Text>
+      <Button size="small" type="link" icon={<EyeOutlined />} onClick={(e) => { e.stopPropagation(); openMap(row); }}>
+        地块视野
+      </Button>
+      <Button size="small" type="link" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); openEdit(row); }}>
+        编辑
+      </Button>
+    </Space>
+  );
+}
+
+function empty(value?: string | null) {
+  return value || "";
+}
+
+function rowKey(row: AssetRow): string {
+  return [row.city, row.county, row.tract_id, row.phase_id, row.tiff_id, row.run_id].filter(Boolean).join(":");
+}
+
+function statusTag(value: string) {
+  const color = value === "已检测" ? "success" : value === "检测失败" ? "error" : value === "检测中" ? "processing" : "default";
+  return <Tag color={color}>{value || "未检测"}</Tag>;
+}
+
+function formatArea(value?: number | null, unit?: string | null) {
+  if (typeof value !== "number") return "";
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2 }) + (unit ? ` ${unit}` : " m²");
+}
+
+function formatTime(value?: string | null) {
+  return value ? new Date(value).toLocaleString() : "";
+}
+
 const FULL: CSSProperties = { width: "100%" };
-const SEARCH: CSSProperties = { maxWidth: 360 };
-const PAGINATION = { pageSize: 10, showSizeChanger: false } as const;
+const TOOL_ROW: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap",
+};
+const SEARCH: CSSProperties = { width: "min(480px, 100%)" };
+const PAGINATION = { pageSize: 12, showSizeChanger: false } as const;
+const TREE_PANEL: CSSProperties = {
+  border: "1px solid var(--color-border)",
+  borderRadius: 8,
+  padding: 12,
+  background: "var(--color-surface)",
+};
+const ALERT: CSSProperties = { marginBottom: 12 };
+const INSPECT_PANEL: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  marginTop: -6,
+  marginBottom: 12,
+  padding: 10,
+  border: "1px solid var(--color-border)",
+  borderRadius: 6,
+  background: "color-mix(in srgb, var(--color-surface) 86%, var(--color-bg))",
+  fontSize: 12,
+};
+const FORM_GRID: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: "0 12px",
+};
 const ARTIFACT_PANEL: CSSProperties = {
   padding: 12,
   background: "color-mix(in srgb, var(--color-surface) 90%, var(--color-bg))",
 };
-const RUN_DIR_LINE: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  marginBottom: 8,
-};
-const EXPORT_BAR: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto auto",
-  gap: 8,
-  marginTop: 12,
-};
+const RUN_DIR_LINE: CSSProperties = { display: "flex", gap: 8, alignItems: "center", marginBottom: 8 };
 const PREVIEW_IMAGE: CSSProperties = { maxWidth: "100%", maxHeight: "70vh", display: "block", margin: "0 auto" };
 const PREVIEW_FRAME: CSSProperties = { width: "100%", height: "70vh", border: "1px solid var(--color-border)" };
-
-function formatArea(value?: number | null, unit?: string | null) {
-  if (typeof value !== "number") return "-";
-  return value.toLocaleString(undefined, { maximumFractionDigits: 2 }) + (unit ? ` ${unit}` : "");
-}

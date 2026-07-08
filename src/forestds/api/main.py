@@ -6,17 +6,34 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __codename__, __version__
-from .routers import health, jobs, tiles, tracts, uploads
+from .routers import assets, geo, health, jobs, tiles, tracts, uploads
 
 API_PREFIX = "/api/v1"
 
 
+def _load_local_env() -> None:
+    candidates = (Path.cwd() / ".env", Path(__file__).resolve().parents[3] / ".env")
+    env_path = next((path for path in candidates if path.exists()), None)
+    if env_path is None:
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
+
+
 def create_app() -> FastAPI:
+    _load_local_env()
     app = FastAPI(
         title=f"{__codename__} API",
         version=__version__,
@@ -40,6 +57,8 @@ def create_app() -> FastAPI:
     app.include_router(uploads.router, prefix=API_PREFIX)
     app.include_router(jobs.router, prefix=API_PREFIX)
     app.include_router(tracts.router, prefix=API_PREFIX)
+    app.include_router(assets.router, prefix=API_PREFIX)
+    app.include_router(geo.router, prefix=API_PREFIX)
     app.include_router(tiles.router, prefix=API_PREFIX)
     return app
 

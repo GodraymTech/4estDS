@@ -3,6 +3,9 @@ export interface Tract {
   tract_phase_pk?: string;
   phase_id?: string;
   region_id?: string;
+  city?: string | null;
+  county?: string | null;
+  town?: string | null;
   tract_id: string;
   geo_area?: number;
   area_unit?: string;
@@ -140,7 +143,102 @@ export interface InputInspectResult {
   images: InputInspectImage[];
 }
 
+export interface AssetRow {
+  city?: string | null;
+  county?: string | null;
+  town?: string | null;
+  region_id?: string | null;
+  tract_pk?: string | null;
+  tract_id?: string | null;
+  tract_phase_pk?: string | null;
+  phase_id?: string | null;
+  tiff_id?: string | null;
+  image_name?: string | null;
+  source_path?: string | null;
+  run_id?: string | null;
+  status: string;
+  geo_area?: number | null;
+  area_unit?: string | null;
+  observation_count: number;
+  detected_at?: string | null;
+}
+
+export interface AssetInspectRequest {
+  input_path?: string;
+  lng?: number;
+  lat?: number;
+}
+
+export interface AssetInspectResult {
+  input_path?: string | null;
+  normalized_path?: string | null;
+  exists: boolean;
+  inspect_error?: string | null;
+  image_name?: string | null;
+  suggested_tract_id?: string | null;
+  suggested_phase_id?: string | null;
+  city?: string | null;
+  county?: string | null;
+  town?: string | null;
+  region_id?: string | null;
+  lng?: number | null;
+  lat?: number | null;
+  width?: number | null;
+  height?: number | null;
+  crs_epsg?: number | null;
+  geo_error?: string | null;
+}
+
+export interface AssetTiffCreate {
+  input_path: string;
+  city?: string | null;
+  county?: string | null;
+  town?: string | null;
+  tract_id?: string | null;
+  phase_id?: string | null;
+  image_name?: string | null;
+}
+
+export interface AssetPatch {
+  city?: string | null;
+  county?: string | null;
+  town?: string | null;
+  tract_id?: string | null;
+  phase_id?: string | null;
+  image_name?: string | null;
+  new_path?: string | null;
+}
+
 export type GeometryKind = "point" | "crown";
+
+export interface GeoPlace {
+  id: string;
+  name: string;
+  address?: string | null;
+  city?: string | null;
+  county?: string | null;
+  town?: string | null;
+  adcode?: string | null;
+  lng: number;
+  lat: number;
+  source: string;
+}
+
+export interface GeoSearchResult {
+  query: string;
+  places: GeoPlace[];
+}
+
+export interface GeoReverseResult {
+  lng: number;
+  lat: number;
+  city: string;
+  county: string;
+  town: string;
+  region_id: string;
+  formatted_address?: string | null;
+  adcode?: string | null;
+}
 
 export interface GeoFeature {
   type: "Feature";

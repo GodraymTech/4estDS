@@ -205,3 +205,100 @@ class ChangeCompareOut(BaseModel):
     base_crown_area: Optional[float] = None
     target_crown_area: Optional[float] = None
     delta_crown_area: Optional[float] = None
+
+
+class AssetInspectRequest(BaseModel):
+    input_path: Optional[str] = None
+    lng: Optional[float] = None
+    lat: Optional[float] = None
+
+
+class AssetInspectOut(BaseModel):
+    input_path: Optional[str] = None
+    normalized_path: Optional[str] = None
+    exists: bool = False
+    inspect_error: Optional[str] = None
+    image_name: Optional[str] = None
+    suggested_tract_id: Optional[str] = None
+    suggested_phase_id: Optional[str] = None
+    city: Optional[str] = None
+    county: Optional[str] = None
+    town: Optional[str] = None
+    region_id: Optional[str] = None
+    lng: Optional[float] = None
+    lat: Optional[float] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    crs_epsg: Optional[int] = None
+    geo_error: Optional[str] = None
+
+
+class AssetTiffCreate(BaseModel):
+    input_path: str
+    city: Optional[str] = None
+    county: Optional[str] = None
+    town: Optional[str] = None
+    tract_id: Optional[str] = None
+    phase_id: Optional[str] = None
+    image_name: Optional[str] = None
+
+
+class AssetPatch(BaseModel):
+    city: Optional[str] = None
+    county: Optional[str] = None
+    town: Optional[str] = None
+    tract_id: Optional[str] = None
+    phase_id: Optional[str] = None
+    image_name: Optional[str] = None
+    new_path: Optional[str] = None
+
+
+class AssetRow(BaseModel):
+    model_config = {"extra": "allow"}
+
+    city: Optional[str] = None
+    county: Optional[str] = None
+    town: Optional[str] = None
+    region_id: Optional[str] = None
+    tract_pk: Optional[str] = None
+    tract_id: Optional[str] = None
+    tract_phase_pk: Optional[str] = None
+    phase_id: Optional[str] = None
+    tiff_id: Optional[str] = None
+    image_name: Optional[str] = None
+    source_path: Optional[str] = None
+    run_id: Optional[str] = None
+    status: str = "未检测"
+    geo_area: Optional[float] = None
+    area_unit: Optional[str] = None
+    observation_count: int = 0
+    detected_at: Optional[str] = None
+
+
+class GeoPlaceOut(BaseModel):
+    id: str
+    name: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    county: Optional[str] = None
+    town: Optional[str] = None
+    adcode: Optional[str] = None
+    lng: float
+    lat: float
+    source: str
+
+
+class GeoSearchOut(BaseModel):
+    query: str
+    places: list[GeoPlaceOut] = Field(default_factory=list)
+
+
+class GeoReverseOut(BaseModel):
+    lng: float
+    lat: float
+    city: str
+    county: str
+    town: str
+    region_id: str
+    formatted_address: Optional[str] = None
+    adcode: Optional[str] = None

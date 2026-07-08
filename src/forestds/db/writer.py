@@ -12,6 +12,15 @@ from typing import Any
 
 from loguru import logger as log
 
+from ..geo_admin import (
+    UNKNOWN_CITY,
+    UNKNOWN_COUNTY,
+    UNKNOWN_TOWN,
+    normalize_city,
+    normalize_county,
+    region_id as format_region_id,
+    split_region_id,
+)
 from .schema import init_db, resolve_db_path
 
 _REGION_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]+)_([\u4e00-\u9fffA-Za-z0-9]+)")
@@ -70,8 +79,26 @@ def _infer_region_id(*texts: str | None) -> str:
             continue
         match = _REGION_RE.search(str(text))
         if match:
-            return f"{match.group(1)}_{match.group(2)}"
-    return "unknown_unknown"
+            return format_region_id(match.group(1), match.group(2))
+    return format_region_id(UNKNOWN_CITY, UNKNOWN_COUNTY)
+
+
+def _resolve_admin(
+    *,
+    region_id: str | None,
+    city: str | None,
+    county: str | None,
+    town: str | None,
+    tract_id: str | None,
+    image_path: str | None,
+) -> tuple[str, str, str, str]:
+    split_city, split_county = split_region_id(region_id) if region_id else (None, None)
+    resolved_city = normalize_city(city or split_city or UNKNOWN_CITY)
+    resolved_county = normalize_county(county or split_county or UNKNOWN_COUNTY)
+    resolved_town = (town or UNKNOWN_TOWN).strip() or UNKNOWN_TOWN
+    if resolved_county == UNKNOWN_COUNTY and region_id:
+        _city, resolved_county = split_region_id(region_id)
+    return format_region_id(resolved_city, resolved_county), resolved_city, resolved_county, resolved_town
 
 
 def _path_version(path: str | None) -> str:
@@ -282,6 +309,9 @@ def ensure_tract(
     *,
     url: str | None = None,
     region_id: str | None = None,
+    city: str | None = None,
+    county: str | None = None,
+    town: str | None = None,
     pixel_w: int | None = None,
     pixel_h: int | None = None,
     gsd: float | None = None,
@@ -299,7 +329,14 @@ def ensure_tract(
         tract_id = f"tract_{uuid.uuid4().hex[:5]}"
     else:
         tract_id = resolved_tract_id
-    resolved_region_id = region_id or _infer_region_id(tract_id, image_path)
+    resolved_region_id, city, county, town = _resolve_admin(
+        region_id=region_id,
+        city=city,
+        county=county,
+        town=town,
+        tract_id=tract_id,
+        image_path=image_path,
+    )
     tract_pk = _safe_pk("tract", resolved_region_id, tract_id)
     tract_phase_pk = _safe_pk("phase", tract_pk, phase_id)
     now = _now()
@@ -308,12 +345,16 @@ def ensure_tract(
     try:
         conn.execute(
             "INSERT INTO tracts "
-            "(tract_pk, region_id, tract_id, boundary_geom, boundary_source, coverage_status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(tract_pk) DO UPDATE SET updated_at=excluded.updated_at",
+            "(tract_pk, region_id, city, county, town, tract_id, boundary_geom, boundary_source, coverage_status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(tract_pk) DO UPDATE SET region_id=excluded.region_id, city=excluded.city, county=excluded.county, "
+            "town=excluded.town, updated_at=excluded.updated_at",
             (
                 tract_pk,
                 resolved_region_id,
+                city,
+                county,
+                town,
                 tract_id,
                 boundary_geom,
                 "manual" if boundary_geom else "unset",
@@ -324,13 +365,17 @@ def ensure_tract(
         )
         conn.execute(
             "INSERT INTO tract_phases "
-            "(tract_phase_pk, tract_pk, region_id, tract_id, phase_id, boundary_geom, coverage_status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(tract_pk, phase_id) DO UPDATE SET updated_at=excluded.updated_at",
+            "(tract_phase_pk, tract_pk, region_id, city, county, town, tract_id, phase_id, boundary_geom, coverage_status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(tract_pk, phase_id) DO UPDATE SET region_id=excluded.region_id, city=excluded.city, county=excluded.county, "
+            "town=excluded.town, updated_at=excluded.updated_at",
             (
                 tract_phase_pk,
                 tract_pk,
                 resolved_region_id,
+                city,
+                county,
+                town,
                 tract_id,
                 phase_id,
                 None,

@@ -1,5 +1,6 @@
 import type { FeatureCollection, GeoFeature } from "../../shared/api";
 import { haversineMeters, polygonAreaMeters } from "../../shared/lib/geodesy";
+import { liveFeatureCollection } from "../../shared/lib/species";
 
 // 逐图斑空间变化检测(客户端近似)。
 // 语义: 单木树冠不位移, 两期同一棵树的冠应近乎重合。
@@ -58,10 +59,10 @@ export function detectPolygonChanges(
   before?: FeatureCollection,
   after?: FeatureCollection,
 ): DetectResult {
-  const beforeC = (before?.features ?? [])
+  const beforeC = (liveFeatureCollection(before)?.features ?? [])
     .map(toCrown)
     .filter((c): c is Crown => c !== null);
-  const afterC = (after?.features ?? [])
+  const afterC = (liveFeatureCollection(after)?.features ?? [])
     .map(toCrown)
     .filter((c): c is Crown => c !== null);
 

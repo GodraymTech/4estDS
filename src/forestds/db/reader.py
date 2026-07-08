@@ -79,7 +79,7 @@ def _to_wgs84(x: float, y: float, tract: dict) -> tuple[float, float] | None:
 
 def _base_tract_query(where: str = "") -> str:
     return (
-        "SELECT tr.tract_pk, tr.region_id, tr.tract_id, tr.boundary_geom, tr.boundary_source, "
+        "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_source, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
         "tp.tract_phase_pk, tp.phase_id, tp.coverage_status, tp.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
@@ -103,7 +103,7 @@ def _base_tract_query(where: str = "") -> str:
 
 def _phase_tract_query(where: str = "") -> str:
     return (
-        "SELECT tr.tract_pk, tr.region_id, tr.tract_id, tr.boundary_geom, tr.boundary_source, "
+        "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_source, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
         "tp.tract_phase_pk, tp.phase_id, tp.coverage_status, tp.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "

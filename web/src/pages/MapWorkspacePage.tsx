@@ -22,7 +22,7 @@ import {
   SearchOutlined,
   SwapOutlined,
 } from "@ant-design/icons";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
 import { MapStage } from "../shared/ui/MapStage";
 import {
@@ -40,7 +40,7 @@ import {
   type MapController,
   type MarkerSpec,
 } from "../shared/map-core";
-import type { DistributionSummary } from "../shared/api";
+import { endpoints, type DistributionSummary, type GeoPlace } from "../shared/api";
 import { env } from "../shared/config/env";
 import type { GeoFeature } from "../shared/api";
 import { useObservations, type FeatureCollection } from "../entities/observation";
@@ -96,24 +96,6 @@ const OUTLINE_COLORS = [
   "#ff9f1c",
 ];
 
-const GUANGDONG_PLACES: Array<{ name: string; center: LngLat; zoom: number }> = [
-  { name: "广东", center: [113.27, 23.13], zoom: 7 },
-  { name: "广州", center: [113.2644, 23.1291], zoom: 11 },
-  { name: "深圳", center: [114.0579, 22.5431], zoom: 11 },
-  { name: "珠海", center: [113.5767, 22.2707], zoom: 11 },
-  { name: "汕头", center: [116.6819, 23.3541], zoom: 11 },
-  { name: "佛山", center: [113.1214, 23.0215], zoom: 11 },
-  { name: "湛江", center: [110.3594, 21.2707], zoom: 11 },
-  { name: "徐闻", center: [110.175, 20.3261], zoom: 12 },
-  { name: "雷州", center: [110.0965, 20.9144], zoom: 12 },
-  { name: "阳江", center: [111.9822, 21.8579], zoom: 11 },
-  { name: "茂名", center: [110.9255, 21.6627], zoom: 11 },
-  { name: "惠州", center: [114.4168, 23.1123], zoom: 11 },
-  { name: "东莞", center: [113.7518, 23.0207], zoom: 11 },
-  { name: "江门", center: [113.0819, 22.5787], zoom: 11 },
-  { name: "中山", center: [113.3926, 22.5159], zoom: 11 },
-];
-
 interface TractGroup {
   key: string;
   label: string;
@@ -130,6 +112,7 @@ interface HoveredTract {
 
 export function MapWorkspacePage() {
   const { tractId } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { data: tracts, error: tractsError, isError: tractsFailed, isLoading } = useTracts();
   const [map, setMap] = useState<MapController | null>(null);
@@ -137,11 +120,14 @@ export function MapWorkspacePage() {
   const [hovered, setHovered] = useState<HoveredTract | null>(null);
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [basemapId, setBasemapId] = useState(env.defaultBasemapId);
-  const [roadVisible, setRoadVisible] = useState(true);
+  const [roadVisible, setRoadVisible] = useState(false);
   const [showDetections, setShowDetections] = useState(true);
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
   const [zoom, setZoom] = useState(env.overviewZoom);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [geoQuery, setGeoQuery] = useState("");
+  const [geoPlaces, setGeoPlaces] = useState<GeoPlace[]>([]);
+  const [geoSearching, setGeoSearching] = useState(false);
   const [measureMode, setMeasureMode] = useState<MeasureMode>("idle");
   const [measureCoords, setMeasureCoords] = useState<LngLat[]>([]);
   const [chromeHidden, setChromeHidden] = useState(false);
@@ -163,8 +149,20 @@ export function MapWorkspacePage() {
   const list = tracts ?? EMPTY_TRACTS;
   const tractGroups = useMemo(() => buildTractGroups(list), [list]);
   const overviewStats = useMemo(() => buildOverviewStats(list, tractGroups), [list, tractGroups]);
-  const searchOptions = useMemo(() => buildSearchOptions(tractGroups), [tractGroups]);
+  const searchOptions = useMemo(() => buildSearchOptions(tractGroups, list, geoPlaces), [geoPlaces, list, tractGroups]);
   const groupByTract = useMemo(() => mapTractToGroup(tractGroups), [tractGroups]);
+  const requestedPhaseId = searchParams.get("phase_id") ?? undefined;
+  const requestedSelectionId = useMemo(() => {
+    if (!tractId) return undefined;
+    if (requestedPhaseId) {
+      const phase = list.find((t) => t.tract_id === tractId && t.phase_id === requestedPhaseId);
+      if (phase) return tractRequestId(phase);
+    }
+    const direct = list.find((t) => tractRequestId(t) === tractId);
+    if (direct) return tractRequestId(direct);
+    const group = tractGroups.find((g) => g.key === tractId);
+    return group ? tractRequestId(group.latest) : tractId;
+  }, [list, requestedPhaseId, tractGroups, tractId]);
   const selected = useMemo(
     () => list.find((t) => tractRequestId(t) === selectedId),
     [list, selectedId],
@@ -204,16 +202,43 @@ export function MapWorkspacePage() {
       }
       return;
     }
-    if (list.some((t) => tractRequestId(t) === tractId)) {
-      setSelectedId(tractId);
+    if (requestedSelectionId && list.some((t) => tractRequestId(t) === requestedSelectionId)) {
+      setSelectedId(requestedSelectionId);
     } else if (list.length > 0) {
       navigate("/map", { replace: true });
     }
-  }, [tractId, list, map, navigate, overviewBounds, ready, selectedId]);
+  }, [tractId, requestedSelectionId, list, map, navigate, overviewBounds, ready, selectedId]);
 
   useEffect(() => {
     setSelectedSpecies(speciesList);
   }, [speciesList.join("|")]);
+
+  useEffect(() => {
+    const q = geoQuery.trim();
+    if (!searchOpen || q.length < 2) {
+      setGeoPlaces([]);
+      setGeoSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setGeoSearching(true);
+    const timer = window.setTimeout(() => {
+      endpoints.searchGeo(q, "广东", 12)
+        .then((result) => {
+          if (!cancelled) setGeoPlaces(result.places);
+        })
+        .catch(() => {
+          if (!cancelled) setGeoPlaces([]);
+        })
+        .finally(() => {
+          if (!cancelled) setGeoSearching(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [geoQuery, searchOpen]);
 
   const syncMask = useCallback((ctl: MapController) => {
     ctl.removeLayer(MASK_LAYER);
@@ -399,12 +424,24 @@ export function MapWorkspacePage() {
       selectGroup(group);
       return;
     }
-    const place = GUANGDONG_PLACES.find((p) => "place:" + p.name === key);
+    const place = geoPlaces.find((p) => "geo:" + p.id === key);
     if (place) {
       setSelectedId(undefined);
       fittedTract.current = null;
       navigate("/map");
-      map?.flyTo(place.center, place.zoom);
+      map?.flyTo([place.lng, place.lat], 13);
+      return;
+    }
+    if (key.startsWith("admin:")) {
+      const [, level, name] = key.split(":");
+      const match = tractGroups.find((g) =>
+        g.tracts.some((t) => {
+          if (level === "city") return t.city === name;
+          if (level === "county") return t.county === name;
+          return t.town === name;
+        }),
+      );
+      if (match) selectGroup(match);
     }
   }
 
@@ -461,10 +498,10 @@ export function MapWorkspacePage() {
             value={selectedGroup?.key}
             placeholder="搜索"
             options={searchOptions}
-            filterOption={(input, option) =>
-              String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-            }
-            notFoundContent="本地未命中"
+            filterOption={false}
+            onSearch={setGeoQuery}
+            loading={geoSearching}
+            notFoundContent={geoSearching ? <Spin size="small" /> : "无结果"}
             onChange={(v) => {
               if (v) selectSearch(v);
               else returnOverview();
@@ -680,20 +717,33 @@ function tractRequestId(tract: Tract): string {
   return String(tract.tract_phase_pk || tract.tract_id);
 }
 
-function buildSearchOptions(groups: TractGroup[]) {
+function buildSearchOptions(groups: TractGroup[], tracts: Tract[], places: GeoPlace[]) {
+  const adminOptions = [
+    ...unique(tracts.map((t) => t.city)).map((name) => ({ value: "admin:city:" + name, label: name })),
+    ...unique(tracts.map((t) => t.county)).map((name) => ({ value: "admin:county:" + name, label: name })),
+    ...unique(tracts.map((t) => t.town)).map((name) => ({ value: "admin:town:" + name, label: name })),
+  ];
   return [
     {
       label: "地块",
       options: groups.map((g) => ({ value: g.key, label: g.label })),
     },
     {
+      label: "行政区划",
+      options: adminOptions,
+    },
+    {
       label: "地名",
-      options: GUANGDONG_PLACES.map((p) => ({
-        value: "place:" + p.name,
-        label: p.name,
+      options: places.map((p) => ({
+        value: "geo:" + p.id,
+        label: p.address ? `${p.name} · ${p.address}` : p.name,
       })),
     },
   ];
+}
+
+function unique(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((v): v is string => Boolean(v)))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
 }
 
 function buildOverviewStats(tracts: Tract[], groups: TractGroup[]) {

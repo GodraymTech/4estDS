@@ -118,7 +118,7 @@ export function TemporalWipe({
     });
   }, [after.overlay?.data, before.overlay?.data, center, onApi, ready, zoom]);
 
-  // 固定图层顺序: 底图 -> 时相影像 -> 路网 -> 检测框。
+  // 固定图层顺序: 底图 -> 路网 -> 时相影像 -> 检测框。
   useEffect(() => {
     if (!ready) return;
     syncSide(beforeCtrl.current, before, roadOverlay, true, center, zoom);
@@ -195,10 +195,10 @@ function syncSide(
   zoom: number,
 ) {
   if (!controller) return;
-  if (side.basemap) controller.setRasterOverlay("phase-imagery", { ...side.basemap, opacity: 0.88 });
-  else controller.removeRasterOverlay("phase-imagery");
   if (roadOverlay) controller.setRasterOverlay("road-overlay", roadOverlay);
   else controller.removeRasterOverlay("road-overlay");
+  if (side.basemap) controller.setRasterOverlay("phase-imagery", { ...side.basemap, opacity: 0.88 });
+  else controller.removeRasterOverlay("phase-imagery");
 
   if (!side.overlay) return;
   controller.removeLayer(side.overlay.id);

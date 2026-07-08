@@ -20,6 +20,9 @@ DDL: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS tracts (
         tract_pk        TEXT PRIMARY KEY,
         region_id       TEXT NOT NULL,
+        city            TEXT,
+        county          TEXT,
+        town            TEXT,
         tract_id        TEXT NOT NULL,
         boundary_geom   TEXT,
         boundary_source TEXT NOT NULL DEFAULT 'unset'
@@ -37,6 +40,9 @@ DDL: tuple[str, ...] = (
         tract_phase_pk  TEXT PRIMARY KEY,
         tract_pk        TEXT NOT NULL REFERENCES tracts(tract_pk) ON DELETE CASCADE,
         region_id       TEXT NOT NULL,
+        city            TEXT,
+        county          TEXT,
+        town            TEXT,
         tract_id        TEXT NOT NULL,
         phase_id        TEXT NOT NULL
             CHECK (phase_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),

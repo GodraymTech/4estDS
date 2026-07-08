@@ -13,6 +13,8 @@ import type { Phase } from "../../entities/phase";
 import { useObservations } from "../../entities/observation";
 import { useTractImagery } from "../../entities/tract";
 import type { TractImagery } from "../../shared/api";
+import type { FeatureCollection } from "../../shared/api";
+import { liveFeatureCollection } from "../../shared/lib/species";
 import { PhaseTimeline } from "./PhaseTimeline";
 
 const COLOR_BEFORE = "#f0b84f";
@@ -133,10 +135,11 @@ function buildOverlay(
   color: string,
 ): GeoJsonLayerSpec | undefined {
   if (!phaseId || !data) return undefined;
+  const liveData = liveFeatureCollection(data as FeatureCollection);
   return {
     id,
     kind: "line",
-    data: data as GeoJsonLayerSpec["data"],
+    data: liveData as GeoJsonLayerSpec["data"],
     color,
     opacity: 0.86,
     lineWidth: 1.15,

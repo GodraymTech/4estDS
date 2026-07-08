@@ -156,6 +156,8 @@ def _latest_input_imagery(tract_id: str, db_url: str | None) -> dict:
     run = reader.get_run(run_id, url=db_url) if run_id else None
     input_path = run.get("input_path") if run else None
     if not input_path:
+      input_path = reader.latest_tiff_path_for_tract(tract_id, url=db_url)
+    if not input_path:
         return {"tiles": None, "source_path": None, "source_format": None, "tile_service": None}
 
     path = Path(input_path).expanduser()

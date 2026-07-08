@@ -1,5 +1,6 @@
 import type { FeatureCollection, GeoFeature } from "../../shared/api";
 import { polygonAreaMeters } from "../../shared/lib/geodesy";
+import { deadFeatureCollection, liveFeatureCollection } from "../../shared/lib/species";
 
 // 变化量化指标(聚合总量对比)。
 // 说明: 这是两期树冠的总量对比(株数/总面积), 非逐图斑的空间变化检测。
@@ -13,6 +14,12 @@ export interface ChangeMetrics {
   areaAfter: number;
   areaDelta: number;
   areaPct: number | null;
+  deadCountBefore: number;
+  deadCountAfter: number;
+  deadCountDelta: number;
+  deadAreaBefore: number;
+  deadAreaAfter: number;
+  deadAreaDelta: number;
 }
 
 function featureArea(f: GeoFeature): number {
@@ -44,12 +51,20 @@ export function buildChangeMetrics(
   before?: FeatureCollection,
   after?: FeatureCollection,
 ): ChangeMetrics {
-  const countBefore = before?.features.length ?? 0;
-  const countAfter = after?.features.length ?? 0;
+  const liveBefore = liveFeatureCollection(before);
+  const liveAfter = liveFeatureCollection(after);
+  const deadBefore = deadFeatureCollection(before);
+  const deadAfter = deadFeatureCollection(after);
+  const countBefore = liveBefore?.features.length ?? 0;
+  const countAfter = liveAfter?.features.length ?? 0;
   const countDelta = countAfter - countBefore;
-  const areaBefore = totalArea(before);
-  const areaAfter = totalArea(after);
+  const areaBefore = totalArea(liveBefore);
+  const areaAfter = totalArea(liveAfter);
   const areaDelta = areaAfter - areaBefore;
+  const deadCountBefore = deadBefore?.features.length ?? 0;
+  const deadCountAfter = deadAfter?.features.length ?? 0;
+  const deadAreaBefore = totalArea(deadBefore);
+  const deadAreaAfter = totalArea(deadAfter);
   return {
     countBefore,
     countAfter,
@@ -59,6 +74,12 @@ export function buildChangeMetrics(
     areaAfter,
     areaDelta,
     areaPct: pct(areaBefore, areaDelta),
+    deadCountBefore,
+    deadCountAfter,
+    deadCountDelta: deadCountAfter - deadCountBefore,
+    deadAreaBefore,
+    deadAreaAfter,
+    deadAreaDelta: deadAreaAfter - deadAreaBefore,
   };
 }
 
