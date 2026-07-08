@@ -94,12 +94,11 @@ def rows_to_featurecollection(
         if geometry == "crown":
             geom = parse_wkt_polygon(r.get("geom_crown"))
         else:
-            # geom_point 是历史像素坐标；地图展示优先使用真实地理坐标。
-            geom = parse_wkt_point(r.get("center_geo")) or parse_wkt_point(r.get("geom_point"))
+            geom = parse_wkt_point(r.get("center_geom")) or parse_wkt_point(r.get("geom_point"))
         geom = _to_wgs84_geometry(geom, crs_epsg=crs_epsg, crs_wkt=crs_wkt)
         props = {k: r.get(k) for k in _PROPERTY_KEYS if r.get(k) is not None}
         # 保留一个稳定 id 便于前端选中/高亮。
-        props["id"] = r.get("obs_id") or r.get("canonical_id")
+        props["id"] = r.get("observation_id") or r.get("individual_id")
         feat = _feature(geom, props)
         if feat is not None:
             features.append(feat)

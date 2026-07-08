@@ -9,7 +9,7 @@ logging:
   level: DEBUG             # DEBUG  INFO
   rotation_mb: 20        # 单个日志文件滚动大小(MB)
   backups: 5
-  to_db: true            # 是否把 run 记录写入 run_logs 表
+  to_db: true            # 是否把运行记录写入 runs 表
 
 db:
   # 默认 SQLite(本地);设计上可平滑迁移到 PostgreSQL/PostGIS
@@ -73,6 +73,7 @@ export:
 # 多源融合指标提取参数
 fusion:
   height_stat: "max"             # 树高采样统计量 (max / p95 / median / mean)
+  area_method: "bbox_product"     # 树冠面积估算方法: bbox_product / polygon_area / mask_area
   las_grid_size: 0.05            # 激光点云网格化分辨率 (米)
   dem_default: 0.0               # 单独 DSM 模式下默认常数背景 DEM 高程 (米)
   volume_method: "cbh"           # 树冠体积估算方法: cbh (枝下高积分) / column (柱体积分) / 【支持像素过滤】
@@ -83,8 +84,6 @@ fusion:
   chm_threshold: 0.1             # CHM 相对高度二值掩膜截断阈值，用于去噪与树冠勾勒 (米)
   find_real_canopy: true         # 获取真实树冠, 即过滤检测框内`属于地面`的像素点
   max_valid_height: 8.0          # 最大有效高度 (米)，高于该配置的高程或点云在预处理时均被截断为该值，过滤电塔/电线/建筑干扰
-
-
 
 
 

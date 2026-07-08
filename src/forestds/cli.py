@@ -46,8 +46,8 @@ def _bootstrap(level: str | None = None, task_type: str | None = None, to_file: 
 def cmd_infer(
     images: list[str] = Argument(..., help="输入影像/图像路径(支持 TIFF/PNG/JPG 等)或目录"),
     arch: Optional[str] = Option(None, "--arch", "-a", help="模型架构 (默认 ultralytics)"),
-    acquisition_time: Optional[str] = Option(None, "--acquisition-time", "-t", help="地块时相 YYYYmmdd"),
-    location: Optional[str] = Option(None, "--location", "-l", help="地块位置标识"),
+    phase_id: Optional[str] = Option(None, "--phase-id", "-p", help="地块时相 YYYYMMDD"),
+    tract_id: Optional[str] = Option(None, "--tract-id", "-t", help="地块 ID"),
     tile_size: Optional[int] = Option(None, "--tile-size", "-s", help="手动指定切片边长(不指定则自适应)"),
     overlap_rate: Optional[float] = Option(None, "--overlap-rate", "-r", help="手动指定重叠率(0.0~0.5，不指定则自适应)"),
     chm: Optional[str] = Option(None, "--chm", help="CHM 冠层高度模型栅格路径"),
@@ -89,7 +89,7 @@ def cmd_infer(
         logger.info("[infer] run_id={} arch={} image={}", run_id, arch_val, image)
         req = InferenceRequest(
             image_path=image, arch=arch_val,
-            acquisition_time=acquisition_time, location=location,
+            phase_id=phase_id, tract_id=tract_id,
             tile_size=tile_size, overlap_rate=overlap_rate,
             chm=chm, dsm=dsm, dem=dem, las=las,
             las_grid_size=las_grid_size, dem_default=dem_default,
@@ -126,8 +126,8 @@ def cmd_infer(
             images,
             settings=settings,
             arch=arch,
-            acquisition_time=acquisition_time,
-            location=location,
+            phase_id=phase_id,
+            tract_id=tract_id,
             tile_size=tile_size,
             overlap_rate=overlap_rate,
             chm=chm,
@@ -298,8 +298,6 @@ def cmd_train(
 def cmd_report(
     tract_id: Optional[str] = Option(None, "--tract-id", help="地块 ID"),
     run_id: Optional[str] = Option(None, "--run-id", help="限定某次 run"),
-    acquisition_time: Optional[str] = Option(None, "--acquisition-time", help="地块时相 YYYYmmdd"),
-    location: Optional[str] = Option(None, "--location", help="地块位置标识"),
     format: Optional[str] = Option(None, "--format", help="输出格式 (md / csv / pdf) (默认:md)"),
     out: Optional[str] = Option(None, "--out", help="输出目录(默认 <home>/outputs)"),
     no_charts: Optional[bool] = Option(None, "--no-charts/--charts", help="是否不生成图表(PDF) (默认:False)"),
@@ -318,8 +316,6 @@ def cmd_report(
         out_res = generate_report(
             tract_id=tract_id,
             run_id=run_id,
-            acquisition_time=acquisition_time,
-            location=location,
             fmt=act_format,
             out_dir=out,
             with_charts=not act_no_charts,
@@ -373,11 +369,13 @@ def cmd_batch(
     input_dir: str = Option(..., "--input-dir", "-i", help="输入目录"),
     glob: str = Option("*.tif", "--glob", "-g", help="文件匹配模式(默认 *.tif)"),
     arch: Optional[str] = Option(None, "--arch", "-a", help="模型架构 (默认 ultralytics)"),
-    acquisition_time: Optional[str] = Option(None, "--acquisition-time", "-t", help="地块时相 YYYYmmdd"),
+    phase_id: Optional[str] = Option(None, "--phase-id", "-p", help="地块时相 YYYYMMDD"),
+    tract_id: Optional[str] = Option(None, "--tract-id", "-t", help="批量地块 ID 前缀"),
     log_level: Optional[str] = Option(None, "--log-level", "-l", help="日志级别(默认读配置)"),
 ) -> int:
     args = SimpleNamespace(
-        input_dir=input_dir, glob=glob, arch=arch, acquisition_time=acquisition_time, log_level=log_level
+        input_dir=input_dir, glob=glob, arch=arch, phase_id=phase_id, tract_id=tract_id,
+        log_level=log_level
     )
 
     settings, run_id = _bootstrap(args.log_level, task_type="batch")
@@ -405,7 +403,8 @@ def cmd_batch(
         inputs,
         settings=settings,
         arch=arch_val,
-        acquisition_time=args.acquisition_time,
+        phase_id=args.phase_id,
+        tract_id=args.tract_id,
     )
     logger.info(
         f"[batch] 完成: 成功={res.succeeded} 失败={res.failed} 总株数={res.total_trees} 耗时={res.elapsed_s:.2f}s"
@@ -448,13 +447,13 @@ def cmd_db(
 
 @app.command("track", help="单木生命周期追踪(创新点 C)")
 def cmd_track(
-    location: str = Option(..., "--location", help="要追踪的地块位置标识(跨多个时相)"),
+    tract_id: str = Option(..., "--tract-id", help="要追踪的地块 ID(跨多个时相)"),
     max_dist: float = Option(20.0, "--max-dist", help="跨时相匹配位置门控(像素,默认 20)"),
     greedy: bool = Option(False, "--greedy", help="使用贪婪匹配(默认匈牙利最优)"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
     args = SimpleNamespace(
-        location=location, max_dist=max_dist, greedy=greedy, log_level=log_level
+        tract_id=tract_id, max_dist=max_dist, greedy=greedy, log_level=log_level
     )
 
     settings, run_id = _bootstrap(args.log_level, task_type="track")
@@ -464,12 +463,12 @@ def cmd_track(
     from .lifecycle import TreeRecord, track_sequence
 
     db_url = settings.get("url", None)
-    tracts = [t for t in reader.list_tracts(url=db_url) if t.get("location") == args.location]
-    tracts.sort(key=lambda t: str(t.get("acquisition_time")))
+    tracts = [t for t in reader.list_tracts(url=db_url) if t.get("tract_id") == args.tract_id]
+    tracts.sort(key=lambda t: str(t.get("phase_id")))
     if not tracts:
-        logger.error(f"[track] location={args.location} 无地块")
+        logger.error(f"[track] tract_id={args.tract_id} 无地块")
         return 2
-    logger.info(f"[track] location={args.location} 命中 {len(tracts)} 个时相地块")
+    logger.info(f"[track] tract_id={args.tract_id} 命中 {len(tracts)} 个时相")
 
     snapshots: list[tuple[str, list]] = []
     for t in tracts:
@@ -496,25 +495,25 @@ def cmd_track(
             if pt is None:
                 continue
             recs.append(TreeRecord(
-                key=o["obs_id"], x=pt[0], y=pt[1],
+                key=o["observation_id"], x=pt[0], y=pt[1],
                 height=o.get("height"), crown=o.get("crown_area_px"),
                 species=o.get("species"),
             ))
-        snapshots.append((str(t.get("acquisition_time")), recs))
-        logger.info(f"[track] 时相 {t.get('acquisition_time')}: 规范株 {len(recs)} 位")
+        snapshots.append((str(t.get("phase_id")), recs))
+        logger.info(f"[track] 时相 {t.get('phase_id')}: 观测 {len(recs)} 条")
 
     if not snapshots:
         logger.error("[track] 无可追踪的时相")
         return 2
 
     result = track_sequence(
-        snapshots, location_cluster=args.location, max_dist=args.max_dist,
+        snapshots, tract_id=args.tract_id, max_dist=args.max_dist,
         use_hungarian=not args.greedy,
     )
     payload = [
         {
             "individual_id": ind.individual_id,
-            "location_cluster": ind.location_cluster,
+            "tract_id": ind.tract_id,
             "first_seen": ind.first_seen,
             "last_seen": ind.last_seen,
             "status": ind.status,
@@ -528,7 +527,7 @@ def cmd_track(
     rates = [r for r in (i.height_growth_rate() for i in result.individuals) if r is not None]
     avg_rate = sum(rates) / len(rates) if rates else None
     logger.info(
-        f"[track] 完成 location={args.location} 时相={len(snapshots)} 个体={result.n_individuals} "
+        f"[track] 完成 tract_id={args.tract_id} 时相={len(snapshots)} 个体={result.n_individuals} "
         f"存活={alive} 枯死={result.n_deaths} 新生={result.n_births} 配对={result.n_matched} "
         f"平均生长率={avg_rate if avg_rate is None else round(avg_rate, 3)} m/时相"
     )
@@ -612,20 +611,18 @@ def cmd_clean(
         
         # 1. 打印按地块进行统计的单木信息删除明细
         obs_by_t = db_by_tract.get("tree_observations", {})
-        trees_by_t = db_by_tract.get("tract_trees", {})
-        affected_tracts = set(obs_by_t.keys()) | set(trees_by_t.keys())
+        affected_tracts = set(obs_by_t.keys())
         if affected_tracts:
             logger.info("🌲  单木空间观测清理明细 (按地块统计):")
             for tid in affected_tracts:
                 obs_cnt = obs_by_t.get(tid, 0)
-                tree_cnt = trees_by_t.get(tid, 0)
-                if obs_cnt > 0 or tree_cnt > 0:
-                    logger.info(f"  - 地块 [{tid}]: 删除了 {obs_cnt} 条原始观测, {tree_cnt} 条规范单木")
+                if obs_cnt > 0:
+                    logger.info(f"  - 地块 [{tid}]: 删除了 {obs_cnt} 条单木观测")
         
         # 2. 打印其他表的删除统计 (排除已按地块/明细统计的表)
         other_tables_printed = False
         for table_name, deleted_count in db_stats.items():
-            if table_name in ("tree_observations", "tract_trees", "run_logs"):
+            if table_name in ("tree_observations", "runs"):
                 continue
             if deleted_count > 0:
                 if not other_tables_printed:

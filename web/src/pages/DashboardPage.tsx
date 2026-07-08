@@ -10,7 +10,7 @@ import {
 import { Link } from "react-router-dom";
 import { PageContainer } from "../shared/ui/PageContainer";
 import { useTractSummaries, useTracts, type Tract, type TractSummary } from "../entities/tract";
-import { groupPhasesByLocation } from "../entities/phase";
+import { groupPhasesByTract } from "../entities/phase";
 import { tractCenter } from "../features/overview/tractGeo";
 
 interface BarRow {
@@ -35,7 +35,7 @@ export function DashboardPage() {
   const tracts = data ?? [];
   const summariesQuery = useTractSummaries(tracts.length > 0);
   const summaries = summariesQuery.data ?? [];
-  const groups = useMemo(() => groupPhasesByLocation(tracts), [tracts]);
+  const groups = useMemo(() => groupPhasesByTract(tracts), [tracts]);
   const summaryByTract = useMemo(() => indexSummaries(summaries), [summaries]);
   const stats = useMemo(() => buildStats(tracts, summaries), [tracts, summaries]);
   const auditRows = useMemo(
@@ -132,7 +132,8 @@ export function DashboardPage() {
 function indexSummaries(summaries: TractSummary[]): Map<string, TractSummary> {
   const out = new Map<string, TractSummary>();
   for (const summary of summaries) {
-    if (summary.tract_id) out.set(summary.tract_id, summary);
+    const key = summary.tract_phase_pk || summary.tract_id;
+    if (key) out.set(key, summary);
   }
   return out;
 }
@@ -162,11 +163,11 @@ function buildAuditRows(
 ): AuditRow[] {
   return tracts
     .map((tract) => {
-      const summary = summaryByTract.get(tract.tract_id);
+      const summary = summaryByTract.get(String(tract.tract_phase_pk || tract.tract_id));
       return {
-        id: tract.tract_id,
-        name: tract.location || tract.name || tract.tract_id,
-        time: tract.acquisition_time || "-",
+        id: String(tract.tract_phase_pk || tract.tract_id),
+        name: tract.tract_id,
+      time: tract.phase_id || "-",
         trees: summary?.tree_count ?? tract.observation_count ?? 0,
         cover: summary?.meta?.canopy_cover_rate ?? null,
         crownArea: summary?.meta?.total_crown_area ?? 0,
@@ -213,7 +214,7 @@ function buildAreaRows(rows: AuditRow[]): BarRow[] {
 function bucketByTime(tracts: Tract[]): BarRow[] {
   const map = new Map<string, number>();
   for (const t of tracts) {
-    const key = (t.acquisition_time || "未知").slice(0, 8);
+    const key = (t.phase_id || "未知").slice(0, 8);
     map.set(key, (map.get(key) ?? 0) + 1);
   }
   return [...map.entries()]

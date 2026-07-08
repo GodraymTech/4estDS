@@ -63,10 +63,9 @@ def to_markdown(
     lines.append("# 红树林单木智能解译成果报告")
     lines.append("")
     lines.append("---")
-    lines.append(f"- **地块 (Tract)**: `{data.tract_id or '-'}`  **位置 (Location)**: {m.get('location') or '-'}  "
-                 f"**观测时相 (Time)**: {m.get('acquisition_time') or '-'}")
+    lines.append(f"- **地块 (Tract)**: `{data.tract_id or '-'}`  **时相 (Phase)**: {m.get('phase_id') or '-'}")
     lines.append(f"- **分析运行编号 (Run ID)**: `{data.run_id or '-'}`")
-    lines.append(f"- **影像分辨率 (Dimensions)**: {m.get('pixel_w') or '?'} x {m.get('pixel_h') or '?'} 像素")
+    lines.append(f"- **影像分辨率 (Dimensions)**: {m.get('pixel_width') or '?'} x {m.get('pixel_height') or '?'} 像素")
     lines.append("---")
     lines.append("")
     
@@ -134,11 +133,11 @@ def to_markdown(
     lines.append(_format_table_row("检测置信度 (Confidence)", data.confidence))
     lines.append(_format_table_row("林木估计树高 (Height, m)", data.height))
     lines.append(_format_table_row("树冠三维体积 (Volume, m³)", data.crown_volume_geo))
-    lines.append(_format_table_row("像素冠幅宽 (Crown W, px)", data.crown_w_px))
-    lines.append(_format_table_row("像素冠幅高 (Crown H, px)", data.crown_h_px))
+    lines.append(_format_table_row("像素冠幅宽 (Crown W, px)", data.crown_width_px))
+    lines.append(_format_table_row("像素冠幅高 (Crown H, px)", data.crown_height_px))
     lines.append(_format_table_row("像素冠幅面积 (Crown Area, px²)", data.crown_area_px))
-    lines.append(_format_table_row("物理树冠宽 (Crown W, m)", data.crown_w_geo))
-    lines.append(_format_table_row("物理树冠高 (Crown H, m)", data.crown_h_geo))
+    lines.append(_format_table_row("物理树冠宽 (Crown W, m)", data.crown_width_geo))
+    lines.append(_format_table_row("物理树冠高 (Crown H, m)", data.crown_height_geo))
     lines.append(_format_table_row("物理树冠面积 (Crown Area, m²)", data.crown_area_geo))
     lines.append("")
 
@@ -297,9 +296,9 @@ def to_csv(data: ReportData) -> str:
     w.writerow(["species_richness", data.meta.get("species_richness", 0)])
     for sp, cnt in data.species.items():
         w.writerow([f"species:{sp}", cnt])
-    for label, dist in (("crown_w_px", data.crown_w_px), ("crown_h_px", data.crown_h_px),
+    for label, dist in (("crown_width_px", data.crown_width_px), ("crown_height_px", data.crown_height_px),
                         ("crown_area_px", data.crown_area_px),
-                        ("crown_w_geo", data.crown_w_geo), ("crown_h_geo", data.crown_h_geo),
+                        ("crown_width_geo", data.crown_width_geo), ("crown_height_geo", data.crown_height_geo),
                         ("crown_area_geo", data.crown_area_geo),
                         ("confidence", data.confidence), ("height", data.height),
                         ("crown_volume_geo", data.crown_volume_geo)):
@@ -711,7 +710,7 @@ def to_pdf(data: ReportData, out_path: Path, *, charts: list[Path] | None = None
 
     line("4estDS Tree Detection Report", size=16, dy=1.0 * cm)
     line(f"tract={data.tract_id or '-'}  run={data.run_id or '-'}", size=9)
-    line(f"location={data.meta.get('location') or '-'}  time={data.meta.get('acquisition_time') or '-'}", size=9)
+    line(f"phase={data.meta.get('phase_id') or '-'}", size=9)
     line("")
     line(f"Tree count: {data.tree_count}", size=12)
     if data.density_per_ha is not None:
@@ -722,7 +721,7 @@ def to_pdf(data: ReportData, out_path: Path, *, charts: list[Path] | None = None
     for sp, cnt in data.species.items():
         line(f"  - {sp}: {cnt}", size=10)
     line("")
-    cw = data.crown_w_px
+    cw = data.crown_width_px
     if cw.get("n"):
         line(f"Crown width px: median={cw['median']:.1f} p90={cw['p90']:.1f} max={cw['max']:.1f}", size=10)
     conf = data.confidence

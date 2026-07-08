@@ -107,10 +107,10 @@ export function AtlasPage() {
                   style={itemStyle(selected?.tract_id === t.tract_id)}
                 >
                   <List.Item.Meta
-                    title={t.name || t.location || t.tract_id}
+                    title={t.tract_id}
                     description={
                       <Space size={4} wrap>
-                        <Tag>{t.acquisition_time || "-"}</Tag>
+                  <Tag>{t.phase_id || "-"}</Tag>
                         {t.active_run_id ? (
                           <Tag color="green">已发布</Tag>
                         ) : (

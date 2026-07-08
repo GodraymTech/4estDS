@@ -76,11 +76,11 @@ class ReportData:
     tree_count: int
     species: dict[str, int]
     density_per_ha: float | None
-    crown_w_px: dict
-    crown_h_px: dict
+    crown_width_px: dict
+    crown_height_px: dict
     crown_area_px: dict
-    crown_w_geo: dict
-    crown_h_geo: dict
+    crown_width_geo: dict
+    crown_height_geo: dict
     crown_area_geo: dict
     confidence: dict
     height: dict
@@ -95,11 +95,11 @@ class ReportData:
             "tree_count": self.tree_count,
             "species": self.species,
             "density_per_ha": self.density_per_ha,
-            "crown_w_px": self.crown_w_px,
-            "crown_h_px": self.crown_h_px,
+            "crown_width_px": self.crown_width_px,
+            "crown_height_px": self.crown_height_px,
             "crown_area_px": self.crown_area_px,
-            "crown_w_geo": self.crown_w_geo,
-            "crown_h_geo": self.crown_h_geo,
+            "crown_width_geo": self.crown_width_geo,
+            "crown_height_geo": self.crown_height_geo,
             "crown_area_geo": self.crown_area_geo,
             "confidence": self.confidence,
             "height": self.height,
@@ -127,10 +127,13 @@ def compute_report(
     run_id: str | None = None,
 ) -> ReportData:
     """从观测记录计算一份完整报告数据。"""
-    # Map legacy keys to physical/real measurements for compatibility with rendering and calculations
+    # Map persisted measurement fields to report-facing aggregate keys.
     for o in observations:
         if "crown_area_px" not in o or o["crown_area_px"] is None:
-            o["crown_area_px"] = o.get("crown_area_px_real")
+            w_px = _num(o.get("crown_width_px"))
+            h_px = _num(o.get("crown_height_px"))
+            if w_px is not None and h_px is not None:
+                o["crown_area_px"] = w_px * h_px
         if "crown_area_geo" not in o or o["crown_area_geo"] is None:
             o["crown_area_geo"] = o.get("crown_area_geo_real")
         if "crown_volume_geo" not in o or o["crown_volume_geo"] is None:
@@ -195,8 +198,8 @@ def compute_report(
             "avg_volume": avg_v,
             "max_volume": max(volumes) if volumes else None,
             "avg_crown_area": avg_a,
-            "crown_w_geo": summarize_distribution(_collect(obs_list, "crown_w_geo")),
-            "crown_h_geo": summarize_distribution(_collect(obs_list, "crown_h_geo")),
+            "crown_width_geo": summarize_distribution(_collect(obs_list, "crown_width_geo")),
+            "crown_height_geo": summarize_distribution(_collect(obs_list, "crown_height_geo")),
             "crown_area_geo": summarize_distribution(_collect(obs_list, "crown_area_geo")),
             "height": summarize_distribution(_collect(obs_list, "height")),
         }
@@ -207,22 +210,21 @@ def compute_report(
         tree_count=n,
         species=species,
         density_per_ha=density_per_hectare(n, area_m2),
-        crown_w_px=summarize_distribution(_collect(observations, "crown_w_px")),
-        crown_h_px=summarize_distribution(_collect(observations, "crown_h_px")),
+        crown_width_px=summarize_distribution(_collect(observations, "crown_width_px")),
+        crown_height_px=summarize_distribution(_collect(observations, "crown_height_px")),
         crown_area_px=summarize_distribution(_collect(observations, "crown_area_px")),
-        crown_w_geo=summarize_distribution(_collect(observations, "crown_w_geo")),
-        crown_h_geo=summarize_distribution(_collect(observations, "crown_h_geo")),
+        crown_width_geo=summarize_distribution(_collect(observations, "crown_width_geo")),
+        crown_height_geo=summarize_distribution(_collect(observations, "crown_height_geo")),
         crown_area_geo=summarize_distribution(_collect(observations, "crown_area_geo")),
         confidence=summarize_distribution(_collect(observations, "confidence")),
         height=summarize_distribution(_collect(observations, "height")),
         crown_volume_geo=summarize_distribution(_collect(observations, "crown_volume_geo")),
         scale_classes=scale_class_breakdown(observations),
         meta={
-            "acquisition_time": tract.get("acquisition_time"),
-            "location": tract.get("location"),
+            "phase_id": tract.get("phase_id"),
             "area_m2": area_m2,
-            "pixel_w": tract.get("pixel_w"),
-            "pixel_h": tract.get("pixel_h"),
+            "pixel_width": tract.get("pixel_width"),
+            "pixel_height": tract.get("pixel_height"),
             "species_richness": len(species),
             "species_analysis": species_analysis,
             "canopy_cover_rate": canopy_cover_rate,

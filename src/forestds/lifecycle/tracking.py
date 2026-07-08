@@ -1,6 +1,6 @@
 """跨时相生命周期追踪与生长轨迹(阶段八 / 创新点 C 核心)。
 
-给定同一 location 多个时相的单木快照(按时间排序),逐期医牛利匹配,
+给定同一 tract_id 多个时相的单木快照(按时间排序),逐期匹配,
 分配跨时相 individual_id,识别新生/枯死,并拟合每个个体的生长轨迹。
 
 纯函数 + 可选 numpy(仅用于线性拟合生长率,缺失时降级为简单斜率)。
@@ -25,12 +25,12 @@ class GrowthPoint:
 @dataclass
 class Individual:
     individual_id: str
-    location_cluster: str
+    tract_id: str
     first_seen: str
     last_seen: str
     status: str = "alive"        # alive | dead
     growth: list[GrowthPoint] = field(default_factory=list)
-    # 每个时相对应的观测 key(用于回填 tract_trees.individual_id)
+    # 每个时相对应的 observation_id，用于回填 tree_observations.individual_id。
     members: dict[str, str] = field(default_factory=dict)
 
     def height_growth_rate(self) -> Optional[float]:
@@ -76,7 +76,7 @@ class TrackingResult:
 def track_sequence(
     snapshots: list[tuple[str, list[TreeRecord]]],
     *,
-    location_cluster: str,
+    tract_id: str,
     max_dist: float,
     w_pos: float = 1.0,
     w_crown: float = 0.3,
@@ -101,8 +101,8 @@ def track_sequence(
         nonlocal seq
         seq += 1
         ind = Individual(
-            individual_id=f"ind_{location_cluster}_{seq:05d}",
-            location_cluster=location_cluster,
+            individual_id=f"ind_{tract_id}_{seq:05d}",
+            tract_id=tract_id,
             first_seen=time,
             last_seen=time,
         )
@@ -154,8 +154,8 @@ def track_sequence(
         active = next_active
 
     log.info(
-        "[lifecycle] 追踪完成 location=%s 时相数=%d 个体数=%d 配对次=%d 新生=%d 枯死=%d",
-        location_cluster, len(snapshots), len(individuals), n_matched, n_births, n_deaths,
+        "[lifecycle] 追踪完成 tract_id=%s 时相数=%d 个体数=%d 配对次=%d 新生=%d 枯死=%d",
+        tract_id, len(snapshots), len(individuals), n_matched, n_births, n_deaths,
     )
     return TrackingResult(
         individuals=individuals, n_births=n_births, n_deaths=n_deaths, n_matched=n_matched,

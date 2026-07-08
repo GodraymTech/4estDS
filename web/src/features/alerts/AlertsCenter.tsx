@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { Alert, Card, Empty, List, Space, Tag } from "antd";
-import type { LocationGroup } from "../../entities/phase";
+import type { TractPhaseGroup } from "../../entities/phase";
 import { pickLatestTwo } from "../../entities/phase";
 import { useObservations } from "../../entities/observation";
 import { buildChangeMetrics } from "../change-metrics";
@@ -15,14 +15,13 @@ import {
   type AlertSeverity,
 } from "./alerts";
 
-// 单地点探针: 拉两期冠层观测 → 量化+逐图斑变化 → 派生预警, 上报给中心。
-// 以组件形式并发拉取各地点(React Query 去重), 不阻塞整体渲染。
-function LocationAlertProbe({
+// 单地块探针: 拉两期冠层观测 -> 量化+逐图斑变化 -> 派生预警, 上报给中心。
+function TractAlertProbe({
   group,
   onResult,
 }: {
-  group: LocationGroup;
-  onResult: (location: string, items: AlertItem[]) => void;
+  group: TractPhaseGroup;
+  onResult: (tract_id: string, items: AlertItem[]) => void;
 }) {
   const [before, after] = pickLatestTwo(group.phases);
   const beforePhase = group.phases[before];
@@ -34,18 +33,18 @@ function LocationAlertProbe({
     const m = buildChangeMetrics(beforeObs.data, afterObs.data);
     const d = detectPolygonChanges(beforeObs.data, afterObs.data);
     return deriveAlerts({
-      location: group.location,
+      tract_id: group.tract_id,
       areaPct: m.areaPct,
       countPct: m.countPct,
       lostCount: d.lostCount,
       totalBefore: m.countBefore,
     });
-  }, [beforeObs.data, afterObs.data, group.location]);
+  }, [beforeObs.data, afterObs.data, group.tract_id]);
 
   const ready = !beforeObs.isFetching && !afterObs.isFetching;
   useEffect(() => {
-    if (ready) onResult(group.location, items);
-  }, [ready, items, group.location, onResult]);
+    if (ready) onResult(group.tract_id, items);
+  }, [ready, items, group.tract_id, onResult]);
 
   return null;
 }
@@ -68,26 +67,26 @@ function sevTagColor(sev: AlertSeverity): string {
   return "default";
 }
 
-// 预警中心: 汇总各多时相地点的探针结果, 按严重度排序展示。
-export function AlertsCenter({ groups }: { groups: LocationGroup[] }) {
+// 预警中心: 汇总各多时相地块的探针结果, 按严重度排序展示。
+export function AlertsCenter({ groups }: { groups: TractPhaseGroup[] }) {
   const multi = useMemo(
     () => groups.filter((g) => g.phases.length > 1),
     [groups],
   );
-  const [byLoc, setByLoc] = useState<Record<string, AlertItem[]>>({});
+  const [byTract, setByTract] = useState<Record<string, AlertItem[]>>({});
 
-  const onResult = useCallback((location: string, items: AlertItem[]) => {
-    setByLoc((prev) => {
-      if (sameIds(prev[location], items)) return prev;
-      return { ...prev, [location]: items };
+  const onResult = useCallback((tract_id: string, items: AlertItem[]) => {
+    setByTract((prev) => {
+      if (sameIds(prev[tract_id], items)) return prev;
+      return { ...prev, [tract_id]: items };
     });
   }, []);
 
   const all = useMemo(() => {
     const merged: AlertItem[] = [];
-    for (const loc of Object.keys(byLoc)) merged.push(...byLoc[loc]);
+    for (const tract_id of Object.keys(byTract)) merged.push(...byTract[tract_id]);
     return sortAlerts(merged);
-  }, [byLoc]);
+  }, [byTract]);
 
   const counts = useMemo(() => {
     const c = { high: 0, medium: 0, low: 0 };
@@ -98,14 +97,14 @@ export function AlertsCenter({ groups }: { groups: LocationGroup[] }) {
   return (
     <div>
       {multi.map((g) => (
-        <LocationAlertProbe key={g.location} group={g} onResult={onResult} />
+        <TractAlertProbe key={g.tract_id} group={g} onResult={onResult} />
       ))}
       <Space size={8} style={SUMMARY} wrap>
         <Tag color="red">高 {counts.high}</Tag>
         <Tag color="gold">中 {counts.medium}</Tag>
         <Tag>低 {counts.low}</Tag>
         <span style={MUTED}>
-          共 {all.length} 条 · 覆盖 {multi.length} 个多时相地点
+          共 {all.length} 条 · 覆盖 {multi.length} 个多时相地块
         </span>
       </Space>
       <Card styles={CARD_STYLES}>
@@ -121,7 +120,7 @@ export function AlertsCenter({ groups }: { groups: LocationGroup[] }) {
                     <Space size={8}>
                       <span style={sevDot(a.severity)} />
                       <span>{a.title}</span>
-                      <Tag>{a.location}</Tag>
+                      <Tag>{a.tract_id}</Tag>
                       <Tag color={sevTagColor(a.severity)}>
                         {severityLabel(a.severity)}
                       </Tag>

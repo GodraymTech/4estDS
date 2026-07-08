@@ -43,26 +43,33 @@ def list_tracts(db_url: str | None = Depends(get_db_url)) -> list[TractOut]:
     return [TractOut(**t) for t in reader.list_tracts(url=db_url)]
 
 
-def _tract_summary(tract_id: str, db_url: str | None) -> dict:
+def _tract_summary(
+    tract_id: str,
+    db_url: str | None,
+    *,
+    run_id: str | None = None,
+) -> dict:
     """用报告统计层生成轻量摘要，供地图卡片/看板直接读取。"""
     from ...db import reader
     from ...report.metrics import compute_report
 
-    rid = _resolve_run(tract_id, None, db_url)
+    tract = reader.get_tract(tract_id, url=db_url) or {"tract_id": tract_id}
+    phase_key = tract.get("tract_phase_pk") or tract_id
+    rid = run_id or _resolve_run(phase_key, None, db_url)
     if rid is None:
-        tract = reader.get_tract(tract_id, url=db_url) or {"tract_id": tract_id}
         return {
-            "tract_id": tract_id,
+            "tract_id": tract.get("tract_id") or tract_id,
+            "tract_phase_pk": tract.get("tract_phase_pk"),
+            "phase_id": tract.get("phase_id"),
             "run_id": None,
             "tree_count": 0,
             "species": {},
             "density_per_ha": None,
-            "crown_w_geo": {},
-            "crown_h_geo": {},
+            "crown_width_geo": {},
+            "crown_height_geo": {},
             "crown_area_geo": {},
             "meta": {
-                "acquisition_time": tract.get("acquisition_time"),
-                "location": tract.get("location"),
+                "phase_id": tract.get("phase_id"),
                 "area_m2": tract.get("geo_area"),
                 "species_richness": 0,
                 "species_analysis": {},
@@ -70,9 +77,10 @@ def _tract_summary(tract_id: str, db_url: str | None) -> dict:
                 "total_crown_area": 0.0,
             },
         }
-    tract = reader.get_tract(tract_id, url=db_url) or {"tract_id": tract_id}
-    rows = reader.fetch_observations(run_id=rid, tract_id=tract_id, url=db_url)
+    rows = reader.fetch_observations(run_id=rid, tract_id=phase_key, url=db_url)
     data = compute_report(rows, tract=tract, run_id=rid).as_dict()
+    data["tract_phase_pk"] = tract.get("tract_phase_pk")
+    data["phase_id"] = tract.get("phase_id")
     meta = data.get("meta")
     if isinstance(meta, dict):
         meta.pop("raw_observations", None)
@@ -83,7 +91,16 @@ def _tract_summary(tract_id: str, db_url: str | None) -> dict:
 def list_tract_summaries(db_url: str | None = Depends(get_db_url)) -> list[TractSummaryOut]:
     from ...db import reader
 
-    return [TractSummaryOut(**_tract_summary(t["tract_id"], db_url)) for t in reader.list_tracts(url=db_url)]
+    return [
+        TractSummaryOut(
+            **_tract_summary(
+                t.get("tract_phase_pk") or t["tract_id"],
+                db_url,
+                run_id=t.get("active_run_id"),
+            )
+        )
+        for t in reader.list_tracts(url=db_url)
+    ]
 
 
 @router.get("/{tract_id}/summary", response_model=TractSummaryOut, summary="地块统计摘要")
@@ -192,7 +209,7 @@ def get_imagery(tract_id: str, db_url: str | None = Depends(get_db_url)) -> Trac
         d.update(_latest_input_imagery(tract_id, db_url))
     return TractImageryOut(
         tract_id=tract_id,
-        acquisition_time=tract.get("acquisition_time"),
+        phase_id=tract.get("phase_id"),
         tiles=d["tiles"],
         tile_size=d["tile_size"],
         attribution=d["attribution"],

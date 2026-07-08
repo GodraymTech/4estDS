@@ -4,9 +4,9 @@ from pathlib import Path
 
 from PIL import Image
 
-from forestds.tasks.batch import build_batch_location
+from forestds.tasks.batch import build_batch_tract_id
 from forestds.utils.input_inspect import (
-    extract_image_acquisition_time,
+    extract_image_phase_id,
     inspect_input_path,
     normalize_user_path,
 )
@@ -29,10 +29,10 @@ def test_inspect_input_path_file_reads_stem_and_mtime_date(tmp_path: Path) -> No
     assert items[0].stem == "Q12"
     assert items[0].width == 12
     assert items[0].height == 8
-    assert extract_image_acquisition_time(image)[0]
+    assert extract_image_phase_id(image)[0]
 
 
-def test_build_batch_location_uses_user_value_as_prefix() -> None:
-    assert build_batch_location(Path("/data/Q12.tif"), None) == "Q12"
-    assert build_batch_location(Path("/data/Q12.tif"), "珠海_斗门") == "珠海_斗门_Q12"
-    assert build_batch_location(Path("/data/Q12.tif"), "珠海_斗门", 2) == "珠海_斗门_Q12_2"
+def test_build_batch_tract_id_uses_user_value_as_prefix() -> None:
+    assert build_batch_tract_id(Path("/data/Q12.tif"), None) == "Q12"
+    assert build_batch_tract_id(Path("/data/Q12.tif"), "珠海_斗门") == "珠海_斗门_Q12"
+    assert build_batch_tract_id(Path("/data/Q12.tif"), "珠海_斗门", 2) == "珠海_斗门_Q12_2"

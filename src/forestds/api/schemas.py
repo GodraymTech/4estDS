@@ -28,8 +28,8 @@ class InferSubmit(BaseModel):
     image_key: Optional[str] = Field(None, description="已上传影像的存储 key")
     input_path: Optional[str] = Field(None, description="本地影像文件或目录路径")
     arch: Optional[str] = None
-    acquisition_time: Optional[str] = Field(None, description="地块时相 YYYYmmdd")
-    location: Optional[str] = None
+    phase_id: Optional[str] = Field(None, description="地块时相 YYYYMMDD")
+    tract_id: Optional[str] = None
     tile_size: Optional[int] = Field(None, ge=1)
     overlap_rate: Optional[float] = Field(None, ge=0.0, le=0.5)
     dsm: Optional[str] = None
@@ -48,8 +48,8 @@ class InputInspectImage(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     crs_epsg: Optional[int] = None
-    acquisition_time: Optional[str] = None
-    acquisition_time_source: Optional[str] = None
+    phase_id: Optional[str] = None
+    phase_source: Optional[str] = None
 
 
 class InputInspectOut(BaseModel):
@@ -57,8 +57,8 @@ class InputInspectOut(BaseModel):
     normalized_path: str
     input_kind: str
     image_count: int
-    suggested_location: Optional[str] = None
-    suggested_acquisition_time: Optional[str] = None
+    suggested_tract_id: Optional[str] = None
+    suggested_phase_id: Optional[str] = None
     images: list[InputInspectImage] = Field(default_factory=list)
 
 
@@ -148,9 +148,7 @@ class TractOut(BaseModel):
     model_config = {"extra": "allow"}
 
     tract_id: str
-    name: Optional[str] = None
-    acquisition_time: Optional[str] = None
-    location: Optional[str] = None
+    phase_id: Optional[str] = None
     geo_area: Optional[float] = None
     area_unit: Optional[str] = None
     crs_epsg: Optional[int] = None
@@ -165,7 +163,7 @@ class TractImageryOut(BaseModel):
     """
 
     tract_id: str
-    acquisition_time: Optional[str] = None
+    phase_id: Optional[str] = None
     tiles: Optional[list[str]] = None
     tile_size: int = 256
     attribution: Optional[str] = None
@@ -183,12 +181,14 @@ class TractSummaryOut(BaseModel):
     model_config = {"extra": "allow"}
 
     tract_id: Optional[str] = None
+    tract_phase_pk: Optional[str] = None
+    phase_id: Optional[str] = None
     run_id: Optional[str] = None
     tree_count: int = 0
     species: dict[str, int] = Field(default_factory=dict)
     density_per_ha: Optional[float] = None
-    crown_w_geo: dict[str, Any] = Field(default_factory=dict)
-    crown_h_geo: dict[str, Any] = Field(default_factory=dict)
+    crown_width_geo: dict[str, Any] = Field(default_factory=dict)
+    crown_height_geo: dict[str, Any] = Field(default_factory=dict)
     crown_area_geo: dict[str, Any] = Field(default_factory=dict)
     meta: dict[str, Any] = Field(default_factory=dict)
 

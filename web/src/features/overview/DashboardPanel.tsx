@@ -9,7 +9,7 @@ export function DashboardPanel() {
   const total = list.length;
   const published = list.filter((t) => t.active_run_id).length;
   const area = list.reduce((s, t) => s + (t.geo_area ?? 0), 0);
-  const phases = new Set(list.map((t) => t.acquisition_time).filter(Boolean))
+  const phases = new Set(list.map((t) => t.phase_id).filter(Boolean))
     .size;
   const unit = list.find((t) => t.area_unit)?.area_unit || "";
 

@@ -1,9 +1,9 @@
 """异步推理作业端点。
 
 - POST /jobs/infer -> 202 + job_id(即 run_id)，作业入 GPU 队列异步执行。
-- GET  /jobs/:job_id -> 从 run_logs 轮询状态(无行=queued)。
+- GET  /jobs/:job_id -> 从 runs 轮询状态(无行=queued)。
 
-作业状态复用 run_logs 表为单一真相，不引入额外结果后端(KISS/一致性)。
+作业状态复用 runs 表为单一真相，不引入额外结果后端(KISS/一致性)。
 """
 from __future__ import annotations
 
@@ -104,19 +104,19 @@ def inspect_input(body: InputInspectRequest) -> InputInspectOut:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     first = images[0] if images else None
-    suggested_location = None
-    suggested_acquisition_time = None
+    suggested_tract_id = None
+    suggested_phase_id = None
     if kind == "file" and first is not None:
-        suggested_location = first.stem
-        suggested_acquisition_time = first.acquisition_time
+        suggested_tract_id = first.stem
+        suggested_phase_id = first.phase_id
 
     return InputInspectOut(
         input_path=body.input_path,
         normalized_path=str(normalized_path),
         input_kind=kind,
         image_count=len(images),
-        suggested_location=suggested_location,
-        suggested_acquisition_time=suggested_acquisition_time,
+        suggested_tract_id=suggested_tract_id,
+        suggested_phase_id=suggested_phase_id,
         images=[
             InputInspectImage(
                 path=item.path,
@@ -124,8 +124,8 @@ def inspect_input(body: InputInspectRequest) -> InputInspectOut:
                 width=item.width,
                 height=item.height,
                 crs_epsg=item.crs_epsg,
-                acquisition_time=item.acquisition_time,
-                acquisition_time_source=item.acquisition_time_source,
+                phase_id=item.phase_id,
+                phase_source=item.phase_source,
             )
             for item in images[:50]
         ],
@@ -159,8 +159,8 @@ def submit_infer(
         req = InferenceRequest(
             image_path=image_path,
             arch=body.arch,
-            acquisition_time=body.acquisition_time,
-            location=body.location,
+            phase_id=body.phase_id,
+            tract_id=body.tract_id,
             tile_size=body.tile_size,
             overlap_rate=body.overlap_rate,
             dsm=dsm,
@@ -185,8 +185,8 @@ def submit_infer(
             batch_req = BatchInferenceRequest(
                 input_path=str(normalized_path),
                 arch=body.arch,
-                acquisition_time=body.acquisition_time,
-                location=body.location,
+                phase_id=body.phase_id,
+                tract_id=body.tract_id,
                 tile_size=body.tile_size,
                 overlap_rate=body.overlap_rate,
                 dsm=dsm,
@@ -202,8 +202,8 @@ def submit_infer(
             req = InferenceRequest(
                 image_path=str(normalized_path),
                 arch=body.arch,
-                acquisition_time=body.acquisition_time,
-                location=body.location,
+                phase_id=body.phase_id,
+                tract_id=body.tract_id,
                 tile_size=body.tile_size,
                 overlap_rate=body.overlap_rate,
                 dsm=dsm,

@@ -1,14 +1,12 @@
-"""读取层（阶段六）：为统计报告 / 导出提供查询。
-
-纯标准库 sqlite3，返回普通 dict（与 ORM 解耦，保证无重依赖可跑）。
-与 writer.py 对称： writer 管写、reader 管读。
-"""
+"""Read helpers for the tract -> phase -> TIFF -> observation schema."""
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
 from loguru import logger as log
+
 from .schema import init_db, resolve_db_path
 
 
@@ -22,6 +20,23 @@ def _connect(url: str | None) -> sqlite3.Connection:
 
 def _rows_to_dicts(rows) -> list[dict]:
     return [dict(r) for r in rows]
+
+
+def _loads(raw: str | None, default):
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _latest_path(raw: str | None) -> str | None:
+    data = _loads(raw, {})
+    if not isinstance(data, dict) or not data:
+        return None
+    key = sorted(str(k) for k in data.keys())[-1]
+    return data.get(key)
 
 
 def _parse_wkt_point(wkt: str | None) -> tuple[float, float] | None:
@@ -62,12 +77,65 @@ def _to_wgs84(x: float, y: float, tract: dict) -> tuple[float, float] | None:
     return None
 
 
+def _base_tract_query(where: str = "") -> str:
+    return (
+        "SELECT tr.tract_pk, tr.region_id, tr.tract_id, tr.boundary_geom, tr.boundary_source, "
+        "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
+        "tp.tract_phase_pk, tp.phase_id, tp.coverage_status, tp.active_run_id, "
+        "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
+        "tf.footprint_geom, tf.footprint_bbox, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
+        "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, "
+        "tf.dtype, tf.nodata, tf.inference_status "
+        "FROM tracts tr "
+        "LEFT JOIN tract_phases tp ON tp.tract_phase_pk = ("
+        "  SELECT tp2.tract_phase_pk FROM tract_phases tp2 "
+        "  WHERE tp2.tract_pk = tr.tract_pk "
+        "  ORDER BY (tp2.active_run_id IS NOT NULL) DESC, tp2.phase_id DESC LIMIT 1"
+        ") "
+        "LEFT JOIN tiffs tf ON tf.rowid = ("
+        "  SELECT tf2.rowid FROM tiffs tf2 "
+        "  WHERE tf2.tract_phase_pk = tp.tract_phase_pk "
+        "  ORDER BY tf2.created_at DESC LIMIT 1"
+        ") "
+        f"{where}"
+    )
+
+
+def _phase_tract_query(where: str = "") -> str:
+    return (
+        "SELECT tr.tract_pk, tr.region_id, tr.tract_id, tr.boundary_geom, tr.boundary_source, "
+        "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
+        "tp.tract_phase_pk, tp.phase_id, tp.coverage_status, tp.active_run_id, "
+        "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
+        "tf.footprint_geom, tf.footprint_bbox, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
+        "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, "
+        "tf.dtype, tf.nodata, tf.inference_status "
+        "FROM tract_phases tp "
+        "JOIN tracts tr ON tr.tract_pk = tp.tract_pk "
+        "LEFT JOIN tiffs tf ON tf.rowid = ("
+        "  SELECT tf2.rowid FROM tiffs tf2 "
+        "  WHERE tf2.tract_phase_pk = tp.tract_phase_pk "
+        "  ORDER BY tf2.created_at DESC LIMIT 1"
+        ") "
+        f"{where}"
+    )
+
+
+def _tract_row(row: dict) -> dict:
+    out = dict(row)
+    out["status"] = out.get("coverage_status") or out.get("tract_coverage_status")
+    out["source_path"] = _latest_path(out.get("path_versions"))
+    return out
+
+
 def _latest_run_for_tract_conn(conn: sqlite3.Connection, tract_id: str) -> str | None:
     row = conn.execute(
         "SELECT o.run_id FROM tree_observations o "
-        "JOIN run_logs r ON r.run_id = o.run_id "
-        "WHERE o.tract_id=? AND r.status='succeeded' ORDER BY r.started_at DESC LIMIT 1",
-        (tract_id,),
+        "JOIN runs r ON r.run_id = o.run_id "
+        "JOIN tract_phases tp ON tp.tract_phase_pk = o.tract_phase_pk "
+        "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) AND r.status='succeeded' "
+        "ORDER BY r.started_at DESC LIMIT 1",
+        (tract_id, tract_id),
     ).fetchone()
     return row["run_id"] if row else None
 
@@ -76,18 +144,22 @@ def _mean_observation_center(
     conn: sqlite3.Connection,
     tract: dict,
 ) -> tuple[float, float] | None:
-    tract_id = tract.get("tract_id")
-    if not tract_id:
+    tract_key = tract.get("tract_phase_pk") or tract.get("tract_id")
+    if not tract_key:
         return None
-    run_id = tract.get("active_run_id") or _latest_run_for_tract_conn(conn, tract_id)
-    sql = "SELECT center_geo FROM tree_observations WHERE tract_id=? AND center_geo IS NOT NULL"
-    params: list[str] = [tract_id]
+    run_id = tract.get("active_run_id") or _latest_run_for_tract_conn(conn, tract_key)
+    sql = (
+        "SELECT o.center_geom FROM tree_observations o "
+        "JOIN tract_phases tp ON tp.tract_phase_pk=o.tract_phase_pk "
+        "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) AND o.center_geom IS NOT NULL"
+    )
+    params: list[str] = [tract_key, tract_key]
     if run_id:
-        sql += " AND run_id=?"
+        sql += " AND o.run_id=?"
         params.append(run_id)
     points = []
     for row in conn.execute(sql, params).fetchall():
-        pt = _parse_wkt_point(row["center_geo"])
+        pt = _parse_wkt_point(row["center_geom"])
         if isinstance(pt, tuple) and len(pt) == 2:
             points.append(pt)
     if not points:
@@ -99,16 +171,18 @@ def _mean_observation_center(
 
 def _enrich_tracts(conn: sqlite3.Connection, tracts: list[dict]) -> list[dict]:
     for tract in tracts:
-        tract_id = tract.get("tract_id")
+        tract_key = tract.get("tract_phase_pk") or tract.get("tract_id")
         run_id = None
-        if tract_id:
-            run_id = tract.get("active_run_id") or _latest_run_for_tract_conn(conn, tract_id)
+        if tract_key:
+            run_id = tract.get("active_run_id") or _latest_run_for_tract_conn(conn, tract_key)
             if run_id and not tract.get("active_run_id"):
                 tract["active_run_id"] = run_id
             row_count = conn.execute(
-                "SELECT COUNT(*) AS c FROM tree_observations WHERE tract_id=?"
-                + (" AND run_id=?" if run_id else ""),
-                (tract_id, run_id) if run_id else (tract_id,),
+                "SELECT COUNT(*) AS c FROM tree_observations o "
+                "JOIN tract_phases tp ON tp.tract_phase_pk=o.tract_phase_pk "
+        "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?)"
+        + (" AND o.run_id=?" if run_id else ""),
+                (tract_key, tract_key, run_id) if run_id else (tract_key, tract_key),
             ).fetchone()
             tract["observation_count"] = int(row_count["c"]) if row_count else 0
         if tract.get("center_lng") is not None and tract.get("center_lat") is not None:
@@ -121,61 +195,41 @@ def _enrich_tracts(conn: sqlite3.Connection, tracts: list[dict]) -> list[dict]:
 
 
 def get_tract(tract_id: str, *, url: str | None = None) -> dict | None:
-    """取单个地块元信息。"""
+    """取单个地块元信息。支持 tract_id 或 tract_pk。"""
     conn = _connect(url)
     try:
         row = conn.execute(
-            "SELECT * FROM tracts WHERE tract_id=?", (tract_id,)
+            _phase_tract_query("WHERE tp.tract_phase_pk=? LIMIT 1"),
+            (tract_id,),
         ).fetchone()
-        tracts = _enrich_tracts(conn, [dict(row)]) if row else []
+        if row:
+            tracts = _enrich_tracts(conn, [_tract_row(dict(row))])
+            return tracts[0] if tracts else None
+        row = conn.execute(
+            _base_tract_query("WHERE tr.tract_id=? OR tr.tract_pk=? LIMIT 1"),
+            (tract_id, tract_id),
+        ).fetchone()
+        tracts = _enrich_tracts(conn, [_tract_row(dict(row))]) if row else []
     finally:
         conn.close()
     return tracts[0] if tracts else None
 
 
-def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    return any(
-        row["name"] == column
-        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
-    )
-
-
-def resolve_tract_id(
-    *,
-    tract_id: str | None = None,
-    acquisition_time: str | None = None,
-    location: str | None = None,
-    url: str | None = None,
-) -> str | None:
-    """按 tract_id 或 (acquisition_time, location) 定位地块。"""
-    if tract_id:
-        return tract_id
-    if not (acquisition_time and location):
-        return None
-    conn = _connect(url)
-    try:
-        row = conn.execute(
-            "SELECT tract_id FROM tracts WHERE acquisition_time=? AND location=?",
-            (acquisition_time, location),
-        ).fetchone()
-    finally:
-        conn.close()
-    return row["tract_id"] if row else None
-
-
 def latest_run_for_tract(tract_id: str, *, url: str | None = None) -> str | None:
-    """返回地块最近一次有观测的 run_id。"""
+    """返回地块最近一次有观测的成功 run_id。"""
     conn = _connect(url)
     try:
-        row = conn.execute(
-            "SELECT o.run_id FROM tree_observations o "
-            "JOIN run_logs r ON r.run_id = o.run_id "
-            "WHERE o.tract_id=? AND r.status='succeeded' ORDER BY r.started_at DESC LIMIT 1",
-            (tract_id,),
-        ).fetchone()
+        return _latest_run_for_tract_conn(conn, tract_id)
     finally:
         conn.close()
-    return row["run_id"] if row else None
+
+
+def _observation_row(row: dict) -> dict:
+    out = dict(row)
+    out["geom_crown"] = out.get("geom_crown") or out.get("crown_geom")
+    out["crown_area_geo"] = out.get("crown_area_geo_real") or out.get("crown_area_geo_est")
+    out["crown_volume_geo"] = out.get("crown_volume_geo_real") or out.get("crown_volume_geo_est")
+    return out
 
 
 def fetch_observations(
@@ -189,27 +243,23 @@ def fetch_observations(
         raise ValueError("fetch_observations 需要 run_id 或 tract_id")
     clauses, params = [], []
     if run_id:
-        clauses.append("run_id=?")
+        clauses.append("o.run_id=?")
         params.append(run_id)
     if tract_id:
-        clauses.append("tract_id=?")
-        params.append(tract_id)
+        clauses.append("(tp.tract_id=? OR tp.tract_phase_pk=?)")
+        params.extend([tract_id, tract_id])
     where = " AND ".join(clauses)
     conn = _connect(url)
     try:
         rows = conn.execute(
-            f"SELECT * FROM tree_observations WHERE {where}", params
+            "SELECT o.*, tp.tract_id, tp.region_id FROM tree_observations o "
+            "JOIN tract_phases tp ON tp.tract_phase_pk=o.tract_phase_pk "
+            f"WHERE {where}",
+            params,
         ).fetchall()
     finally:
         conn.close()
-    obs = _rows_to_dicts(rows)
-    for o in obs:
-        if "crown_area_px" not in o or o["crown_area_px"] is None:
-            o["crown_area_px"] = o.get("crown_area_px_real")
-        if "crown_area_geo" not in o or o["crown_area_geo"] is None:
-            o["crown_area_geo"] = o.get("crown_area_geo_real")
-        if "crown_volume_geo" not in o or o["crown_volume_geo"] is None:
-            o["crown_volume_geo"] = o.get("crown_volume_geo_real")
+    obs = [_observation_row(dict(row)) for row in rows]
     log.debug("fetch_observations: {} 条 (run_id={} tract_id={})", len(obs), run_id, tract_id)
     return obs
 
@@ -217,9 +267,7 @@ def fetch_observations(
 def get_run(run_id: str, *, url: str | None = None) -> dict | None:
     conn = _connect(url)
     try:
-        row = conn.execute(
-            "SELECT * FROM run_logs WHERE run_id=?", (run_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
     finally:
         conn.close()
     return dict(row) if row else None
@@ -237,12 +285,12 @@ def list_runs(
         select_sql = (
             "SELECT r.*, "
             "(SELECT COUNT(*) FROM tree_observations o WHERE o.run_id=r.run_id) AS observation_count, "
-            "(SELECT o.tract_id FROM tree_observations o WHERE o.run_id=r.run_id LIMIT 1) AS tract_id, "
-            "(SELECT t.geo_area FROM tracts t WHERE t.tract_id = "
-            "(SELECT o.tract_id FROM tree_observations o WHERE o.run_id=r.run_id LIMIT 1)) AS geo_area, "
-            "(SELECT t.area_unit FROM tracts t WHERE t.tract_id = "
-            "(SELECT o.tract_id FROM tree_observations o WHERE o.run_id=r.run_id LIMIT 1)) AS area_unit "
-            "FROM run_logs r "
+            "tp.tract_id, tf.geo_area, tf.area_unit "
+            "FROM runs r "
+            "LEFT JOIN tract_phases tp ON tp.tract_phase_pk = r.tract_phase_pk "
+            "LEFT JOIN tiffs tf ON tf.rowid = ("
+            "  SELECT tf2.rowid FROM tiffs tf2 WHERE tf2.tract_phase_pk=r.tract_phase_pk ORDER BY tf2.created_at DESC LIMIT 1"
+            ") "
         )
         if task_type:
             rows = conn.execute(
@@ -250,10 +298,7 @@ def list_runs(
                 (task_type, bounded_limit),
             ).fetchall()
         else:
-            rows = conn.execute(
-                select_sql + "ORDER BY r.started_at DESC LIMIT ?",
-                (bounded_limit,),
-            ).fetchall()
+            rows = conn.execute(select_sql + "ORDER BY r.started_at DESC LIMIT ?", (bounded_limit,)).fetchall()
     finally:
         conn.close()
     return _rows_to_dicts(rows)
@@ -263,7 +308,17 @@ def tract_for_run(run_id: str, *, url: str | None = None) -> str | None:
     conn = _connect(url)
     try:
         row = conn.execute(
-            "SELECT tract_id FROM tree_observations WHERE run_id=? LIMIT 1",
+            "SELECT tp.tract_id FROM runs r "
+            "LEFT JOIN tract_phases tp ON tp.tract_phase_pk=r.tract_phase_pk "
+            "WHERE r.run_id=?",
+            (run_id,),
+        ).fetchone()
+        if row and row["tract_id"]:
+            return row["tract_id"]
+        row = conn.execute(
+            "SELECT tp.tract_id FROM tree_observations o "
+            "JOIN tract_phases tp ON tp.tract_phase_pk=o.tract_phase_pk "
+            "WHERE o.run_id=? LIMIT 1",
             (run_id,),
         ).fetchone()
     finally:
@@ -274,38 +329,26 @@ def tract_for_run(run_id: str, *, url: str | None = None) -> str | None:
 def list_tracts(*, url: str | None = None) -> list[dict]:
     conn = _connect(url)
     try:
-        rows = conn.execute(
-            "SELECT * FROM tracts ORDER BY acquisition_time DESC, location"
-        ).fetchall()
-        tracts = _enrich_tracts(conn, _rows_to_dicts(rows))
+        rows = conn.execute(_phase_tract_query("ORDER BY tp.phase_id DESC, tr.tract_id")).fetchall()
+        tracts = _enrich_tracts(conn, [_tract_row(dict(row)) for row in rows])
     finally:
         conn.close()
     return tracts
 
 
 def find_cached_tiles(input_path: str, *, url: str | None = None) -> Path | None:
-    """查找该图像最近一次成功运行保留的切片目录。
-
-    匹配策略（优先级递降）：
-    1. 精确路径匹配：input_path 完全一致（最可靠）
-    2. 文件名匹配：路径可能变化，但文件名（stem+suffix）不变
-
-    直接从 run_logs.tiles_dir 列读取，无需文件系统 glob。
-    若目录在磁盘上已被删除，返回 None（不信任幽灵记录）。
-    """
+    """查找该图像最近一次成功运行保留的切片目录。"""
     p = Path(input_path)
     resolved = str(p.resolve())
-    filename = p.name  # e.g. "forest_rgb.tif"
+    filename = p.name
 
     conn = _connect(url)
     try:
         row = conn.execute(
-            "SELECT run_id, tiles_dir FROM run_logs "
+            "SELECT run_id, tiles_dir FROM runs "
             "WHERE status='succeeded' AND tiles_dir IS NOT NULL "
             "AND (input_path=? OR input_path LIKE ?) "
-            "ORDER BY "
-            "  CASE WHEN input_path=? THEN 0 ELSE 1 END, "  # 精确路径优先
-            "  started_at DESC LIMIT 1",
+            "ORDER BY CASE WHEN input_path=? THEN 0 ELSE 1 END, started_at DESC LIMIT 1",
             (resolved, f"%/{filename}", resolved),
         ).fetchone()
     finally:
@@ -325,12 +368,26 @@ def active_run_for_tract(tract_id: str, *, url: str | None = None) -> str | None
     """返回地块当前激活/发布的 run_id。"""
     conn = _connect(url)
     try:
-        if not _has_column(conn, "tracts", "active_run_id"):
-            return None
         row = conn.execute(
-            "SELECT active_run_id FROM tracts WHERE tract_id=?",
-            (tract_id,),
+            "SELECT active_run_id FROM tract_phases "
+            "WHERE (tract_id=? OR tract_phase_pk=?) AND active_run_id IS NOT NULL "
+            "ORDER BY phase_id DESC LIMIT 1",
+            (tract_id, tract_id),
         ).fetchone()
     finally:
         conn.close()
     return row["active_run_id"] if row else None
+
+
+def latest_tiff_path_for_tract(tract_id: str, *, url: str | None = None) -> str | None:
+    conn = _connect(url)
+    try:
+        row = conn.execute(
+            "SELECT tf.path_versions FROM tiffs tf "
+            "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
+            "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) ORDER BY tp.phase_id DESC, tf.updated_at DESC LIMIT 1",
+            (tract_id, tract_id),
+        ).fetchone()
+    finally:
+        conn.close()
+    return _latest_path(row["path_versions"]) if row else None

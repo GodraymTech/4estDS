@@ -6,6 +6,7 @@ const META: Record<JobState, { color: string; text: string }> = {
   running: { color: "processing", text: "推理中" },
   succeeded: { color: "success", text: "已完成" },
   failed: { color: "error", text: "失败" },
+  canceled: { color: "warning", text: "已取消" },
 };
 
 // 单行作业状态: 自行轮询(useJob 在终态停止)。

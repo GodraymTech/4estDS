@@ -5,7 +5,7 @@
 - actors.py: infer_actor(GPU 队列, concurrency=1, 模型常驻)。
 - enqueue_inference: 供 API 层投递作业的唯一入口。
 
-作业状态不额外存储：复用 run_logs 表(run_id 即 job_id)。API 轮询 reader.get_run(run_id):
+作业状态不额外存储：复用 runs 表(run_id 即 job_id)。API 轮询 reader.get_run(run_id):
 无行=queued，否则取 status(running/succeeded/failed)。
 """
 from __future__ import annotations

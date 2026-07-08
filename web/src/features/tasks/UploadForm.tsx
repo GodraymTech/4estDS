@@ -34,8 +34,8 @@ const EXPORT_OPTIONS = [
 
 const PATH_TIP =
   "支持“图像路径”（单图像推理）和“文件夹路径”（批量推理）";
-const LOCATION_TIP =
-  '为输入图像设置具有唯一性的"地理标识", 格式通常为【市_县_区块名/编号】, 默认使用"图像文件名"。 如果此次任务为批量推理，您输入的「location」将作为“地理标识前缀”。';
+const TRACT_TIP =
+  '为输入图像设置地块 ID，默认使用图像文件名。批量推理时，您输入的 tract_id 将作为地块 ID 前缀。';
 
 export function UploadForm({
   activeJobId,
@@ -50,8 +50,8 @@ export function UploadForm({
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [inspect, setInspect] = useState<InputInspectResult | null>(null);
   const [inspectBusy, setInspectBusy] = useState(false);
-  const [location, setLocation] = useState("");
-  const [acquisitionTime, setAcquisitionTime] = useState("");
+  const [tractId, setTractId] = useState("");
+  const [phaseId, setPhaseId] = useState("");
   const [tileSize, setTileSize] = useState<number | null>(null);
   const [overlapPercent, setOverlapPercent] = useState<number | null>(null);
   const [exportFmt, setExportFmt] = useState("shp");
@@ -79,8 +79,8 @@ export function UploadForm({
   }, [inputPath]);
 
   const isBatch = inspect?.input_kind === "directory";
-  const suggestedLocation = inspect?.suggested_location || undefined;
-  const suggestedDate = inspect?.suggested_acquisition_time || undefined;
+  const suggestedTractId = inspect?.suggested_tract_id || undefined;
+  const suggestedPhaseId = inspect?.suggested_phase_id || undefined;
   const inputName = useMemo(() => {
     if (inspect?.normalized_path) return basename(inspect.normalized_path);
     if (inputPath.trim()) return basename(inputPath.trim());
@@ -118,8 +118,8 @@ export function UploadForm({
         jobId: ref.job_id,
         filename: inputName || uploadFile?.name || ref.job_id,
         sourceKind: isBatch ? "directory" : body.input_path ? "file" : "upload",
-        location: location || suggestedLocation,
-        acquisitionTime: acquisitionTime || suggestedDate,
+        tractId: tractId || suggestedTractId,
+        phaseId: phaseId || suggestedPhaseId,
         submittedAt: Date.now(),
       });
       onSubmitted?.(ref.job_id);
@@ -146,9 +146,9 @@ export function UploadForm({
   }
 
   function buildSubmitBody(): InferSubmit | null {
-    const cleanTime = acquisitionTime.replace(/[^\d]/g, "");
-    if (acquisitionTime && cleanTime.length !== 8) {
-      message.warning("地块生成日期需为 8 位 YYYYMMDD");
+    const cleanPhaseId = phaseId.replace(/[^\d]/g, "");
+    if (phaseId && cleanPhaseId.length !== 8) {
+      message.warning("时相 ID 需为 8 位 YYYYMMDD");
       return null;
     }
     if (!inputPath.trim() && !uploadFile) {
@@ -160,8 +160,8 @@ export function UploadForm({
       export_fmt: exportFmt,
     };
     if (inputPath.trim()) body.input_path = inputPath.trim();
-    if (cleanTime) body.acquisition_time = cleanTime;
-    if (location.trim()) body.location = location.trim();
+    if (cleanPhaseId) body.phase_id = cleanPhaseId;
+    if (tractId.trim()) body.tract_id = tractId.trim();
     if (typeof tileSize === "number") body.tile_size = tileSize;
     if (typeof overlapPercent === "number") body.overlap_rate = overlapPercent / 100;
     if (dsmOpen && dsm.trim()) body.dsm = dsm.trim();
@@ -230,24 +230,24 @@ export function UploadForm({
 
       <div className="task-form__grid">
         <div className="task-field-row">
-          <FieldLabel title="地块生成日期" />
+          <FieldLabel title="时相 ID" />
           <Input
-            value={acquisitionTime}
-            onChange={(e) => setAcquisitionTime(e.target.value)}
-            placeholder={suggestedDate ? `默认 ${suggestedDate}` : "默认读取元数据"}
+            value={phaseId}
+            onChange={(e) => setPhaseId(e.target.value)}
+            placeholder={suggestedPhaseId ? `默认 ${suggestedPhaseId}` : "默认读取元数据"}
             disabled={busy}
           />
         </div>
         <div className="task-field-row">
-          <FieldLabel title="地理标识" tooltip={LOCATION_TIP} />
+          <FieldLabel title="地块 ID" tooltip={TRACT_TIP} />
           <Input
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
+            value={tractId}
+            onChange={(e) => setTractId(e.target.value)}
             placeholder={
               isBatch
                 ? "批量时作为前缀"
-                : suggestedLocation
-                  ? `默认 ${suggestedLocation}`
+                : suggestedTractId
+                  ? `默认 ${suggestedTractId}`
                   : "默认图像文件名"
             }
             disabled={busy}
@@ -447,8 +447,8 @@ function InputStatus({
       <span>{inspect.input_kind === "directory" ? "批量目录" : "单图影像"}</span>
       <span>{inspect.image_count} 张</span>
       {size ? <span className="mono">{size}</span> : null}
-      {inspect.suggested_acquisition_time ? (
-        <span className="mono">{inspect.suggested_acquisition_time}</span>
+      {inspect.suggested_phase_id ? (
+        <span className="mono">{inspect.suggested_phase_id}</span>
       ) : null}
     </Space>
   );

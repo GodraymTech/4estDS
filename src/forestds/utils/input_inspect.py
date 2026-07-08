@@ -45,8 +45,8 @@ class ImageMetadata:
     height: int | None = None
     crs_epsg: int | None = None
     crs_wkt: str | None = None
-    acquisition_time: str | None = None
-    acquisition_time_source: str | None = None
+    phase_id: str | None = None
+    phase_source: str | None = None
 
 
 def normalize_user_path(raw: str) -> str:
@@ -101,7 +101,7 @@ def resolve_images_from_path(path: Path) -> list[Path]:
     return []
 
 
-def extract_image_acquisition_time(path: str | Path) -> tuple[str | None, str | None]:
+def extract_image_phase_id(path: str | Path) -> tuple[str | None, str | None]:
     """从影像元数据提取 YYYYMMDD 日期。
 
     优先读取 GeoTIFF/raster tags，其次读取普通图片 EXIF，最后沿用历史行为回退到
@@ -151,7 +151,7 @@ def inspect_image(path: str | Path) -> ImageMetadata:
         except Exception:
             pass
 
-    acquisition_time, source = extract_image_acquisition_time(p)
+    phase_id, source = extract_image_phase_id(p)
     return ImageMetadata(
         path=str(p),
         stem=p.stem,
@@ -159,8 +159,8 @@ def inspect_image(path: str | Path) -> ImageMetadata:
         height=height,
         crs_epsg=crs_epsg,
         crs_wkt=crs_wkt,
-        acquisition_time=acquisition_time,
-        acquisition_time_source=source,
+        phase_id=phase_id,
+        phase_source=source,
     )
 
 

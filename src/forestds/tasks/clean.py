@@ -102,7 +102,7 @@ def run_clean_pipeline(
                     parts = item.stem.split("__")
                     if len(parts) >= 2:
                         run_id = parts[1]
-                        if re.match(r"^[0-9a-f]{5}$", run_id):
+                        if re.match(r"^[0-9a-f]{5,6}$", run_id):
                             active_run_ids.add(run_id)
         
         log.info(f"活动运行日志分析完成。当前活跃 run_id 数量: {len(active_run_ids)}")
@@ -127,7 +127,7 @@ def run_clean_pipeline(
                     conn.execute("PRAGMA foreign_keys = ON")
                     
                     # 统计清理前各表数量
-                    tables = ["run_logs", "tree_observations", "tracts", "tract_trees", "tree_individuals"]
+                    tables = ["runs", "tree_observations", "tracts", "tract_phases", "tiffs", "tree_individuals"]
                     counts_before = {}
                     for t in tables:
                         try:
@@ -140,11 +140,11 @@ def run_clean_pipeline(
                     if active_run_ids:
                         placeholders = ",".join("?" for _ in active_run_ids)
                         rows = conn.execute(
-                            f"SELECT run_id, task_type FROM run_logs WHERE run_id NOT IN ({placeholders})",
+                            f"SELECT run_id, task_type FROM runs WHERE run_id NOT IN ({placeholders})",
                             tuple(active_run_ids)
                         ).fetchall()
                     else:
-                        rows = conn.execute("SELECT run_id, task_type FROM run_logs").fetchall()
+                        rows = conn.execute("SELECT run_id, task_type FROM runs").fetchall()
                     
                     for r in rows:
                         deleted_runs.append(f"{r['run_id']} ({r['task_type']})")
@@ -152,62 +152,64 @@ def run_clean_pipeline(
 
                     # 预先统计各表按地块分组即将被删除的行数（级联删除前操作）
                     obs_del_by_tract = {}
-                    trees_del_by_tract = {}
                     try:
                         if active_run_ids:
                             placeholders = ",".join("?" for _ in active_run_ids)
                             obs_del_rows = conn.execute(
-                                f"SELECT tract_id, COUNT(*) as cnt FROM tree_observations WHERE run_id NOT IN ({placeholders}) GROUP BY tract_id",
-                                tuple(active_run_ids)
-                            ).fetchall()
-                            trees_del_rows = conn.execute(
-                                f"SELECT tract_id, COUNT(*) as cnt FROM tract_trees WHERE active_run_id NOT IN ({placeholders}) GROUP BY tract_id",
+                                "SELECT tp.tract_id, COUNT(*) as cnt FROM tree_observations o "
+                                "JOIN tract_phases tp ON tp.tract_phase_pk=o.tract_phase_pk "
+                                f"WHERE o.run_id NOT IN ({placeholders}) GROUP BY tp.tract_id",
                                 tuple(active_run_ids)
                             ).fetchall()
                         else:
                             obs_del_rows = conn.execute(
-                                "SELECT tract_id, COUNT(*) as cnt FROM tree_observations GROUP BY tract_id"
-                            ).fetchall()
-                            trees_del_rows = conn.execute(
-                                "SELECT tract_id, COUNT(*) as cnt FROM tract_trees GROUP BY tract_id"
+                                "SELECT tp.tract_id, COUNT(*) as cnt FROM tree_observations o "
+                                "JOIN tract_phases tp ON tp.tract_phase_pk=o.tract_phase_pk "
+                                "GROUP BY tp.tract_id"
                             ).fetchall()
                         
                         for r in obs_del_rows:
                             obs_del_by_tract[r["tract_id"]] = r["cnt"]
-                        for r in trees_del_rows:
-                            trees_del_by_tract[r["tract_id"]] = r["cnt"]
                     except Exception as stats_err:
                         log.warning(f"预先统计地块单木删除数量失败: {stats_err}")
 
                     stats["deleted_db_by_tract"] = {
                         "tree_observations": obs_del_by_tract,
-                        "tract_trees": trees_del_by_tract,
                     }
 
-                    # 执行删除无用 run_logs
+                    # 执行删除无用 runs
                     if active_run_ids:
                         placeholders = ",".join("?" for _ in active_run_ids)
                         conn.execute(
-                            f"DELETE FROM run_logs WHERE run_id NOT IN ({placeholders})",
+                            f"DELETE FROM runs WHERE run_id NOT IN ({placeholders})",
                             tuple(active_run_ids)
                         )
                     else:
-                        conn.execute("DELETE FROM run_logs")
+                        conn.execute("DELETE FROM runs")
 
                     # 记录并删除无用地块 tracts
                     rows_tracts = conn.execute(
-                        "SELECT tract_id, name FROM tracts WHERE tract_id NOT IN (SELECT DISTINCT tract_id FROM tree_observations)"
+                        "SELECT tr.tract_id FROM tracts tr "
+                        "WHERE NOT EXISTS ("
+                        "  SELECT 1 FROM tract_phases tp "
+                        "  JOIN tree_observations o ON o.tract_phase_pk=tp.tract_phase_pk "
+                        "  WHERE tp.tract_pk=tr.tract_pk"
+                        ")"
                     ).fetchall()
-                    deleted_tracts = [f"{r['tract_id']} ({r['name']})" for r in rows_tracts]
+                    deleted_tracts = [r["tract_id"] for r in rows_tracts]
                     stats["deleted_tracts"] = deleted_tracts
                     
                     conn.execute(
-                        "DELETE FROM tracts WHERE tract_id NOT IN (SELECT DISTINCT tract_id FROM tree_observations)"
+                        "DELETE FROM tracts WHERE tract_pk NOT IN ("
+                        "  SELECT DISTINCT tp.tract_pk FROM tract_phases tp "
+                        "  JOIN tree_observations o ON o.tract_phase_pk=tp.tract_phase_pk"
+                        ")"
                     )
 
                     # 清理独立的无用 tree_individuals
                     conn.execute(
-                        "DELETE FROM tree_individuals WHERE individual_id NOT IN (SELECT DISTINCT individual_id FROM tract_trees WHERE individual_id IS NOT NULL)"
+                        "DELETE FROM tree_individuals WHERE individual_id NOT IN "
+                        "(SELECT DISTINCT individual_id FROM tree_observations WHERE individual_id IS NOT NULL)"
                     )
 
                     conn.commit()

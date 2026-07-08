@@ -18,6 +18,7 @@ const STATUS_TEXT: Record<JobState, string> = {
   running: "推理中",
   succeeded: "已完成",
   failed: "失败",
+  canceled: "已取消",
 };
 
 export function TasksCenter() {
@@ -52,9 +53,9 @@ export function TasksCenter() {
       },
     },
     {
-      title: "地理标识",
-      dataIndex: "location",
-      key: "location",
+      title: "地块 ID",
+      dataIndex: "tractId",
+      key: "tractId",
       render: (v: string | undefined) => v || "-",
     },
     {
@@ -294,7 +295,7 @@ function BatchItems({ status }: { status?: JobStatus }) {
           const row = item as Record<string, unknown>;
           return (
             <div className="task-batch__row" key={String(row.run_id ?? idx)}>
-              <span>{String(row.location ?? row.path ?? "-")}</span>
+              <span>{String(row.tract_key ?? row.path ?? "-")}</span>
               <Tag color={row.status === "succeeded" ? "success" : "error"}>
                 {row.status === "succeeded" ? "完成" : "失败"}
               </Tag>

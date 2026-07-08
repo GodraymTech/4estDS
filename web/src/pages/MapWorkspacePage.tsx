@@ -114,7 +114,7 @@ const GUANGDONG_PLACES: Array<{ name: string; center: LngLat; zoom: number }> = 
   { name: "中山", center: [113.3926, 22.5159], zoom: 11 },
 ];
 
-interface PlotGroup {
+interface TractGroup {
   key: string;
   label: string;
   tracts: Tract[];
@@ -122,8 +122,8 @@ interface PlotGroup {
   center: LngLat;
 }
 
-interface HoveredPlot {
-  group: PlotGroup;
+interface HoveredTract {
+  group: TractGroup;
   x: number;
   y: number;
 }
@@ -134,7 +134,7 @@ export function MapWorkspacePage() {
   const { data: tracts, error: tractsError, isError: tractsFailed, isLoading } = useTracts();
   const [map, setMap] = useState<MapController | null>(null);
   const [ready, setReady] = useState(false);
-  const [hovered, setHovered] = useState<HoveredPlot | null>(null);
+  const [hovered, setHovered] = useState<HoveredTract | null>(null);
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [basemapId, setBasemapId] = useState(env.defaultBasemapId);
   const [roadVisible, setRoadVisible] = useState(true);
@@ -161,20 +161,21 @@ export function MapWorkspacePage() {
     [overviewBounds],
   );
   const list = tracts ?? EMPTY_TRACTS;
-  const plotGroups = useMemo(() => buildPlotGroups(list), [list]);
-  const overviewStats = useMemo(() => buildOverviewStats(list, plotGroups), [list, plotGroups]);
-  const searchOptions = useMemo(() => buildSearchOptions(plotGroups), [plotGroups]);
-  const groupByTract = useMemo(() => mapTractToGroup(plotGroups), [plotGroups]);
+  const tractGroups = useMemo(() => buildTractGroups(list), [list]);
+  const overviewStats = useMemo(() => buildOverviewStats(list, tractGroups), [list, tractGroups]);
+  const searchOptions = useMemo(() => buildSearchOptions(tractGroups), [tractGroups]);
+  const groupByTract = useMemo(() => mapTractToGroup(tractGroups), [tractGroups]);
   const selected = useMemo(
-    () => list.find((t) => t.tract_id === selectedId),
+    () => list.find((t) => tractRequestId(t) === selectedId),
     [list, selectedId],
   );
-  const selectedGroup = selected ? groupByTract.get(selected.tract_id) : undefined;
+  const selectedGroup = selected ? groupByTract.get(tractRequestId(selected)) : undefined;
   const activeTract = selected;
+  const activeTractId = activeTract ? tractRequestId(activeTract) : undefined;
 
-  const observations = useObservations(activeTract?.tract_id, "crown");
-  const imagery = useTractImagery(activeTract?.tract_id);
-  const summary = useTractSummary(activeTract?.tract_id);
+  const observations = useObservations(activeTractId, "crown");
+  const imagery = useTractImagery(activeTractId);
+  const summary = useTractSummary(activeTractId);
   const speciesList = useMemo(
     () => extractSpecies(observations.data),
     [observations.data],
@@ -184,7 +185,7 @@ export function MapWorkspacePage() {
     [speciesList],
   );
 
-  const missingCoords = Math.max(0, list.length - plotGroups.reduce((n, g) => n + g.tracts.length, 0));
+  const missingCoords = Math.max(0, list.length - tractGroups.reduce((n, g) => n + g.tracts.length, 0));
 
   useEffect(() => {
     if (!tractId) {
@@ -203,7 +204,7 @@ export function MapWorkspacePage() {
       }
       return;
     }
-    if (list.some((t) => t.tract_id === tractId)) {
+    if (list.some((t) => tractRequestId(t) === tractId)) {
       setSelectedId(tractId);
     } else if (list.length > 0) {
       navigate("/map", { replace: true });
@@ -280,7 +281,7 @@ export function MapWorkspacePage() {
       map.setMarkers([]);
       return;
     }
-    const markers: MarkerSpec[] = plotGroups.map((group) => {
+    const markers: MarkerSpec[] = tractGroups.map((group) => {
       const element = createTractMarkerElement(Boolean(group.latest.active_run_id), {
         onClick: () => selectGroup(group),
         onEnter: (rect) =>
@@ -290,7 +291,7 @@ export function MapWorkspacePage() {
       return { id: group.key, lngLat: group.center, element };
     });
     map.setMarkers(markers);
-  }, [map, plotGroups, ready, selectedId]);
+  }, [map, ready, selectedId, tractGroups]);
 
   useEffect(() => {
     if (!map || !ready) return;
@@ -377,21 +378,23 @@ export function MapWorkspacePage() {
     });
   }, [map, measureCoords, measureMode, ready]);
 
-  function selectGroup(group: PlotGroup) {
-    setSelectedId(group.latest.tract_id);
+  function selectGroup(group: TractGroup) {
+    const id = tractRequestId(group.latest);
+    setSelectedId(id);
     fittedTract.current = null;
-    navigate(`/map/${encodeURIComponent(group.latest.tract_id)}`);
+    navigate(`/map/${encodeURIComponent(id)}`);
     map?.flyTo(group.center, 15);
   }
 
   function selectPhaseTract(tract: Tract) {
-    setSelectedId(tract.tract_id);
+    const id = tractRequestId(tract);
+    setSelectedId(id);
     fittedTract.current = null;
-    navigate(`/map/${encodeURIComponent(tract.tract_id)}`);
+    navigate(`/map/${encodeURIComponent(id)}`);
   }
 
   function selectSearch(key: string) {
-    const group = plotGroups.find((g) => g.key === key);
+    const group = tractGroups.find((g) => g.key === key);
     if (group) {
       selectGroup(group);
       return;
@@ -494,7 +497,7 @@ export function MapWorkspacePage() {
             opacity: selectedGroup.tracts.length < 2 ? 0.54 : 1,
           }}
           disabled={selectedGroup.tracts.length < 2}
-          onClick={() => navigate(`/change?location=${encodeURIComponent(selectedGroup.key)}`)}
+          onClick={() => navigate(`/change?tract_id=${encodeURIComponent(selectedGroup.key)}`)}
         >
           <SwapOutlined />
           <span>时相对比</span>
@@ -610,7 +613,7 @@ export function MapWorkspacePage() {
         </div>
       ) : null}
 
-      {!chromeHidden && hovered ? <PlotHoverCard hovered={hovered} /> : null}
+      {!chromeHidden && hovered ? <TractHoverCard hovered={hovered} /> : null}
 
       {isLoading ? (
         <div style={LOADING}>
@@ -625,7 +628,7 @@ export function MapWorkspacePage() {
             }
           />
         </div>
-      ) : plotGroups.length === 0 ? (
+      ) : tractGroups.length === 0 ? (
         <div style={EMPTY}>
           <Empty description="暂无可上图地块" />
         </div>
@@ -638,15 +641,15 @@ export function MapWorkspacePage() {
   );
 }
 
-function buildPlotGroups(tracts: Tract[]): PlotGroup[] {
+function buildTractGroups(tracts: Tract[]): TractGroup[] {
   const byKey = new Map<string, Tract[]>();
   for (const tract of tracts) {
-    const key = tract.location || tract.name || tract.tract_id;
+    const key = tract.tract_id;
     const arr = byKey.get(key) ?? [];
     arr.push(tract);
     byKey.set(key, arr);
   }
-  const groups: PlotGroup[] = [];
+  const groups: TractGroup[] = [];
   for (const [key, arr] of byKey) {
     const sorted = [...arr].sort(compareTractTime);
     const latest = sorted[sorted.length - 1];
@@ -655,7 +658,7 @@ function buildPlotGroups(tracts: Tract[]): PlotGroup[] {
     if (!center) continue;
     groups.push({
       key,
-      label: latest.name || latest.location || latest.tract_id,
+      label: latest.tract_id,
       tracts: sorted,
       latest,
       center,
@@ -665,15 +668,19 @@ function buildPlotGroups(tracts: Tract[]): PlotGroup[] {
   return groups;
 }
 
-function mapTractToGroup(groups: PlotGroup[]): Map<string, PlotGroup> {
-  const out = new Map<string, PlotGroup>();
+function mapTractToGroup(groups: TractGroup[]): Map<string, TractGroup> {
+  const out = new Map<string, TractGroup>();
   for (const group of groups) {
-    for (const tract of group.tracts) out.set(tract.tract_id, group);
+    for (const tract of group.tracts) out.set(tractRequestId(tract), group);
   }
   return out;
 }
 
-function buildSearchOptions(groups: PlotGroup[]) {
+function tractRequestId(tract: Tract): string {
+  return String(tract.tract_phase_pk || tract.tract_id);
+}
+
+function buildSearchOptions(groups: TractGroup[]) {
   return [
     {
       label: "地块",
@@ -689,7 +696,7 @@ function buildSearchOptions(groups: PlotGroup[]) {
   ];
 }
 
-function buildOverviewStats(tracts: Tract[], groups: PlotGroup[]) {
+function buildOverviewStats(tracts: Tract[], groups: TractGroup[]) {
   const area = tracts.reduce((sum, t) => sum + (t.geo_area ?? 0), 0);
   const trees = tracts.reduce((sum, t) => sum + (t.observation_count ?? 0), 0);
   const located = tracts.filter((t) => tractCenter(t)).length;
@@ -705,7 +712,7 @@ function buildOverviewStats(tracts: Tract[], groups: PlotGroup[]) {
 }
 
 function compareTractTime(a: Tract, b: Tract): number {
-  return String(a.acquisition_time || "").localeCompare(String(b.acquisition_time || ""));
+  return String(a.phase_id || "").localeCompare(String(b.phase_id || ""));
 }
 
 function extractSpecies(fc?: FeatureCollection): string[] {
@@ -847,7 +854,7 @@ function ProfilePanel({
   loading,
 }: {
   tract: Tract;
-  group: PlotGroup;
+  group: TractGroup;
   imagery?: { available: boolean; source_format?: string | null; tile_service?: string | null };
   summary?: TractSummary;
   speciesColors: Map<string, string>;
@@ -860,8 +867,8 @@ function ProfilePanel({
     <div style={PROFILE_PANEL}>
       <div style={PANEL_HEAD}>
         <div style={PROFILE_TITLE_GROUP}>
-          <span style={PANEL_TITLE}>{tract.name || tract.location || tract.tract_id}</span>
-          <span style={PANEL_SUBTITLE}>时相ID {tract.acquisition_time || "未知时相"}</span>
+          <span style={PANEL_TITLE}>{tract.tract_id}</span>
+          <span style={PANEL_SUBTITLE}>时相ID {tract.phase_id || "未知时相"}</span>
         </div>
         <Space size={6}>
           <Popover
@@ -872,12 +879,12 @@ function ProfilePanel({
               <div style={PHASE_POPOVER}>
                 {group.tracts.map((phase) => (
                   <button
-                    key={phase.tract_id}
+                    key={tractRequestId(phase)}
                     type="button"
-                    style={phase.tract_id === tract.tract_id ? PHASE_OPTION_ACTIVE : PHASE_OPTION}
+                    style={tractRequestId(phase) === tractRequestId(tract) ? PHASE_OPTION_ACTIVE : PHASE_OPTION}
                     onClick={() => onSelectPhase(phase)}
                   >
-                    <span>{phase.acquisition_time || "未知时相"}</span>
+                    <span>{phase.phase_id || "未知时相"}</span>
                     <strong>{(phase.observation_count ?? 0).toLocaleString()} 株</strong>
                   </button>
                 ))}
@@ -995,8 +1002,8 @@ function buildProfileMetricSections(
     ratio: totalCount > 0 ? 1 : null,
     density: summary?.density_per_ha ?? densityFromCount(totalCount, tract.geo_area),
     crownArea: summary?.meta?.total_crown_area ?? 0,
-    crownW: summary?.crown_w_geo,
-    crownH: summary?.crown_h_geo,
+    crownW: summary?.crown_width_geo,
+    crownH: summary?.crown_height_geo,
     crownAreaDist: summary?.crown_area_geo,
     height: summary?.height,
   };
@@ -1012,8 +1019,8 @@ function buildProfileMetricSections(
         ratio: item.ratio ?? (totalCount > 0 ? count / totalCount : null),
         density: item.density_per_ha ?? densityFromCount(count, tract.geo_area),
         crownArea: item.total_crown_area ?? (item.avg_crown_area ?? 0) * count,
-        crownW: item.crown_w_geo,
-        crownH: item.crown_h_geo,
+    crownW: item.crown_width_geo,
+    crownH: item.crown_height_geo,
         crownAreaDist: item.crown_area_geo,
         height: item.height,
       } satisfies ProfileMetricSectionData;
@@ -1021,7 +1028,7 @@ function buildProfileMetricSections(
   return species.length <= 1 ? species : [total, ...species];
 }
 
-function PlotHoverCard({ hovered }: { hovered: HoveredPlot }) {
+function TractHoverCard({ hovered }: { hovered: HoveredTract }) {
   const { group, x, y } = hovered;
   const style: CSSProperties = { ...HOVER_CARD, left: x, top: y };
   return (
@@ -1029,7 +1036,7 @@ function PlotHoverCard({ hovered }: { hovered: HoveredPlot }) {
       <div style={HOVER_TITLE}>{group.label}</div>
       <div style={HOVER_ROW}>
         <span>最新时相</span>
-        <strong>{group.latest.acquisition_time || "-"}</strong>
+        <strong>{group.latest.phase_id || "-"}</strong>
       </div>
       <div style={HOVER_ROW}>
         <span>时相数</span>

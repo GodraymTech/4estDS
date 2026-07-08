@@ -19,7 +19,7 @@ import type { TemporalWipeApi } from "../shared/ui/TemporalWipe";
 const { Text } = Typography;
 
 interface CompareGroup {
-  location: string;
+  tract_id: string;
   phases: Phase[];
   center: LngLat;
 }
@@ -27,9 +27,9 @@ interface CompareGroup {
 export function ChangePage() {
   const { data: tracts, isLoading } = useTracts();
   const [params, setParams] = useSearchParams();
-  const requestedLocation = params.get("location") ?? undefined;
+  const requestedTractId = params.get("tract_id") ?? undefined;
   const groups = useMemo(() => buildCompareGroups(tracts ?? []), [tracts]);
-  const [location, setLocation] = useState<string | undefined>(undefined);
+  const [tractId, setTractId] = useState<string | undefined>(undefined);
   const [basemapId, setBasemapId] = useState(env.defaultBasemapId);
   const [roadVisible, setRoadVisible] = useState(true);
   const [wipeApi, setWipeApi] = useState<TemporalWipeApi | null>(null);
@@ -37,11 +37,11 @@ export function ChangePage() {
   const active = useMemo(() => {
     if (groups.length === 0) return undefined;
     return (
-      groups.find((g) => g.location === location)
-      ?? groups.find((g) => g.location === requestedLocation)
+      groups.find((g) => g.tract_id === tractId)
+      ?? groups.find((g) => g.tract_id === requestedTractId)
       ?? groups[0]
     );
-  }, [groups, location, requestedLocation]);
+  }, [groups, tractId, requestedTractId]);
 
   const [range, setRange] = useState<[number, number]>([0, 0]);
   const roadOverlay = roadVisible
@@ -53,13 +53,13 @@ export function ChangePage() {
   }, [active]);
 
   const options = groups.map((g) => ({
-    value: g.location,
-    label: g.location + "（" + g.phases.length + " 时相）",
+    value: g.tract_id,
+    label: g.tract_id + "（" + g.phases.length + " 时相）",
   }));
 
-  function selectLocation(next: string) {
-    setLocation(next);
-    setParams({ location: next });
+  function selectTract(next: string) {
+    setTractId(next);
+    setParams({ tract_id: next });
   }
 
   return (
@@ -70,7 +70,7 @@ export function ChangePage() {
         </div>
       ) : active ? (
         <TemporalCompare
-          key={active.location}
+          key={active.tract_id}
           phases={active.phases}
           range={range}
           onRangeChange={setRange}
@@ -90,10 +90,10 @@ export function ChangePage() {
         <Space direction="vertical" size={8} style={FULL}>
           <Select
             style={FULL}
-            placeholder="选择地点"
-            value={active?.location}
+            placeholder="选择地块"
+            value={active?.tract_id}
             options={options}
-            onChange={selectLocation}
+            onChange={selectTract}
             disabled={groups.length === 0}
           />
           <Text type="secondary">{active ? active.phases.length + " 个时相" : "无时相"}</Text>
@@ -120,25 +120,25 @@ export function ChangePage() {
 }
 
 function buildCompareGroups(tracts: Tract[]): CompareGroup[] {
-  const byLocation = new Map<string, Tract[]>();
+  const byTract = new Map<string, Tract[]>();
   for (const tract of tracts) {
-    const location = tract.location || tract.name || tract.tract_id;
-    const arr = byLocation.get(location) ?? [];
+    const tract_id = tract.tract_id;
+    const arr = byTract.get(tract_id) ?? [];
     arr.push(tract);
-    byLocation.set(location, arr);
+    byTract.set(tract_id, arr);
   }
 
   const fallbackCenter = centerOfBounds(env.overviewBounds);
   const groups: CompareGroup[] = [];
-  for (const [location, items] of byLocation) {
+  for (const [tract_id, items] of byTract) {
     const sorted = [...items].sort(compareTractTime);
     const centerSource = [...sorted].reverse().find((t) => tractCenter(t));
     groups.push({
-      location,
+      tract_id,
       phases: sorted.map((tract) => ({
-        id: tract.tract_id,
-        label: location + " · " + (tract.acquisition_time || "未知时相"),
-        time: tract.acquisition_time || "",
+        id: String(tract.tract_phase_pk || tract.tract_id),
+        label: tract_id + " · " + (tract.phase_id || "未知时相"),
+        time: tract.phase_id || "",
       })),
       center: centerSource ? tractCenter(centerSource) ?? fallbackCenter : fallbackCenter,
     });
@@ -146,13 +146,13 @@ function buildCompareGroups(tracts: Tract[]): CompareGroup[] {
   groups.sort(
     (a, b) =>
       b.phases.length - a.phases.length
-      || a.location.localeCompare(b.location, "zh-Hans-CN"),
+      || a.tract_id.localeCompare(b.tract_id, "zh-Hans-CN"),
   );
   return groups;
 }
 
 function compareTractTime(a: Tract, b: Tract): number {
-  return String(a.acquisition_time || "").localeCompare(String(b.acquisition_time || ""));
+  return String(a.phase_id || "").localeCompare(String(b.phase_id || ""));
 }
 
 function centerOfBounds(bounds: [LngLat, LngLat]): LngLat {

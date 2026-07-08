@@ -1,31 +1,197 @@
-"""观测与运行记录入库(阶段三)。
-
-纯标准库 sqlite3,与 db/schema.py 同一套表结构。提供:
-- run_logs 的开始/收尾记录(可追溯、可复现)。
-- ensure_tract: 按 (acquisition_time, location) 幂等录入地块。
-- write_observations: 把一次 run 的全图检测写入 tree_observations。
-"""
+"""Database write helpers for the tract -> phase -> TIFF -> tree model."""
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 from loguru import logger as log
+
 from .schema import init_db, resolve_db_path
+
+_REGION_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]+)_([\u4e00-\u9fffA-Za-z0-9]+)")
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _today_key() -> str:
+    return datetime.now().strftime("%Y%m%d")
+
+
 def _connect(url: str | None) -> sqlite3.Connection:
     db_path = resolve_db_path(url)
     init_db(url)
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def _dump(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _loads(raw: str | None, default):
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _hash(text: str, n: int) -> str:
+    return hashlib.sha1(text.encode("utf-8", errors="replace")).hexdigest()[:n]
+
+
+def _safe_pk(prefix: str, *parts: str) -> str:
+    return f"{prefix}_{_hash(chr(0).join(parts), 12)}"
+
+
+def _normalize_phase_id(value: str | None) -> str:
+    s = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if len(s) == 6:
+        return s + "01"
+    if len(s) >= 8:
+        return s[:8]
+    return "00000000"
+
+
+def _infer_region_id(*texts: str | None) -> str:
+    for text in texts:
+        if not text:
+            continue
+        match = _REGION_RE.search(str(text))
+        if match:
+            return f"{match.group(1)}_{match.group(2)}"
+    return "unknown_unknown"
+
+
+def _path_version(path: str | None) -> str:
+    return _dump({_today_key(): path}) if path else "{}"
+
+
+def _merge_path_version(raw: str | None, path: str | None) -> str:
+    data = _loads(raw, {})
+    if path:
+        data[_today_key()] = path
+    return _dump(data)
+
+
+def _merge_multisource(raw: str | None, source_type: str, path: str) -> str:
+    data = _loads(raw, {})
+    bucket = data.setdefault(source_type, {})
+    bucket[_today_key()] = path
+    return _dump(data)
+
+
+def _wkt_polygon(coords: list[tuple[float, float]]) -> str:
+    if not coords:
+        return "POLYGON EMPTY"
+    closed = coords + [coords[0]]
+    return "POLYGON((" + ", ".join(f"{x} {y}" for x, y in closed) + "))"
+
+
+def _compute_tiff_metadata(
+    image_path: str | None,
+    *,
+    phase_id: str,
+    tract_phase_pk: str,
+    pixel_w: int | None = None,
+    pixel_h: int | None = None,
+    gsd: float | None = None,
+    geo_area: float | None = None,
+    area_unit: str | None = None,
+    crs_epsg: int | None = None,
+    crs_wkt: str | None = None,
+) -> dict | None:
+    if not image_path:
+        return None
+
+    path = Path(image_path)
+    file_name = path.name
+    fallback_input = f"{phase_id}|{image_path}"
+    meta: dict[str, Any] = {
+        "tiff_id": _hash(fallback_input, 5),
+        "phase_id": phase_id,
+        "tract_phase_pk": tract_phase_pk,
+        "file_name": file_name,
+        "path_versions": _path_version(image_path),
+        "multisource_path_versions": "{}",
+        "footprint_geom": "POLYGON EMPTY",
+        "footprint_bbox": None,
+        "corner_hash_input": fallback_input,
+        "crs_epsg": crs_epsg,
+        "crs_wkt": crs_wkt,
+        "geotransform": None,
+        "pixel_width": pixel_w,
+        "pixel_height": pixel_h,
+        "gsd": gsd,
+        "geo_area": geo_area,
+        "area_unit": area_unit,
+        "band_count": None,
+        "dtype": None,
+        "nodata": None,
+    }
+
+    try:
+        import rasterio
+        from rasterio.warp import transform as warp_transform
+
+        with rasterio.open(image_path) as src:
+            width, height = int(src.width), int(src.height)
+            corners_px = [(0, 0), (width, 0), (width, height), (0, height)]
+            xs, ys = [], []
+            for col, row in corners_px:
+                x, y = src.transform * (col, row)
+                xs.append(float(x))
+                ys.append(float(y))
+            if src.crs:
+                lngs, lats = warp_transform(src.crs, "EPSG:4326", xs, ys)
+                coords = [(round(float(x), 6), round(float(y), 6)) for x, y in zip(lngs, lats)]
+            else:
+                coords = [(round(float(x), 6), round(float(y), 6)) for x, y in zip(xs, ys)]
+            normalized = ";".join(f"{round(x, 3):.3f},{round(y, 3):.3f}" for x, y in coords)
+            minx, miny = min(x for x, _ in coords), min(y for _, y in coords)
+            maxx, maxy = max(x for x, _ in coords), max(y for _, y in coords)
+            meta.update(
+                {
+                    "tiff_id": _hash(normalized, 5),
+                    "corner_hash_input": normalized,
+                    "footprint_geom": _wkt_polygon(coords),
+                    "footprint_bbox": _dump([minx, miny, maxx, maxy]),
+                    "crs_epsg": src.crs.to_epsg() if src.crs and hasattr(src.crs, "to_epsg") else crs_epsg,
+                    "crs_wkt": src.crs.to_wkt() if src.crs and hasattr(src.crs, "to_wkt") else crs_wkt,
+                    "geotransform": _dump(tuple(src.transform)),
+                    "pixel_width": width,
+                    "pixel_height": height,
+                    "band_count": int(src.count),
+                    "dtype": str(src.dtypes[0]) if src.dtypes else None,
+                    "nodata": src.nodata,
+                }
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.debug("TIFF 元数据读取失败，使用降级身份: path={} err={}", image_path, exc)
+
+    return meta
+
+
+def _ensure_run_exists(conn: sqlite3.Connection, run_id: str, task_type: str = "infer") -> None:
+    row = conn.execute("SELECT run_id FROM runs WHERE run_id=?", (run_id,)).fetchone()
+    if row:
+        return
+    now = _now()
+    conn.execute(
+        "INSERT INTO runs (run_id, task_type, status, started_at, created_at) VALUES (?, ?, ?, ?, ?)",
+        (run_id, task_type, "running", now, now),
+    )
 
 
 def start_run_log(
@@ -37,24 +203,37 @@ def start_run_log(
     input_path: str | None = None,
     params: dict | None = None,
     tag: str | None = None,
+    parent_run_id: str | None = None,
+    slice_size: int | None = None,
 ) -> str:
-    """插入一条 running 状态的 run_logs。返回 run_id。"""
+    """插入一条 running 状态的 runs 记录。返回 run_id。"""
+    now = _now()
     conn = _connect(url)
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO run_logs "
-            "(run_id, tag, task_type, model_arch, status, started_at, input_path, params_json) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (run_id, tag, task_type, model_arch, "running", _now(),
-             input_path, json.dumps(params or {}, ensure_ascii=False)),
+            "INSERT OR REPLACE INTO runs "
+            "(run_id, parent_run_id, tag, task_type, model_arch, status, started_at, created_at, "
+            " input_path, input_json, params_json, slice_size) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                run_id,
+                parent_run_id,
+                tag,
+                task_type,
+                model_arch,
+                "running",
+                now,
+                now,
+                input_path,
+                _dump({"input_path": input_path}) if input_path else None,
+                _dump(params or {}),
+                slice_size,
+            ),
         )
         conn.commit()
     finally:
         conn.close()
-    log.info(
-        "写入「run_log」表: run_id={} task={} arch={} input={}",
-        run_id, task_type, model_arch, input_path,
-    )
+    log.info("写入「runs」表: run_id={} task={} arch={} input={}", run_id, task_type, model_arch, input_path)
     return run_id
 
 
@@ -67,48 +246,42 @@ def finish_run_log(
     duration_s: float | None = None,
     error: str | None = None,
 ) -> None:
-    """更新 run_logs 为终态(succeeded/failed)。"""
+    """更新 runs 为终态。"""
+    normalized_status = "canceled" if status == "cancelled" else status
     conn = _connect(url)
     try:
+        _ensure_run_exists(conn, run_id)
         conn.execute(
-            "UPDATE run_logs SET status=?, ended_at=?, duration_s=?, "
-            "metrics_json=?, error=? WHERE run_id=?",
-            (status, _now(), duration_s,
-             json.dumps(metrics or {}, ensure_ascii=False), error, run_id),
+            "UPDATE runs SET status=?, ended_at=?, duration_s=?, metrics_json=?, error=? WHERE run_id=?",
+            (normalized_status, _now(), duration_s, _dump(metrics or {}), error, run_id),
         )
-        if status != "succeeded":
-            log.error("run_log 终态: run_id={} status={} error={}", run_id, status, error)
-        else:
-            log.info(
-                "「run_log」表更新终态: run_id={} status={} 耗时={}s",
-                run_id, status, f"{duration_s:.2f}" if duration_s is not None else "?",
-            )
         conn.commit()
     finally:
         conn.close()
+    if normalized_status != "succeeded":
+        log.error("runs 终态: run_id={} status={} error={}", run_id, normalized_status, error)
+    else:
+        log.info("「runs」表更新终态: run_id={} status={} 耗时={}s", run_id, normalized_status, f"{duration_s:.2f}" if duration_s is not None else "?")
 
 
 def update_tiles_dir(run_id: str, tiles_dir, *, url: str | None = None) -> None:
-    """切片落盘成功后，将目录绝对路径写入 run_logs.tiles_dir。"""
-    from pathlib import Path as _Path
+    """切片落盘成功后，将目录绝对路径写入 runs.tiles_dir。"""
     conn = _connect(url)
     try:
-        conn.execute(
-            "UPDATE run_logs SET tiles_dir=? WHERE run_id=?",
-            (str(_Path(tiles_dir).resolve()), run_id),
-        )
+        _ensure_run_exists(conn, run_id)
+        conn.execute("UPDATE runs SET tiles_dir=? WHERE run_id=?", (str(Path(tiles_dir).resolve()), run_id))
         conn.commit()
     finally:
         conn.close()
-    log.debug("tiles_dir 已记录至 run_logs: run_id={} dir={}", run_id, tiles_dir)
+    log.debug("tiles_dir 已记录至 runs: run_id={} dir={}", run_id, tiles_dir)
 
 
 def ensure_tract(
-    acquisition_time: str,
-    location: str,
+    phase_id: str,
+    tract_id: str,
     *,
     url: str | None = None,
-    name: str | None = None,
+    region_id: str | None = None,
     pixel_w: int | None = None,
     pixel_h: int | None = None,
     gsd: float | None = None,
@@ -116,45 +289,163 @@ def ensure_tract(
     area_unit: str | None = None,
     crs_epsg: int | None = None,
     crs_wkt: str | None = None,
+    image_path: str | None = None,
+    boundary_geom: str | None = None,
 ) -> str:
-    """按 (acquisition_time, location) 幂等获取/创建地块,返回 tract_id。"""
+    """幂等获取/创建地块、地块时相和可选 TIFF，返回用户可见 tract_id。"""
+    phase_id = _normalize_phase_id(phase_id)
+    resolved_tract_id = (tract_id or (Path(image_path).stem if image_path else "")).strip()
+    if not resolved_tract_id:
+        tract_id = f"tract_{uuid.uuid4().hex[:5]}"
+    else:
+        tract_id = resolved_tract_id
+    resolved_region_id = region_id or _infer_region_id(tract_id, image_path)
+    tract_pk = _safe_pk("tract", resolved_region_id, tract_id)
+    tract_phase_pk = _safe_pk("phase", tract_pk, phase_id)
+    now = _now()
+
     conn = _connect(url)
     try:
-        row = conn.execute(
-            "SELECT tract_id FROM tracts WHERE acquisition_time=? AND location=?",
-            (acquisition_time, location),
-        ).fetchone()
-        if row:
-            if crs_epsg is not None or crs_wkt is not None:
-                conn.execute(
-                    "UPDATE tracts SET "
-                    "crs_epsg=COALESCE(crs_epsg, ?), "
-                    "crs_wkt=COALESCE(crs_wkt, ?) "
-                    "WHERE tract_id=?",
-                    (crs_epsg, crs_wkt, row[0]),
-                )
-                conn.commit()
-            return row[0]
-        name_part = ""
-        if name:
-            clean_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name)
-            name_part = f"{clean_name[:20]}_"
-        tract_id = f"tract_{name_part}{acquisition_time}_{uuid.uuid4().hex[:5]}"
         conn.execute(
             "INSERT INTO tracts "
-            "(tract_id, name, acquisition_time, location, pixel_w, pixel_h, gsd, "
-            " geo_area, area_unit, crs_epsg, crs_wkt, status) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (tract_id, name, acquisition_time, location,
-             pixel_w, pixel_h, gsd, geo_area, area_unit, crs_epsg, crs_wkt, "registered"),
+            "(tract_pk, region_id, tract_id, boundary_geom, boundary_source, coverage_status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(tract_pk) DO UPDATE SET updated_at=excluded.updated_at",
+            (
+                tract_pk,
+                resolved_region_id,
+                tract_id,
+                boundary_geom,
+                "manual" if boundary_geom else "unset",
+                "none",
+                now,
+                now,
+            ),
         )
-        if geo_area:
-            log.info(
-                "原图地块信息注入「tracts」表: tract_id={}", tract_id )
+        conn.execute(
+            "INSERT INTO tract_phases "
+            "(tract_phase_pk, tract_pk, region_id, tract_id, phase_id, boundary_geom, coverage_status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(tract_pk, phase_id) DO UPDATE SET updated_at=excluded.updated_at",
+            (
+                tract_phase_pk,
+                tract_pk,
+                resolved_region_id,
+                tract_id,
+                phase_id,
+                None,
+                "none",
+                now,
+                now,
+            ),
+        )
+
+        tiff_meta = _compute_tiff_metadata(
+            image_path,
+            phase_id=phase_id,
+            tract_phase_pk=tract_phase_pk,
+            pixel_w=pixel_w,
+            pixel_h=pixel_h,
+            gsd=gsd,
+            geo_area=geo_area,
+            area_unit=area_unit,
+            crs_epsg=crs_epsg,
+            crs_wkt=crs_wkt,
+        )
+        if tiff_meta:
+            existing = conn.execute(
+                "SELECT path_versions, multisource_path_versions FROM tiffs WHERE tiff_id=? AND phase_id=?",
+                (tiff_meta["tiff_id"], phase_id),
+            ).fetchone()
+            if existing:
+                tiff_meta["path_versions"] = _merge_path_version(existing["path_versions"], image_path)
+                tiff_meta["multisource_path_versions"] = existing["multisource_path_versions"] or "{}"
+            conn.execute(
+                "INSERT INTO tiffs "
+                "(tiff_id, phase_id, tract_phase_pk, file_name, path_versions, multisource_path_versions, "
+                " footprint_geom, footprint_bbox, corner_hash_input, crs_epsg, crs_wkt, geotransform, "
+                " pixel_width, pixel_height, gsd, geo_area, area_unit, band_count, dtype, nodata, "
+                " inference_status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(tiff_id, phase_id) DO UPDATE SET "
+                " tract_phase_pk=excluded.tract_phase_pk, path_versions=excluded.path_versions, "
+                " multisource_path_versions=excluded.multisource_path_versions, updated_at=excluded.updated_at",
+                (
+                    tiff_meta["tiff_id"],
+                    phase_id,
+                    tract_phase_pk,
+                    tiff_meta["file_name"],
+                    tiff_meta["path_versions"],
+                    tiff_meta["multisource_path_versions"],
+                    tiff_meta["footprint_geom"],
+                    tiff_meta["footprint_bbox"],
+                    tiff_meta["corner_hash_input"],
+                    tiff_meta["crs_epsg"],
+                    tiff_meta["crs_wkt"],
+                    tiff_meta["geotransform"],
+                    tiff_meta["pixel_width"],
+                    tiff_meta["pixel_height"],
+                    tiff_meta["gsd"],
+                    tiff_meta["geo_area"],
+                    tiff_meta["area_unit"],
+                    tiff_meta["band_count"],
+                    tiff_meta["dtype"],
+                    tiff_meta["nodata"],
+                    "pending",
+                    now,
+                    now,
+                ),
+            )
+            tiff_count = conn.execute(
+                "SELECT COUNT(*) AS c FROM tiffs WHERE tract_phase_pk=?",
+                (tract_phase_pk,),
+            ).fetchone()["c"]
+            tract = conn.execute("SELECT boundary_source FROM tracts WHERE tract_pk=?", (tract_pk,)).fetchone()
+            if int(tiff_count) == 1 and tract and tract["boundary_source"] == "unset" and tiff_meta["footprint_geom"] != "POLYGON EMPTY":
+                conn.execute(
+                    "UPDATE tracts SET boundary_geom=?, boundary_source=?, updated_at=? WHERE tract_pk=?",
+                    (tiff_meta["footprint_geom"], "auto_from_single_tiff", now, tract_pk),
+                )
+
         conn.commit()
-        return tract_id
     finally:
         conn.close()
+    return tract_id
+
+
+def _resolve_context(
+    conn: sqlite3.Connection,
+    tract_id: str,
+    *,
+    phase_id: str | None = None,
+    image_path: str | None = None,
+) -> tuple[str, str, str | None]:
+    normalized_phase = _normalize_phase_id(phase_id)
+    row = None
+    if normalized_phase != "00000000":
+        row = conn.execute(
+            "SELECT tract_phase_pk, phase_id FROM tract_phases WHERE tract_id=? AND phase_id=? ORDER BY updated_at DESC LIMIT 1",
+            (tract_id, normalized_phase),
+        ).fetchone()
+    if row is None:
+        row = conn.execute(
+            "SELECT tract_phase_pk, phase_id FROM tract_phases WHERE tract_id=? ORDER BY phase_id DESC LIMIT 1",
+            (tract_id,),
+        ).fetchone()
+    if row is None:
+        fallback_phase = normalized_phase if normalized_phase != "00000000" else _today_key()
+        ensure_tract(fallback_phase, tract_id, image_path=image_path)
+        row = conn.execute(
+            "SELECT tract_phase_pk, phase_id FROM tract_phases WHERE tract_id=? AND phase_id=?",
+            (tract_id, fallback_phase),
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"无法解析地块时相: tract_id={tract_id} phase_id={phase_id}")
+    tiff_row = conn.execute(
+        "SELECT tiff_id FROM tiffs WHERE tract_phase_pk=? ORDER BY created_at DESC LIMIT 1",
+        (row["tract_phase_pk"],),
+    ).fetchone()
+    return row["tract_phase_pk"], row["phase_id"], (tiff_row["tiff_id"] if tiff_row else None)
 
 
 def write_observations(
@@ -167,118 +458,147 @@ def write_observations(
     image_path: str | None = None,
     transform=None,
     crs=None,
+    phase_id: str | None = None,
 ) -> int:
-    """将一次 run 的全图检测(已 WBF 去重)写入 tree_observations。返回写入条数。
-
-    detections: 可迭代 of Detection(含 x1,y1,x2,y2,score,label,center)。
-    """
+    """将一次 run 的全图检测写入 tree_observations。返回写入条数。"""
     from ..geo import resolve_geo
+
     geo = None
     try:
         geo = resolve_geo(image_path, transform=transform, crs=crs)
-    except Exception as geo_err:
-        log.warning(f"解析地理元数据失败: {geo_err}")
-        
+    except Exception as geo_err:  # noqa: BLE001
+        log.warning("解析地理元数据失败: {}", geo_err)
+
     gsd = geo.gsd_m() if geo else None
     pixel_area_val = geo.pixel_area_m2() if geo else None
+    now = _now()
 
     conn = _connect(url)
     n = 0
     try:
+        tract_phase_pk, resolved_phase_id, tiff_id = _resolve_context(
+            conn, tract_id, phase_id=phase_id, image_path=image_path
+        )
+        _ensure_run_exists(conn, run_id)
+        conn.execute(
+            "UPDATE runs SET tract_phase_pk=?, tiff_id=COALESCE(tiff_id, ?), phase_id=?, slice_size=COALESCE(slice_size, ?) WHERE run_id=?",
+            (tract_phase_pk, tiff_id, resolved_phase_id, slice_size, run_id),
+        )
+
         for d in detections:
-            obs_id = f"obs_{uuid.uuid4().hex[:12]}"
+            observation_id = f"obs_{uuid.uuid4().hex[:12]}"
             cx, cy = d.center
             extra = getattr(d, "extra", None) or {}
             height = extra.get("height")
             height_source = extra.get("height_source")
-            crown_volume_geo = extra.get("volume")
             box_px_sub = extra.get("box_px_sub")
             source_subimage_path = extra.get("source_subimage_path")
-            
-            crown_area_px_est = extra.get("crown_area_px_est")
-            crown_area_px_real = extra.get("crown_area_px_real")
+
+            crown_area_px = (
+                extra.get("crown_area_px")
+                if extra.get("crown_area_px") is not None
+                else extra.get("crown_area_px_real")
+            )
+            if crown_area_px is None:
+                crown_area_px = extra.get("crown_area_px_est")
             crown_area_geo_est = extra.get("crown_area_geo_est")
             crown_area_geo_real = extra.get("crown_area_geo_real")
             crown_volume_geo_est = extra.get("volume_est")
             crown_volume_geo_real = extra.get("volume_real")
 
-            # 计算地理空间字段
-            center_geo = None
+            center_geom = None
             box_geo = None
-            geom_crown = None
-            crown_w_geo = None
-            crown_h_geo = None
-            crown_area_geo = None
-            
+            crown_geom = None
+            crown_width_geo = None
+            crown_height_geo = None
+            fallback_area_geo = None
+
             if geo:
                 try:
                     cx_geo, cy_geo = geo.transform.pixel_to_world(cx, cy)
-                    center_geo = f"POINT({cx_geo} {cy_geo})"
-                    
+                    center_geom = f"POINT({cx_geo} {cy_geo})"
                     x1_geo, y1_geo = geo.transform.pixel_to_world(d.x1, d.y1)
                     x2_geo, y2_geo = geo.transform.pixel_to_world(d.x2, d.y2)
-                    box_geo = json.dumps([x1_geo, y1_geo, x2_geo, y2_geo])
-                    geom_crown = f"POLYGON(({x1_geo} {y1_geo}, {x2_geo} {y1_geo}, {x2_geo} {y2_geo}, {x1_geo} {y2_geo}, {x1_geo} {y1_geo}))"
-                    
+                    box_geo = _dump([x1_geo, y1_geo, x2_geo, y2_geo])
+                    crown_geom = (
+                        f"POLYGON(({x1_geo} {y1_geo}, {x2_geo} {y1_geo}, "
+                        f"{x2_geo} {y2_geo}, {x1_geo} {y2_geo}, {x1_geo} {y1_geo}))"
+                    )
                     if gsd:
-                        crown_w_geo = d.width * gsd
-                        crown_h_geo = d.height * gsd
-                        if pixel_area_val:
-                            crown_area_geo = (d.width * d.height) * pixel_area_val
-                        else:
-                            crown_area_geo = (d.width * d.height) * (gsd * gsd)
-                except Exception as e:
-                    log.warning(f"单木像素坐标转地理坐标失败: {e}")
+                        crown_width_geo = d.width * gsd
+                        crown_height_geo = d.height * gsd
+                        fallback_area_geo = (
+                            (d.width * d.height) * pixel_area_val
+                            if pixel_area_val
+                            else (d.width * d.height) * (gsd * gsd)
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("单木像素坐标转地理坐标失败: {}", exc)
 
-            # 填充没有多源数据时的回退计算值
-            if crown_area_px_est is None:
-                crown_area_px_est = float(d.width * d.height)
-            if crown_area_px_real is None:
-                crown_area_px_real = crown_area_px_est
+            if crown_area_px is None:
+                crown_area_px = float(d.width * d.height)
             if crown_area_geo_est is None:
-                crown_area_geo_est = crown_area_geo if crown_area_geo is not None else (float(d.width * d.height * (gsd * gsd)) if gsd else 0.0)
+                crown_area_geo_est = fallback_area_geo if fallback_area_geo is not None else (float(d.width * d.height * (gsd * gsd)) if gsd else 0.0)
             if crown_area_geo_real is None:
                 crown_area_geo_real = crown_area_geo_est
-            if crown_area_geo is None:
-                crown_area_geo = crown_area_geo_real
 
             conn.execute(
                 "INSERT INTO tree_observations "
-                "(obs_id, tract_id, run_id, species, confidence, box_px_sub, box_px_full, box_geo, "
-                " crown_w_px, crown_h_px, crown_w_geo, crown_h_geo, "
-                " height, height_source, center_geo, source_subimage_path, slice_size, geom_point, geom_crown, "
-                " crown_area_px_est, crown_area_px_real, crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (obs_id, tract_id, run_id, d.label, d.score,
-                 json.dumps(box_px_sub) if box_px_sub else None,
-                 json.dumps([d.x1, d.y1, d.x2, d.y2]),
-                 box_geo,
-                 d.width, d.height, crown_w_geo, crown_h_geo,
-                 height, height_source,
-                 center_geo, source_subimage_path, slice_size,
-                 f"POINT({cx} {cy})", geom_crown,
-                 crown_area_px_est, crown_area_px_real,
-                 crown_area_geo_est, crown_area_geo_real,
-                 crown_volume_geo_est, crown_volume_geo_real),
+                "(observation_id, run_id, tract_phase_pk, tiff_id, phase_id, species, confidence, "
+                " center_geom, crown_geom, box_px, box_px_sub, box_geo, crown_width_px, crown_height_px, "
+                " crown_width_geo, crown_height_geo, crown_area_px, crown_area_geo_est, crown_area_geo_real, "
+                " height, height_source, crown_volume_geo_est, crown_volume_geo_real, source_subimage_path, "
+                " slice_size, geom_point, geom_crown, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    observation_id,
+                    run_id,
+                    tract_phase_pk,
+                    tiff_id,
+                    resolved_phase_id,
+                    d.label,
+                    d.score,
+                    center_geom,
+                    crown_geom,
+                    _dump([d.x1, d.y1, d.x2, d.y2]),
+                    _dump(box_px_sub) if box_px_sub else None,
+                    box_geo,
+                    d.width,
+                    d.height,
+                    crown_width_geo,
+                    crown_height_geo,
+                    crown_area_px,
+                    crown_area_geo_est,
+                    crown_area_geo_real,
+                    height,
+                    height_source,
+                    crown_volume_geo_est,
+                    crown_volume_geo_real,
+                    source_subimage_path,
+                    slice_size,
+                    f"POINT({cx} {cy})",
+                    crown_geom,
+                    now,
+                ),
             )
             n += 1
+
+        if tiff_id:
+            conn.execute(
+                "UPDATE tiffs SET inference_status='inferred', updated_at=? WHERE tiff_id=? AND phase_id=?",
+                (now, tiff_id, resolved_phase_id),
+            )
         conn.commit()
     finally:
         conn.close()
-    log.info(
-        "写「tree_observations」表: 本轮最终单木 {} 株 -> run_id={} slice_size={}",
-        n, run_id, slice_size,
-    )
+    log.info("写「tree_observations」表: 本轮最终单木 {} 株 -> run_id={} slice_size={}", n, run_id, slice_size)
     return n
 
 
 def count_observations(run_id: str, *, url: str | None = None) -> int:
-    """查询某 run 的观测条数(供测试/CLI 汇报)。"""
     conn = _connect(url)
     try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM tree_observations WHERE run_id=?", (run_id,)
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM tree_observations WHERE run_id=?", (run_id,)).fetchone()
         return int(row[0]) if row else 0
     finally:
         conn.close()
@@ -291,32 +611,29 @@ def register_source(
     *,
     meta: dict | None = None,
     url: str | None = None,
+    phase_id: str | None = None,
 ) -> str:
-    """登记地块的一个多源文件(RGB/CHM/DSM/DEM/多光谱)。
-
-    按 (tract_id, source_type, path) 幂等: 已存在则返回原 source_id。
-    """
+    """登记 TIFF 的一个 multisource 文件路径版本。"""
     conn = _connect(url)
     try:
+        tract_phase_pk, resolved_phase_id, tiff_id = _resolve_context(conn, tract_id, phase_id=phase_id)
+        if not tiff_id:
+            raise ValueError(f"地块时相尚未登记 TIFF，无法登记 multisource: {tract_id} {resolved_phase_id}")
         row = conn.execute(
-            "SELECT source_id FROM tract_sources "
-            "WHERE tract_id=? AND source_type=? AND path=?",
-            (tract_id, source_type, path),
+            "SELECT multisource_path_versions FROM tiffs WHERE tiff_id=? AND phase_id=?",
+            (tiff_id, resolved_phase_id),
         ).fetchone()
-        if row:
-            return row[0]
-        source_id = f"src_{uuid.uuid4().hex[:10]}"
+        merged = _merge_multisource(row["multisource_path_versions"] if row else None, source_type, path)
         conn.execute(
-            "INSERT INTO tract_sources (source_id, tract_id, source_type, path, meta_json) "
-            "VALUES (?,?,?,?,?)",
-            (source_id, tract_id, source_type, path,
-             json.dumps(meta, ensure_ascii=False) if meta else None),
+            "UPDATE tiffs SET multisource_path_versions=?, updated_at=? WHERE tiff_id=? AND phase_id=?",
+            (merged, _now(), tiff_id, resolved_phase_id),
         )
         conn.commit()
-        log.info("多源登记: tract={} type={} path={}", tract_id, source_type, path)
-        return source_id
+        source_id = f"{tiff_id}_{resolved_phase_id}_{source_type}"
     finally:
         conn.close()
+    log.info("multisource 登记: tract={} phase={} type={} path={}", tract_id, phase_id, source_type, path)
+    return source_id
 
 
 def parse_point(wkt: str | None) -> tuple[float, float] | None:
@@ -334,297 +651,75 @@ def parse_point(wkt: str | None) -> tuple[float, float] | None:
         return None
 
 
-def bbox_iou_geo(box1, box2):
-    ax_min, ax_max = sorted([box1[0], box1[2]])
-    ay_min, ay_max = sorted([box1[1], box1[3]])
-    bx_min, bx_max = sorted([box2[0], box2[2]])
-    by_min, by_max = sorted([box2[1], box2[3]])
-    
-    inter_x_min = max(ax_min, bx_min)
-    inter_y_min = max(ay_min, by_min)
-    inter_x_max = min(ax_max, bx_max)
-    inter_y_max = min(ay_max, by_max)
-    
-    inter_w = max(0.0, inter_x_max - inter_x_min)
-    inter_h = max(0.0, inter_y_max - inter_y_min)
-    inter_area = inter_w * inter_h
-    
-    area_a = (ax_max - ax_min) * (ay_max - ay_min)
-    area_b = (bx_max - bx_min) * (by_max - by_min)
-    union_area = area_a + area_b - inter_area
-    if union_area <= 0.0:
-        return 0.0
-    return inter_area / union_area
-
-
-def parse_polygon_geo(wkt: str | None) -> list[float] | None:
-    if not wkt or not isinstance(wkt, str):
-        return None
-    s = wkt.strip()
-    if "((" not in s or "))" not in s:
-        return None
-    try:
-        inner = s[s.index("((") + 2: s.index("))")]
-        points = [p.split() for p in inner.split(",")]
-        xs = [float(p[0]) for p in points]
-        ys = [float(p[1]) for p in points]
-        return [min(xs), min(ys), max(xs), max(ys)]
-    except Exception:
-        return None
-
-
-def consolidate_tract_trees(
-    tract_id: str,
-    run_id: str,
-    observations,
-    *,
-    url: str | None = None,
-) -> int:
-    """将某 run 的观测整理为地块规范单木 tract_trees(增量更新: 基于 KD-Tree 和 bbox IoU 空间匹配)。
-
-    observations: fetch_observations 返回的 dict 列表。
-    """
-    from scipy.spatial import cKDTree
-
-    # 1. 查询该地块已有的规范单木
-    conn = _connect(url)
-    conn.row_factory = sqlite3.Row
-    try:
-        row_tract = conn.execute(
-            "SELECT crs_epsg FROM tracts WHERE tract_id = ?",
-            (tract_id,),
-        ).fetchone()
-        crs_epsg = row_tract[0] if row_tract else None
-
-        # 2.0米匹配容差：EPSG:4326(约2e-5度)；投影坐标系(2.0米)
-        if crs_epsg == 4326:
-            matching_radius = 2.0 / 111320.0
-        else:
-            matching_radius = 2.0
-
-        existing_rows = conn.execute(
-            "SELECT canonical_id, geom_point, geom_crown, individual_id FROM tract_trees WHERE tract_id = ?",
-            (tract_id,),
-        ).fetchall()
-
-        # 2. 如果旧表为空，直接执行批量写入
-        if not existing_rows:
-            n = 0
-            for o in observations:
-                canonical_id = f"ct_{uuid.uuid4().hex[:12]}"
-                conn.execute(
-                    "INSERT INTO tract_trees "
-                    "(canonical_id, tract_id, individual_id, species, confidence, "
-                    " geom_point, geom_crown, height, chosen_obs_id, active_run_id, "
-                    " crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
-                     o.get("geom_point"), o.get("geom_crown"),
-                     o.get("height"), o.get("obs_id"), run_id,
-                     o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
-                     o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real")),
-                )
-                n += 1
-            conn.commit()
-            log.info("规范单木整理[初次写入]: {} 株 -> tract_id={} run_id={}", n, tract_id, run_id)
-            return n
-
-        # 3. 如果旧表不为空，执行 KD-Tree 匹配与增量更新
-        old_trees = []
-        for r in existing_rows:
-            pt = parse_point(r["geom_point"])
-            if pt:
-                old_trees.append({
-                    "canonical_id": r["canonical_id"],
-                    "pt": pt,
-                    "individual_id": r["individual_id"],
-                    "bbox": parse_polygon_geo(r["geom_crown"]),
-                    "geom_crown": r["geom_crown"]
-                })
-
-        old_coords = [ot["pt"] for ot in old_trees]
-        tree = cKDTree(old_coords)
-        matched_old_ids = set()
-        n_updated = 0
-        n_inserted = 0
-
-        for o in observations:
-            new_pt = parse_point(o.get("geom_point"))
-            if not new_pt:
-                canonical_id = f"ct_{uuid.uuid4().hex[:12]}"
-                conn.execute(
-                    "INSERT INTO tract_trees "
-                    "(canonical_id, tract_id, individual_id, species, confidence, "
-                    " geom_point, geom_crown, height, chosen_obs_id, active_run_id, "
-                    " crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
-                     o.get("geom_point"), o.get("geom_crown"),
-                     o.get("height"), o.get("obs_id"), run_id,
-                     o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
-                     o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real")),
-                )
-                n_inserted += 1
-                continue
-
-            indices = tree.query_ball_point(new_pt, r=matching_radius)
-            best_old_id = None
-            best_iou = 0.0
-
-            new_bbox = None
-            if o.get("box_geo"):
-                try:
-                    new_bbox = json.loads(o["box_geo"])
-                except Exception:
-                    pass
-            if new_bbox is None:
-                new_bbox = parse_polygon_geo(o.get("geom_crown"))
-
-            for idx in indices:
-                ot = old_trees[idx]
-                if ot["canonical_id"] in matched_old_ids:
-                    continue
-
-                if new_bbox and ot["bbox"]:
-                    iou = bbox_iou_geo(new_bbox, ot["bbox"])
-                    if iou > best_iou:
-                        best_iou = iou
-                        best_old_id = ot["canonical_id"]
-
-            if best_old_id and best_iou > 0.5:
-                matched_old_ids.add(best_old_id)
-                orig_ind_id = next(ot["individual_id"] for ot in old_trees if ot["canonical_id"] == best_old_id)
-                conn.execute(
-                    "UPDATE tract_trees SET "
-                    "individual_id = ?, species = ?, confidence = ?, geom_point = ?, geom_crown = ?, "
-                    "height = ?, chosen_obs_id = ?, active_run_id = ?, "
-                    "crown_area_geo_est = ?, crown_area_geo_real = ?, "
-                    "crown_volume_geo_est = ?, crown_volume_geo_real = ? "
-                    "WHERE canonical_id = ?",
-                    (orig_ind_id, o.get("species"), o.get("confidence"), o.get("geom_point"), o.get("geom_crown"),
-                     o.get("height"), o.get("obs_id"), run_id,
-                     o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
-                     o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real"),
-                     best_old_id),
-                )
-                n_updated += 1
-            else:
-                canonical_id = f"ct_{uuid.uuid4().hex[:12]}"
-                conn.execute(
-                    "INSERT INTO tract_trees "
-                    "(canonical_id, tract_id, individual_id, species, confidence, "
-                    " geom_point, geom_crown, height, chosen_obs_id, active_run_id, "
-                    " crown_area_geo_est, crown_area_geo_real, crown_volume_geo_est, crown_volume_geo_real) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (canonical_id, tract_id, None, o.get("species"), o.get("confidence"),
-                     o.get("geom_point"), o.get("geom_crown"),
-                     o.get("height"), o.get("obs_id"), run_id,
-                     o.get("crown_area_geo_est"), o.get("crown_area_geo_real"),
-                     o.get("crown_volume_geo_est"), o.get("crown_volume_geo_real")),
-                )
-                n_inserted += 1
-
-        n_deleted = 0
-        for ot in old_trees:
-            if ot["canonical_id"] not in matched_old_ids:
-                conn.execute("DELETE FROM tract_trees WHERE canonical_id = ?", (ot["canonical_id"],))
-                n_deleted += 1
-
-        conn.commit()
-        log.info(
-            "规范单木整理[增量更新成功]: 更新={}株 新增={}株 移除={}株 -> tract_id={} run_id={}",
-            n_updated, n_inserted, n_deleted, tract_id, run_id
-        )
-        return n_updated + n_inserted
-    finally:
-        conn.close()
-
-
 def promote_run(run_id: str, *, url: str | None = None) -> None:
-    """激活/发布一个推理 Run 作为该地块的正式版本，触发增量同步与 active_run_id 回填。"""
-    from pathlib import Path
+    """发布一个成功 run，设置对应 tract_phase.active_run_id。"""
     conn = _connect(url)
     conn.row_factory = sqlite3.Row
     try:
-        run_row = conn.execute(
-            "SELECT status, input_path FROM run_logs WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
+        run_row = conn.execute("SELECT status, tract_phase_pk FROM runs WHERE run_id=?", (run_id,)).fetchone()
         if not run_row:
             raise ValueError(f"推理任务 {run_id} 不存在。")
         if run_row["status"] != "succeeded":
             raise ValueError(f"推理任务 {run_id} 状态为 '{run_row['status']}'，只有成功的任务才能发布。")
 
-        obs_rows = conn.execute(
-            "SELECT * FROM tree_observations WHERE run_id = ?",
-            (run_id,),
-        ).fetchall()
-
-        tract_id = None
-        if obs_rows:
-            tract_id = obs_rows[0]["tract_id"]
-        else:
-            input_path = run_row["input_path"]
-            if input_path:
-                stem = Path(input_path).name
-                row_tract = conn.execute(
-                    "SELECT tract_id FROM tracts WHERE name = ? OR location LIKE ?",
-                    (stem, f"%{stem}%")
-                ).fetchone()
-                if row_tract:
-                    tract_id = row_tract[0]
-
-        if not tract_id:
-            input_path = run_row["input_path"]
-            row_tract = conn.execute(
-                "SELECT tract_id FROM tracts WHERE location = ? OR name = ?",
-                (input_path, input_path)
+        tract_phase_pk = run_row["tract_phase_pk"]
+        if not tract_phase_pk:
+            row = conn.execute(
+                "SELECT tract_phase_pk FROM tree_observations WHERE run_id=? LIMIT 1",
+                (run_id,),
             ).fetchone()
-            if row_tract:
-                tract_id = row_tract[0]
+            tract_phase_pk = row["tract_phase_pk"] if row else None
+        if not tract_phase_pk:
+            raise ValueError(f"无法确定推理任务 {run_id} 关联的地块时相。")
 
-        if not tract_id:
-            raise ValueError(f"无法确定推理任务 {run_id} 关联的地块 ID。")
-
-        from .reader import _rows_to_dicts
-        obs_dicts = _rows_to_dicts(obs_rows)
-        consolidate_tract_trees(tract_id, run_id, obs_dicts, url=url)
-
+        now = _now()
         conn.execute(
-            "UPDATE tracts SET active_run_id = ? WHERE tract_id = ?",
-            (run_id, tract_id),
+            "UPDATE tract_phases SET active_run_id=?, updated_at=? WHERE tract_phase_pk=?",
+            (run_id, now, tract_phase_pk),
         )
+        conn.execute("UPDATE runs SET tract_phase_pk=? WHERE run_id=?", (tract_phase_pk, run_id))
         conn.commit()
-        log.info("推理任务 {} 已成功发布激活为地块 {} 的正式版本。", run_id, tract_id)
+        log.info("推理任务 {} 已发布为地块时相 {} 的正式版本。", run_id, tract_phase_pk)
     finally:
         conn.close()
 
 
 def persist_individuals(individuals, *, url: str | None = None) -> int:
-    """写入跨时相个体 tree_individuals,并按 chosen_obs_id 回填 tract_trees.individual_id。
-
-    individuals: dict 列表,每项含 individual_id/location_cluster/first_seen/last_seen/
-    status/growth_json(str)/members(dict: time->obs_key)。返回写入的个体数。
-    """
+    """写入跨时相个体 tree_individuals，并按 observation_id 回填观测。"""
     conn = _connect(url)
     n = 0
     linked = 0
+    now = _now()
     try:
         for ind in individuals:
+            status = ind.get("status") or "alive"
+            if status == "dead":
+                status = "removed"
+            if status not in {"alive", "missing", "removed", "unknown"}:
+                status = "unknown"
             conn.execute(
                 "INSERT INTO tree_individuals "
-                "(individual_id, location_cluster, first_seen, last_seen, status, growth_json) "
-                "VALUES (?,?,?,?,?,?) "
+                "(individual_id, first_seen_phase_id, last_seen_phase_id, global_status, tracking_confidence, growth_json, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(individual_id) DO UPDATE SET "
-                " location_cluster=excluded.location_cluster, first_seen=excluded.first_seen, "
-                " last_seen=excluded.last_seen, status=excluded.status, growth_json=excluded.growth_json",
-                (ind["individual_id"], ind.get("location_cluster"), ind.get("first_seen"),
-                 ind.get("last_seen"), ind.get("status"), ind.get("growth_json")),
+                " first_seen_phase_id=excluded.first_seen_phase_id, last_seen_phase_id=excluded.last_seen_phase_id, "
+                " global_status=excluded.global_status, tracking_confidence=excluded.tracking_confidence, "
+                " growth_json=excluded.growth_json, updated_at=excluded.updated_at",
+                (
+                    ind["individual_id"],
+                    ind.get("first_seen"),
+                    ind.get("last_seen"),
+                    status,
+                    ind.get("tracking_confidence"),
+                    ind.get("growth_json"),
+                    now,
+                    now,
+                ),
             )
             n += 1
             for _time, obs_key in (ind.get("members") or {}).items():
                 cur = conn.execute(
-                    "UPDATE tract_trees SET individual_id=? WHERE chosen_obs_id=?",
+                    "UPDATE tree_observations SET individual_id=? WHERE observation_id=?",
                     (ind["individual_id"], obs_key),
                 )
                 if cur.rowcount and cur.rowcount > 0:
@@ -632,5 +727,5 @@ def persist_individuals(individuals, *, url: str | None = None) -> int:
         conn.commit()
     finally:
         conn.close()
-    log.info("个体持久化: {} 个体, 回填规范株 {} 条", n, linked)
+    log.info("个体持久化: {} 个体, 回填观测 {} 条", n, linked)
     return n

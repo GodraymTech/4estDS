@@ -36,12 +36,13 @@ class JobType(str, Enum):
 
 
 class JobStatus(str, Enum):
-    """作业/运行状态。与 run_logs.status 语义对齐，额外增加队列态 queued。"""
+    """作业/运行状态。与 runs.status 语义对齐。"""
 
     queued = "queued"
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
+    canceled = "canceled"
 
 
 class InferenceRequest(BaseModel):
@@ -55,8 +56,8 @@ class InferenceRequest(BaseModel):
 
     image_path: str = Field(..., description="输入影像本地路径 (TIFF/PNG/JPG)")
     arch: Optional[str] = Field(None, description="模型架构，默认读配置 detect.arch")
-    acquisition_time: Optional[str] = Field(None, description="地块时相 YYYYmmdd")
-    location: Optional[str] = Field(None, description="地块位置标识")
+    phase_id: Optional[str] = Field(None, description="地块时相 YYYYMMDD")
+    tract_id: Optional[str] = Field(None, description="地块 ID")
     tile_size: Optional[int] = Field(None, ge=1, description="手动切片边长，缺省自适应")
     overlap_rate: Optional[float] = Field(None, ge=0.0, le=0.5, description="重叠率 0~0.5")
     chm: Optional[str] = Field(None, description="CHM 栅格路径")
@@ -75,8 +76,8 @@ class InferenceRequest(BaseModel):
     def to_pipeline_kwargs(self) -> dict[str, Any]:
         """转为 ``run_infer_pipeline`` 的关键字参数(不含 arch / detector / run_id / settings)。"""
         return {
-            "acquisition_time": self.acquisition_time,
-            "location": self.location,
+            "phase_id": self.phase_id,
+            "tract_id": self.tract_id,
             "tile_size": self.tile_size,
             "overlap_rate": self.overlap_rate,
             "chm": self.chm,
@@ -97,13 +98,13 @@ class BatchInferenceRequest(BaseModel):
 
     input_path: str = Field(..., description="输入影像目录或单个影像路径")
     arch: Optional[str] = Field(None, description="模型架构，默认读配置 detect.arch")
-    acquisition_time: Optional[str] = Field(
+    phase_id: Optional[str] = Field(
         None,
-        description="显式地块时相 YYYYmmdd；为空时每张影像各自读取元数据默认值",
+        description="显式地块时相 YYYYMMDD；为空时每张影像各自读取元数据默认值",
     )
-    location: Optional[str] = Field(
+    tract_id: Optional[str] = Field(
         None,
-        description="批量地理标识前缀；为空时每张影像使用自己的文件名 stem",
+        description="批量地块 ID 前缀；为空时每张影像使用自己的文件名 stem",
     )
     tile_size: Optional[int] = Field(None, ge=1, description="手动切片边长，缺省自适应")
     overlap_rate: Optional[float] = Field(None, ge=0.0, le=0.5, description="重叠率 0~0.5")

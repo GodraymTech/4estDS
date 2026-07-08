@@ -39,7 +39,7 @@ DEPENDENCY_LOG_WHITELIST = {
 
 def new_run_id() -> str:
     """生成一个短 run_id（全链路关联用）。"""
-    return uuid.uuid4().hex[:5]
+    return uuid.uuid4().hex[:6]
 
 
 def current_run_id() -> str:
@@ -52,7 +52,6 @@ def setup_logging(
     run_id: str | None = None,
     to_file: bool = True,
     task_type: str | None = None,
-    raw_file: bool = False,
 ):
     """配置 loguru 日志，并拦截标准库日志。返回 (logger, run_id)。"""
     global _CURRENT_RUN_ID
@@ -119,7 +118,6 @@ def setup_logging(
             filter=_filter, rotation="20 MB", retention=5, enqueue=True,
         )
         # 前端日志展示直接读取主日志并实时清洗 formatter 前缀，不再额外落 .ui.log。
-        # raw_file 参数保留为兼容旧调用。
 
 
     class InterceptHandler(logging.Handler):

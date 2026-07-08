@@ -1,39 +1,37 @@
 import type { Tract } from "../../shared/api";
 
-// 时相: 同一地点、不同获取时间的一次观测快照。
-// (P1: 由 tract.acquisition_time 派生; P2 接入后端多时相栓格影像时间序列端点。)
+// 时相: 同一地块、不同 phase_id 的一次观测快照。
 export interface Phase {
   id: string;
   label: string;
   time: string;
 }
 
-export interface LocationGroup {
-  location: string;
+export interface TractPhaseGroup {
+  tract_id: string;
   phases: Phase[];
 }
 
-// 按地点分组地块, 将各获取时间视为一个时相; 同地点多时相即可卷帘对比。
-export function groupPhasesByLocation(tracts: Tract[]): LocationGroup[] {
-  const byLoc = new Map<string, Phase[]>();
+// 按地块分组时相; 同一地块多时相即可卷帘对比。
+export function groupPhasesByTract(tracts: Tract[]): TractPhaseGroup[] {
+  const byTract = new Map<string, Phase[]>();
   for (const t of tracts) {
-    const loc = t.location || t.name || t.tract_id;
-    const time = t.acquisition_time || "";
+    const tract_id = t.tract_id;
+    const phase_id = t.phase_id || "";
     const phase: Phase = {
-      id: t.tract_id,
-      label: loc + " \u00b7 " + (time || "\u672a\u77e5\u65f6\u76f8"),
-      time,
+      id: String(t.tract_phase_pk || t.tract_id),
+      label: tract_id + " · " + (phase_id || "未知时相"),
+      time: phase_id,
     };
-    const arr = byLoc.get(loc) ?? [];
+    const arr = byTract.get(tract_id) ?? [];
     arr.push(phase);
-    byLoc.set(loc, arr);
+    byTract.set(tract_id, arr);
   }
-  const groups: LocationGroup[] = [];
-  for (const [location, phases] of byLoc) {
+  const groups: TractPhaseGroup[] = [];
+  for (const [tract_id, phases] of byTract) {
     phases.sort((a, b) => a.time.localeCompare(b.time));
-    groups.push({ location, phases });
+    groups.push({ tract_id, phases });
   }
-  // 多时相地点优先展示。
   groups.sort((a, b) => b.phases.length - a.phases.length);
   return groups;
 }

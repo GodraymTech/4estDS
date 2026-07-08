@@ -6,8 +6,8 @@ export interface SubmittedJob {
   jobId: string;
   filename: string;
   sourceKind?: "file" | "directory" | "upload";
-  location?: string;
-  acquisitionTime?: string;
+  tractId?: string;
+  phaseId?: string;
   submittedAt: number;
 }
 

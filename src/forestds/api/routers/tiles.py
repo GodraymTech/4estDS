@@ -1,6 +1,6 @@
 """本地 GeoTIFF XYZ 瓦片服务。
 
-这是面向单机/内网开发的轻量瓦片端点：从 run_logs 关联的本地 TIFF 按
+这是面向单机/内网开发的轻量瓦片端点：从 runs 关联的本地 TIFF 按
 WebMercator XYZ 实时切 256px PNG。它不替代生产级 TiTiler，但能让已有 COG /
 tiled TIFF 直接在前端加载。
 """
@@ -68,11 +68,13 @@ def _validate_xyz(z: int, x: int, y: int) -> None:
 def _resolve_tract_image_path(tract_id: str, db_url: str | None) -> Path:
     from ...db import reader
 
-    run_id = reader.active_run_for_tract(tract_id, url=db_url) or reader.latest_run_for_tract(
-        tract_id, url=db_url
-    )
-    run = reader.get_run(run_id, url=db_url) if run_id else None
-    raw_path = run.get("input_path") if run else None
+    raw_path = reader.latest_tiff_path_for_tract(tract_id, url=db_url)
+    if not raw_path:
+        run_id = reader.active_run_for_tract(tract_id, url=db_url) or reader.latest_run_for_tract(
+            tract_id, url=db_url
+        )
+        run = reader.get_run(run_id, url=db_url) if run_id else None
+        raw_path = run.get("input_path") if run else None
     if not raw_path:
         raise HTTPException(status_code=404, detail="该地块没有关联可切片的原始影像")
 

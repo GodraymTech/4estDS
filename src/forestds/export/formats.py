@@ -101,7 +101,7 @@ def export_tract_to_file(
         except Exception as e:
             log.warning(f"获取地块空间参考失败: {e}")
 
-    # 3.1 终极防御：若数据库中依然缺失空间参考，尝试从关联的 run_logs.input_path 影像文件中直接读取投影
+    # 3.1 终极防御：若数据库中依然缺失空间参考，尝试从关联的 runs.input_path 影像文件中直接读取投影
     if not resolved_crs_epsg and not resolved_crs_wkt:
         try:
             if target_run_id:
@@ -110,7 +110,7 @@ def export_tract_to_file(
                 conn = sqlite3.connect(resolve_db_path(db_url))
                 try:
                     row = conn.execute(
-                        "SELECT input_path FROM run_logs WHERE run_id=?", (target_run_id,)
+                        "SELECT input_path FROM runs WHERE run_id=?", (target_run_id,)
                     ).fetchone()
                     if row and row[0]:
                         img_path = Path(row[0])
@@ -160,9 +160,9 @@ def export_tract_to_file(
         with open(final_path, "w", newline="", encoding="utf-8") as csvfile:
             writer_csv = csv.writer(csvfile)
             writer_csv.writerow([
-                "obs_id", "species", "confidence",
-                "crown_w_geo", "crown_h_geo",
-                "crown_area_px_est", "crown_area_px_real",
+                "observation_id", "species", "confidence",
+                "crown_width_geo", "crown_height_geo",
+                "crown_area_px",
                 "crown_area_geo_est", "crown_area_geo_real",
                 "crown_volume_geo_est", "crown_volume_geo_real",
                 "height", "height_source", "geom_crown", "geom_point",
@@ -170,13 +170,12 @@ def export_tract_to_file(
             ])
             for obs in observations:
                 writer_csv.writerow([
-                    obs.get("obs_id"),
+                    obs.get("observation_id"),
                     obs.get("species"),
                     obs.get("confidence"),
-                    obs.get("crown_w_geo"),
-                    obs.get("crown_h_geo"),
-                    obs.get("crown_area_px_est"),
-                    obs.get("crown_area_px_real"),
+                    obs.get("crown_width_geo"),
+                    obs.get("crown_height_geo"),
+                    obs.get("crown_area_px"),
                     obs.get("crown_area_geo_est"),
                     obs.get("crown_area_geo_real"),
                     obs.get("crown_volume_geo_est"),
@@ -200,13 +199,12 @@ def export_tract_to_file(
                 geom = parse_wkt_point(obs["geom_point"])
                 
             properties = {
-                "obs_id": obs.get("obs_id"),
+                "observation_id": obs.get("observation_id"),
                 "species": obs.get("species"),
                 "confidence": obs.get("confidence"),
-                "crown_w_geo": obs.get("crown_w_geo"),
-                "crown_h_geo": obs.get("crown_h_geo"),
-                "crown_area_px_est": obs.get("crown_area_px_est"),
-                "crown_area_px_real": obs.get("crown_area_px_real"),
+                "crown_width_geo": obs.get("crown_width_geo"),
+                "crown_height_geo": obs.get("crown_height_geo"),
+                "crown_area_px": obs.get("crown_area_px"),
                 "crown_area_geo_est": obs.get("crown_area_geo_est"),
                 "crown_area_geo_real": obs.get("crown_area_geo_real"),
                 "crown_volume_geo_est": obs.get("crown_volume_geo_est"),
@@ -278,13 +276,12 @@ def export_tract_to_file(
                     
             data_list.append({
                 "geometry": geom,
-                "obs_id": obs.get("obs_id"),
+                "observation_id": obs.get("observation_id"),
                 "species": obs.get("species"),
                 "confidence": obs.get("confidence"),
-                "crown_w": obs.get("crown_w_geo"),
-                "crown_h": obs.get("crown_h_geo"),
-                "area_px_est": obs.get("crown_area_px_est"),
-                "area_px_real": obs.get("crown_area_px_real"),
+                "crown_width_geo": obs.get("crown_width_geo"),
+                "crown_height_geo": obs.get("crown_height_geo"),
+                "area_px": obs.get("crown_area_px"),
                 "area_geo_est": obs.get("crown_area_geo_est"),
                 "area_geo_real": obs.get("crown_area_geo_real"),
                 "volume_est": obs.get("crown_volume_geo_est"),
@@ -298,9 +295,9 @@ def export_tract_to_file(
         # 若列表为空，为了防止 pandas 报错，需要提供结构化模板
         if not data_list:
             data_list = [{
-                "geometry": None, "obs_id": None, "species": None, "confidence": None,
-                "crown_w": None, "crown_h": None,
-                "area_px_est": None, "area_px_real": None,
+                "geometry": None, "observation_id": None, "species": None, "confidence": None,
+                "crown_width_geo": None, "crown_height_geo": None,
+                "area_px": None,
                 "area_geo_est": None, "area_geo_real": None,
                 "volume_est": None, "volume_real": None,
                 "height": None, "height_src": None, "run_id": None, "tract_id": None

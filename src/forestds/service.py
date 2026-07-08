@@ -137,8 +137,8 @@ def run_batch_inference_job(
             [request.input_path],
             settings=settings,
             arch=arch_val,
-            acquisition_time=request.acquisition_time,
-            location=request.location,
+        phase_id=request.phase_id,
+        tract_id=request.tract_id,
             tile_size=request.tile_size,
             overlap_rate=request.overlap_rate,
             dsm=request.dsm,
@@ -163,7 +163,7 @@ def run_batch_inference_job(
         "items": [
             {
                 "path": item.path,
-                "location": item.location,
+                "tract_key": item.tract_key,
                 "status": item.status,
                 "run_id": item.run_id,
                 "tract_id": item.tract_id,

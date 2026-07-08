@@ -20,7 +20,7 @@ _VALID_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
 @dataclass
 class BatchItemSummary:
     path: str
-    location: str
+    tract_key: str
     status: str  # succeeded | failed
     run_id: str
     tract_id: str | None = None
@@ -62,11 +62,11 @@ def resolve_images(inputs: list[str]) -> list[Path]:
     return sorted(resolved_paths)
 
 
-def build_batch_location(path: Path, prefix: str | None, duplicate_index: int | None = None) -> str:
-    """生成批量推理单图 location。
+def build_batch_tract_id(path: Path, prefix: str | None, duplicate_index: int | None = None) -> str:
+    """生成批量推理单图 tract_id。
 
     未指定前缀时使用图像文件名 stem；指定前缀时把 stem 作为后缀，确保用户输入
-    的地理标识在批量任务中成为“前缀”而非所有影像的同一个 location。
+    的地块 ID 在批量任务中成为“前缀”而非所有影像的同一个 tract_id。
     """
     base = path.stem
     if prefix and prefix.strip():
@@ -81,8 +81,8 @@ def run_batch_pipeline(
     *,
     settings,
     arch: str | None = None,
-    acquisition_time: str | None = None,
-    location: str | None = None,
+    phase_id: str | None = None,
+    tract_id: str | None = None,
     tile_size: int | None = None,
     overlap_rate: float | None = None,
     chm: str | None = None,
@@ -137,9 +137,9 @@ def run_batch_pipeline(
     for idx, path in track_progress(list(enumerate(valid_paths, 1)), desc="批量影像推理"):
         check_cancelled(cancel_run_id)
         image_str = str(path)
-        location_key = path.stem if not location else f"{location.strip()}_{path.stem}"
-        stem_seen[location_key] = stem_seen.get(location_key, 0) + 1
-        curr_location = build_batch_location(path, location, stem_seen[location_key])
+        tract_key = path.stem if not tract_id else f"{tract_id.strip()}_{path.stem}"
+        stem_seen[tract_key] = stem_seen.get(tract_key, 0) + 1
+        curr_tract_id = build_batch_tract_id(path, tract_id, stem_seen[tract_key])
         run_id = new_run_id()
         paths.set_run_context(run_id, "infer")
         
@@ -149,13 +149,13 @@ def run_batch_pipeline(
             params={
                 "arch": arch_val,
                 "image": image_str,
-                "acquisition_time": acquisition_time,
-                "location": curr_location,
+                "phase_id": phase_id,
+                "tract_id": curr_tract_id,
             },
             url=settings.get("url", None),
         )
 
-        item = BatchItemSummary(path=image_str, location=curr_location, status="failed", run_id=run_id)
+        item = BatchItemSummary(path=image_str, tract_key=curr_tract_id, status="failed", run_id=run_id)
 
         try:
             log.info("【批量调度】[{}/{}] 开始推理影像: {}", idx, len(valid_paths), image_str)
@@ -164,8 +164,8 @@ def run_batch_pipeline(
                 run_id=run_id,
                 settings=settings,
                 arch=arch_val,
-                acquisition_time=acquisition_time,
-                location=curr_location,
+                phase_id=phase_id,
+                tract_id=curr_tract_id,
                 tile_size=tile_size,
                 overlap_rate=overlap_rate,
                 chm=chm,

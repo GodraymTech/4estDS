@@ -3,7 +3,7 @@
 设计要点：
 - infer_actor 在进程内常驻缓存 Detector(权重仅加载一次)，GPU 队列 concurrency=1
   (由 worker 启动参数 --processes 1 --threads 1 + queue_name 保证，见 deploy/)。
-- 作业与 run_id 一一对应；run_logs 表即作业状态存储(API 轮询 reader.get_run(run_id))。
+- 作业与 run_id 一一对应；runs 表即作业状态存储(API 轮询 reader.get_run(run_id))。
 - 复用 service.run_inference_job 的统一生命周期(DRY)；不自动重试(GPU 昂贵且非幂等)。
 """
 from __future__ import annotations
@@ -66,7 +66,7 @@ def _setup_actor_logging(settings, run_id: str, task_type: str) -> None:
     from ..logging_setup import setup_logging
 
     level = str(settings.get("level", "INFO"))
-    setup_logging(level=level, run_id=run_id, task_type=task_type, to_file=True, raw_file=True)
+    setup_logging(level=level, run_id=run_id, task_type=task_type, to_file=True)
     paths.set_run_context(run_id, task_type)
 
 
@@ -74,7 +74,7 @@ def _setup_actor_logging(settings, run_id: str, task_type: str) -> None:
 def infer_actor(run_id: str, request_dict: dict) -> None:
     """单图推理作业(GPU)。参数均为 JSON 可序列化类型。
 
-    状态不在此返回；由 run_logs 表记录(running/succeeded/failed)，API 轮询获取。
+    状态不在此返回；由 runs 表记录(running/succeeded/failed)，API 轮询获取。
     """
     settings = _get_settings()
     _setup_actor_logging(settings, run_id, "infer")
@@ -90,7 +90,7 @@ def infer_actor(run_id: str, request_dict: dict) -> None:
             result.observations_written, result.published,
         )
     except InferenceError:
-        # 状态已落 run_logs=failed；不重试(max_retries=0)，吹掉异常避免框架重入。
+        # 状态已落 runs=failed；不重试(max_retries=0)，吹掉异常避免框架重入。
         log.warning("作业失败已记录: run_id={}", run_id)
 
 

@@ -23,7 +23,7 @@ Box = tuple[float, float, float, float]
 
 
 def iou(a: Box, b: Box) -> float:
-    """单对框 IoU，供 scope.py 等调用方使用（保留接口兼容性）。"""
+    """单对框 IoU，供 scope.py 等调用方使用。"""
     ax1, ay1, ax2, ay2 = a[:4]
     bx1, by1, bx2, by2 = b[:4]
     ix1 = ax1 if ax1 > bx1 else bx1

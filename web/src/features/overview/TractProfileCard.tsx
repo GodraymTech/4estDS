@@ -17,9 +17,9 @@ export function TractProfileCard({
   const style: CSSProperties = { ...CARD, left: x, top: y };
   return (
     <div style={style}>
-      <div style={TITLE}>{tract.name || tract.tract_id}</div>
-      <Row label="地点" value={tract.location || "-"} />
-      <Row label="时相" value={tract.acquisition_time || "-"} />
+      <div style={TITLE}>{tract.tract_id}</div>
+      <Row label="地块" value={tract.tract_id || "-"} />
+      <Row label="时相" value={tract.phase_id || "-"} />
       <Row label="面积" value={formatArea(tract)} mono />
       <div style={FOOT}>
         {tract.active_run_id ? (

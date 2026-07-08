@@ -35,7 +35,7 @@ __all__ = [
 
 
 def summarize_counts(species: list[str]) -> dict[str, int]:
-    """按物种统计株数（向后兼容的纯 Python 工具）。"""
+    """按物种统计株数的纯 Python 工具。"""
     out: dict[str, int] = {}
     for s in species:
         out[s] = out.get(s, 0) + 1
@@ -46,28 +46,18 @@ def generate_report(
     *,
     tract_id: str | None = None,
     run_id: str | None = None,
-    acquisition_time: str | None = None,
-    location: str | None = None,
     fmt: str = "md",
     out_dir: str | Path | None = None,
     with_charts: bool = True,
     db_url: str | None = None,
     vis_path: str | Path | None = None,
 ) -> dict:
-    """端到端生成一份报告。
-
-    定位优先级: tract_id > (acquisition_time, location)。run_id 可选限定某次 run。
-    fmt: 'md' | 'csv' | 'pdf'。pdf 缺 reportlab 时自动回退到 md。
-    返回 {'format', 'out_path', 'data', 'charts', 'fallback'?}。
-    """
+    """端到端生成一份报告。tract_id 可传业务地块 ID 或 tract_phase_pk。"""
     from ..db import reader  # 延迟导入，避免报告指标单测耦合 db
 
-    rid = reader.resolve_tract_id(
-        tract_id=tract_id, acquisition_time=acquisition_time,
-        location=location, url=db_url,
-    )
+    rid = tract_id
     if rid is None:
-        raise ValueError("未找到地块：请传 --tract-id 或 (--acquisition-time 与 --location)")
+        raise ValueError("未找到地块：请传 --tract-id 或 tract_phase_pk")
 
     used_run = run_id
     if not used_run:

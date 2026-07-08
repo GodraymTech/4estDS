@@ -1,9 +1,9 @@
 // 后端契约的前端镜像类型(与 Python contracts/schemas 对应)。单一真相集中在此。
 export interface Tract {
+  tract_phase_pk?: string;
+  phase_id?: string;
+  region_id?: string;
   tract_id: string;
-  name?: string;
-  acquisition_time?: string;
-  location?: string;
   geo_area?: number;
   area_unit?: string;
   crs_epsg?: number;
@@ -15,7 +15,7 @@ export interface Tract {
   [k: string]: unknown;
 }
 
-export type JobState = "queued" | "running" | "succeeded" | "failed";
+export type JobState = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
 export interface JobStatus {
   job_id: string;
@@ -100,8 +100,8 @@ export interface InferSubmit {
   image_key?: string;
   input_path?: string;
   arch?: string;
-  acquisition_time?: string; // YYYYmmdd
-  location?: string;
+  phase_id?: string;
+  tract_id?: string;
   tile_size?: number;
   overlap_rate?: number;
   dsm?: string;
@@ -126,8 +126,8 @@ export interface InputInspectImage {
   width?: number | null;
   height?: number | null;
   crs_epsg?: number | null;
-  acquisition_time?: string | null;
-  acquisition_time_source?: string | null;
+  phase_id?: string | null;
+  phase_source?: string | null;
 }
 
 export interface InputInspectResult {
@@ -135,8 +135,8 @@ export interface InputInspectResult {
   normalized_path: string;
   input_kind: "file" | "directory" | string;
   image_count: number;
-  suggested_location?: string | null;
-  suggested_acquisition_time?: string | null;
+  suggested_tract_id?: string | null;
+  suggested_phase_id?: string | null;
   images: InputInspectImage[];
 }
 
@@ -157,7 +157,7 @@ export interface FeatureCollection {
 // tiles 为空 / available=false 时, 前端回退默认底图。
 export interface TractImagery {
   tract_id: string;
-  acquisition_time?: string;
+  phase_id?: string;
   tiles?: string[] | null;
   tile_size?: number;
   attribution?: string | null;
@@ -195,25 +195,26 @@ export interface SpeciesAnalysis {
   avg_volume?: number | null;
   max_volume?: number | null;
   avg_crown_area?: number | null;
-  crown_w_geo?: DistributionSummary;
-  crown_h_geo?: DistributionSummary;
+  crown_width_geo?: DistributionSummary;
+  crown_height_geo?: DistributionSummary;
   crown_area_geo?: DistributionSummary;
   height?: DistributionSummary;
 }
 
 export interface TractSummary {
   tract_id?: string | null;
+  tract_phase_pk?: string | null;
+  phase_id?: string | null;
   run_id?: string | null;
   tree_count: number;
   species: Record<string, number>;
   density_per_ha?: number | null;
-  crown_w_geo?: DistributionSummary;
-  crown_h_geo?: DistributionSummary;
+  crown_width_geo?: DistributionSummary;
+  crown_height_geo?: DistributionSummary;
   crown_area_geo?: DistributionSummary;
   height?: DistributionSummary;
   meta?: {
-    acquisition_time?: string | null;
-    location?: string | null;
+    phase_id?: string | null;
     area_m2?: number | null;
     species_richness?: number;
     species_analysis?: Record<string, SpeciesAnalysis>;

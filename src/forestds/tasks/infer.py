@@ -27,8 +27,8 @@ def run_infer_pipeline(
     run_id: str,
     settings,
     arch: str | None = None,
-    acquisition_time: str | None = None,
-    location: str | None = None,
+    phase_id: str | None = None,
+    tract_id: str | None = None,
     tile_size: int | None = None,
     overlap_rate: float | None = None,
     chm: str | None = None,
@@ -146,7 +146,7 @@ def run_infer_pipeline(
 
     check_cancelled(run_id)
 
-    # 2.4 为了跟以前的返回值元数据兼容，将 tiles_dir 相对于 home_dir() 记录到 meta 中
+    # 2.4 记录切片缓存位置，供后续同图复用。
     if mode == "physical_slice" and tiles_dir:
         try:
             rel_tiles_dir = str(Path(tiles_dir).relative_to(paths.home_dir()))
@@ -157,7 +157,7 @@ def run_infer_pipeline(
     # ── 3. GIS 投影 & 地块登记 ─────────────────────────────────────────────────
     from ..geo import compute_tract_geometry
     transform_obj = crs_obj = None
-    default_acquisition_time = None
+    default_phase_id = None
     if image_path.lower().endswith((".tif", ".tiff")):
         try:
             import rasterio
@@ -167,9 +167,9 @@ def run_infer_pipeline(
         except Exception:
             pass
 
-    from ..utils.input_inspect import extract_image_acquisition_time
+    from ..utils.input_inspect import extract_image_phase_id
 
-    default_acquisition_time, _ = extract_image_acquisition_time(image_path)
+    default_phase_id, _ = extract_image_phase_id(image_path)
 
     geo = compute_tract_geometry(
         image_path, result.meta.get("width"), result.meta.get("height"),
@@ -180,13 +180,12 @@ def run_infer_pipeline(
             "输入图像未包含地理空间元数据，地理面积/林木密度等指标在报告和 DB 中将缺失。"
         )
 
-    final_acquisition_time = acquisition_time or default_acquisition_time or "00000000"
-    final_location = location or Path(image_path).stem
+    final_phase_id = phase_id or default_phase_id or "00000000"
+    final_tract_id = tract_id or Path(image_path).stem
 
     tract_id = writer.ensure_tract(
-        final_acquisition_time,
-        final_location,
-        name=Path(image_path).stem,
+        phase_id=final_phase_id,
+        tract_id=final_tract_id,
         pixel_w=geo.get("pixel_w") or result.meta.get("width"),
         pixel_h=geo.get("pixel_h") or result.meta.get("height"),
         gsd=geo.get("gsd"),
@@ -194,6 +193,7 @@ def run_infer_pipeline(
         area_unit=geo.get("area_unit"),
         crs_epsg=geo.get("crs_epsg"),
         crs_wkt=geo.get("crs_wkt"),
+        image_path=image_path,
     )
 
     # ── 4. 高程融合树高（可选）────────────────────────────────────────────────
@@ -224,7 +224,12 @@ def run_infer_pipeline(
             sampler.annotate(result.detections)
             for _stype, _path in (("chm", chm), ("dsm", dsm), ("dem", dem), ("las", las)):
                 if _path:
-                    writer.register_source(tract_id, _stype, _path)
+                    writer.register_source(
+                        tract_id,
+                        _stype,
+                        _path,
+                        phase_id=final_phase_id,
+                    )
 
         # 触发多源融合成果可视化输出至 multisource/ 目录
         if dsm or las:
@@ -267,6 +272,7 @@ def run_infer_pipeline(
         tract_id, run_id, result.detections,
         slice_size=result.meta.get("tile_size"),
         image_path=image_path, transform=transform_obj, crs=crs_obj,
+        phase_id=final_phase_id,
     )
 
     # ── 6. 可视化绘图（可选）──────────────────────────────────────────────────
@@ -288,6 +294,8 @@ def run_infer_pipeline(
         "raw_count": result.raw_count,
         "fused_count": result.fused_count,
         "observations_written": written,
+        "tract_id": tract_id,
+        "phase_id": final_phase_id,
     }
     writer.finish_run_log(run_id, "succeeded", metrics=metrics, duration_s=dur)
 

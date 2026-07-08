@@ -4,7 +4,7 @@ export type AlertSeverity = "high" | "medium" | "low";
 export type AlertKind = "degradation" | "clearing" | "count_drop";
 
 export interface ChangeSignal {
-  location: string;
+  tract_id: string;
   areaPct: number | null; // 冠幅面积变化百分比
   countPct: number | null; // 株数变化百分比
   lostCount: number; // 消失图斑数
@@ -13,7 +13,7 @@ export interface ChangeSignal {
 
 export interface AlertItem {
   id: string;
-  location: string;
+  tract_id: string;
   kind: AlertKind;
   severity: AlertSeverity;
   title: string;
@@ -36,8 +36,8 @@ export function deriveAlerts(s: ChangeSignal): AlertItem[] {
     const sev: AlertSeverity =
       s.areaPct <= -15 ? "high" : s.areaPct <= -10 ? "medium" : "low";
     out.push({
-      id: s.location + ":degradation",
-      location: s.location,
+      id: s.tract_id + ":degradation",
+      tract_id: s.tract_id,
       kind: "degradation",
       severity: sev,
       title: KIND_LABEL.degradation,
@@ -51,8 +51,8 @@ export function deriveAlerts(s: ChangeSignal): AlertItem[] {
     const sev: AlertSeverity =
       lostRatio >= 0.3 ? "high" : lostRatio >= 0.2 ? "medium" : "low";
     out.push({
-      id: s.location + ":clearing",
-      location: s.location,
+      id: s.tract_id + ":clearing",
+      tract_id: s.tract_id,
       kind: "clearing",
       severity: sev,
       title: KIND_LABEL.clearing,
@@ -70,8 +70,8 @@ export function deriveAlerts(s: ChangeSignal): AlertItem[] {
     const sev: AlertSeverity =
       s.countPct <= -20 ? "high" : s.countPct <= -12 ? "medium" : "low";
     out.push({
-      id: s.location + ":count_drop",
-      location: s.location,
+      id: s.tract_id + ":count_drop",
+      tract_id: s.tract_id,
       kind: "count_drop",
       severity: sev,
       title: KIND_LABEL.count_drop,
