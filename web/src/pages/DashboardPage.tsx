@@ -9,8 +9,8 @@ import {
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { PageContainer } from "../shared/ui/PageContainer";
-import { useTractSummaries, useTracts, type Tract, type TractSummary } from "../entities/tract";
-import { groupPhasesByTract } from "../entities/phase";
+import { formatAreaValue } from "../shared/lib/format";
+import { useTiffs, useTractSummaries, useTracts, type TiffAsset, type Tract, type TractSummary } from "../entities/tract";
 import { tractCenter } from "../features/overview/tractGeo";
 
 interface BarRow {
@@ -22,7 +22,10 @@ interface BarRow {
 interface AuditRow {
   id: string;
   name: string;
+  mapPath: string;
   time: string;
+  phases: number;
+  images: number;
   trees: number;
   cover: number | null;
   crownArea: number;
@@ -32,15 +35,16 @@ interface AuditRow {
 
 export function DashboardPage() {
   const { data, isLoading } = useTracts();
+  const tiffsQuery = useTiffs();
   const tracts = data ?? [];
+  const tiffs = tiffsQuery.data ?? [];
   const summariesQuery = useTractSummaries(tracts.length > 0);
   const summaries = summariesQuery.data ?? [];
-  const groups = useMemo(() => groupPhasesByTract(tracts), [tracts]);
   const summaryByTract = useMemo(() => indexSummaries(summaries), [summaries]);
-  const stats = useMemo(() => buildStats(tracts, summaries), [tracts, summaries]);
+  const stats = useMemo(() => buildStats(tracts, summaries, tiffs), [tracts, summaries, tiffs]);
   const auditRows = useMemo(
-    () => buildAuditRows(tracts, summaryByTract),
-    [tracts, summaryByTract],
+    () => buildAuditRows(tracts, tiffs, summaryByTract),
+    [tracts, tiffs, summaryByTract],
   );
   const speciesRows = useMemo(() => buildSpeciesRows(summaries), [summaries]);
   const treeRows = useMemo(() => buildTreeRows(auditRows), [auditRows]);
@@ -58,29 +62,29 @@ export function DashboardPage() {
           <Row gutter={[16, 16]}>
             <KpiCard
               title="已分析地块"
-              value={groups.length.toLocaleString()}
-              sub={`${tracts.length.toLocaleString()} 个入库时相`}
+              value={stats.detectedProjects.toLocaleString()}
+              sub={`${stats.trackedProjects.toLocaleString()} 个已跟踪项目`}
               icon={<ClusterOutlined />}
               accent="#118ab2"
             />
             <KpiCard
               title="总株数"
               value={stats.trees.toLocaleString()}
-              sub={summariesQuery.isFetching ? "统计同步中" : "当前 active/latest run"}
+              sub={summariesQuery.isFetching || tiffsQuery.isFetching ? "统计同步中" : `${stats.detectedImages} 张影像已检测`}
               icon={<BarChartOutlined />}
               accent="#ef476f"
             />
             <KpiCard
               title="冠幅总面积"
               value={formatAreaValue(stats.crownArea)}
-              sub={`监测面积 ${formatAreaValue(stats.area)}`}
+              sub={`有效影像 ${stats.validImages}/${stats.images}`}
               icon={<AreaChartOutlined />}
               accent="#2a9d8f"
             />
             <KpiCard
               title="总体覆盖率"
               value={formatPercent(stats.cover)}
-              sub={`${stats.published}/${tracts.length} 个时相已发布`}
+              sub={`${stats.phases} 个时相，${stats.published} 个时相已发布`}
               icon={<PieChartOutlined />}
               accent="#7b2cbf"
             />
@@ -138,19 +142,26 @@ function indexSummaries(summaries: TractSummary[]): Map<string, TractSummary> {
   return out;
 }
 
-function buildStats(tracts: Tract[], summaries: TractSummary[]) {
+function buildStats(tracts: Tract[], summaries: TractSummary[], tiffs: TiffAsset[]) {
   const located = tracts.filter((t) => tractCenter(t)).length;
   const published = tracts.filter((t) => t.active_run_id).length;
   const withArea = tracts.filter((t) => typeof t.geo_area === "number").length;
   const area = tracts.reduce((sum, t) => sum + (t.geo_area ?? 0), 0);
-  const summaryTrees = summaries.reduce((sum, s) => sum + (s.tree_count ?? 0), 0);
-  const fallbackTrees = tracts.reduce((sum, t) => sum + (t.observation_count ?? 0), 0);
+  const detectedTiffs = tiffs.filter((t) => t.has_detection || t.observation_count > 0);
+  const summaryTrees = detectedTiffs.reduce((sum, t) => sum + (t.observation_count ?? 0), 0);
+  const fallbackTrees = summaries.reduce((sum, s) => sum + (s.tree_count ?? 0), 0);
   const crownArea = summaries.reduce((sum, s) => sum + (s.meta?.total_crown_area ?? 0), 0);
   return {
     located,
     published,
     withArea,
     area,
+    trackedProjects: new Set(tiffs.map((t) => t.tract_id)).size || new Set(tracts.map((t) => t.tract_id)).size,
+    detectedProjects: new Set(detectedTiffs.map((t) => t.tract_id)).size,
+    images: tiffs.length,
+    validImages: tiffs.filter((t) => t.path_exists).length,
+    detectedImages: detectedTiffs.length,
+    phases: new Set(tiffs.map((t) => `${t.tract_id}:${t.phase_id}`)).size || tracts.length,
     trees: summaryTrees || fallbackTrees,
     crownArea,
     cover: area > 0 && crownArea > 0 ? crownArea / area : null,
@@ -159,20 +170,41 @@ function buildStats(tracts: Tract[], summaries: TractSummary[]) {
 
 function buildAuditRows(
   tracts: Tract[],
+  tiffs: TiffAsset[],
   summaryByTract: Map<string, TractSummary>,
 ): AuditRow[] {
-  return tracts
-    .map((tract) => {
-      const summary = summaryByTract.get(String(tract.tract_phase_pk || tract.tract_id));
+  const byTract = new Map<string, Tract[]>();
+  for (const tract of tracts) {
+    const arr = byTract.get(tract.tract_id) ?? [];
+    arr.push(tract);
+    byTract.set(tract.tract_id, arr);
+  }
+  return [...byTract.entries()]
+    .map(([tractId, phases]) => {
+      const sorted = [...phases].sort((a, b) => String(b.phase_id || "").localeCompare(String(a.phase_id || "")));
+      const latest = sorted[0];
+      const latestTiffs = tiffs.filter((t) => t.tract_id === tractId && t.phase_id === latest.phase_id);
+      const detectedLatestTiffs = latestTiffs.filter((t) => t.has_detection || t.observation_count > 0);
+      const summary = summaryByTract.get(String(latest.tract_phase_pk || latest.tract_id));
+      const trees = detectedLatestTiffs.reduce((sum, t) => sum + (t.observation_count ?? 0), 0);
       return {
-        id: String(tract.tract_phase_pk || tract.tract_id),
-        name: tract.tract_id,
-      time: tract.phase_id || "-",
-        trees: summary?.tree_count ?? tract.observation_count ?? 0,
+        id: latest.tract_id,
+        name: latest.tract_id,
+        mapPath: [
+          "/map",
+          encodeURIComponent(latest.city || "未知市"),
+          encodeURIComponent(latest.county || "未知县"),
+          encodeURIComponent(latest.tract_id),
+          encodeURIComponent(latest.phase_id || "00000000"),
+        ].join("/"),
+        time: latest.phase_id || "-",
+        phases: new Set(phases.map((p) => p.phase_id).filter(Boolean)).size,
+        images: latestTiffs.length,
+        trees: trees || (summary?.tree_count ?? latest.observation_count ?? 0),
         cover: summary?.meta?.canopy_cover_rate ?? null,
         crownArea: summary?.meta?.total_crown_area ?? 0,
-        located: Boolean(tractCenter(tract)),
-        published: Boolean(tract.active_run_id),
+        located: latestTiffs.some((t) => typeof t.center_lng === "number" && typeof t.center_lat === "number") || Boolean(tractCenter(latest)),
+        published: Boolean(latest.active_run_id),
       };
     })
     .sort((a, b) => b.trees - a.trees);
@@ -284,6 +316,8 @@ function AuditTable({ rows }: { rows: AuditRow[] }) {
       <div style={{ ...AUDIT_ROW, ...AUDIT_HEAD }}>
         <span>地块</span>
         <span>时相</span>
+        <span>时相数</span>
+        <span>影像数</span>
         <span>株数</span>
         <span>覆盖率</span>
         <span>冠幅和</span>
@@ -291,10 +325,12 @@ function AuditTable({ rows }: { rows: AuditRow[] }) {
       </div>
       {rows.slice(0, 10).map((row) => (
         <div key={row.id} style={AUDIT_ROW}>
-          <Link to={`/map/${encodeURIComponent(row.id)}`} style={AUDIT_NAME}>
+          <Link to={row.mapPath} style={AUDIT_NAME}>
             {row.name}
           </Link>
           <span>{row.time}</span>
+          <strong>{row.phases}</strong>
+          <strong>{row.images}</strong>
           <strong>{row.trees.toLocaleString()}</strong>
           <span>{formatPercent(row.cover)}</span>
           <span>{formatAreaValue(row.crownArea)}</span>
@@ -360,13 +396,6 @@ function progressColor(value: number): string {
   if (value >= 80) return "#2a9d8f";
   if (value >= 50) return "#118ab2";
   return "#ef476f";
-}
-
-function formatAreaValue(m2: number): string {
-  if (!Number.isFinite(m2) || m2 <= 0) return "-";
-  if (m2 >= 1000000) return (m2 / 1000000).toFixed(2) + " km\u00b2";
-  if (m2 >= 10000) return (m2 / 10000).toFixed(2) + " hm\u00b2";
-  return m2.toLocaleString(undefined, { maximumFractionDigits: 1 }) + " m\u00b2";
 }
 
 function formatPercent(value: number | null | undefined): string {
@@ -445,7 +474,7 @@ const AUDIT_TABLE: CSSProperties = {
 };
 const AUDIT_ROW: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(120px, 1.4fr) 88px 72px 72px 96px 150px",
+  gridTemplateColumns: "minmax(120px, 1.4fr) 88px 58px 58px 72px 72px 96px 150px",
   alignItems: "center",
   gap: 10,
   padding: "8px 10px",

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Empty, Table, Tag } from "antd";
+import { Alert, Button, Empty, Table, Tag } from "antd";
 import type { TableProps } from "antd";
 import { ExportOutlined } from "@ant-design/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -227,6 +227,7 @@ function RuntimeView({ jobId }: { jobId?: string }) {
       <LogConsole lines={lines} />
       {data?.status === "succeeded" ? (
         <div className="task-result-actions">
+          <CogCleanupNotice status={data} />
           <Button
             type="primary"
             icon={<ExportOutlined />}
@@ -238,6 +239,23 @@ function RuntimeView({ jobId }: { jobId?: string }) {
       ) : null}
       <BatchItems status={data} />
     </>
+  );
+}
+
+function CogCleanupNotice({ status }: { status?: JobStatus }) {
+  const conversion = status?.metrics?.cog_conversion;
+  if (!conversion || typeof conversion !== "object") return null;
+  const row = conversion as Record<string, unknown>;
+  const oldPath = typeof row.source_path === "string" ? row.source_path : "";
+  const newPath = typeof row.cog_path === "string" ? row.cog_path : "";
+  if (!oldPath || !newPath || oldPath === newPath) return null;
+  return (
+    <Alert
+      type="info"
+      showIcon
+      message="推理过程中已自动生成 COG 影像；确认成果无误后，可自行删除旧 tif/tiff 与 tif.ovr 等旁路文件。"
+      description={<span className="mono">{newPath}</span>}
+    />
   );
 }
 

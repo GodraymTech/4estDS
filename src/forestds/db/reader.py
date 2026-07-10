@@ -50,6 +50,45 @@ def _parse_wkt_point(wkt: str | None) -> tuple[float, float] | None:
         return None
 
 
+def _parse_wkt_polygon_centroid(wkt: str | None) -> tuple[float, float] | None:
+    if not wkt or "POLYGON" not in wkt.upper() or "EMPTY" in wkt.upper():
+        return None
+    try:
+        inner = wkt[wkt.index("((") + 2 : wkt.rindex("))")]
+        coords: list[tuple[float, float]] = []
+        for item in inner.split(","):
+            parts = item.strip().split()
+            if len(parts) >= 2:
+                coords.append((float(parts[0]), float(parts[1])))
+        if len(coords) > 1 and coords[0] == coords[-1]:
+            coords = coords[:-1]
+        if not coords:
+            return None
+        if len(coords) < 3:
+            return (
+                sum(p[0] for p in coords) / len(coords),
+                sum(p[1] for p in coords) / len(coords),
+            )
+        pts = coords + [coords[0]]
+        signed_area = 0.0
+        cx = 0.0
+        cy = 0.0
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            cross = x0 * y1 - x1 * y0
+            signed_area += cross
+            cx += (x0 + x1) * cross
+            cy += (y0 + y1) * cross
+        if abs(signed_area) < 1e-12:
+            return (
+                sum(p[0] for p in coords) / len(coords),
+                sum(p[1] for p in coords) / len(coords),
+            )
+        area = signed_area * 0.5
+        return cx / (6 * area), cy / (6 * area)
+    except (ValueError, IndexError):
+        return None
+
+
 def _looks_like_lnglat(x: float, y: float) -> bool:
     return -180 <= x <= 180 and -90 <= y <= 90
 
@@ -79,11 +118,12 @@ def _to_wgs84(x: float, y: float, tract: dict) -> tuple[float, float] | None:
 
 def _base_tract_query(where: str = "") -> str:
     return (
-        "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_source, "
+        "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_geom_cent, "
+        "tr.effective_geom, tr.boundary_source, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
-        "tp.tract_phase_pk, tp.phase_id, tp.coverage_status, tp.active_run_id, "
+        "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tp.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
-        "tf.footprint_geom, tf.footprint_bbox, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
+        "tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
         "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, "
         "tf.dtype, tf.nodata, tf.inference_status "
         "FROM tracts tr "
@@ -103,11 +143,12 @@ def _base_tract_query(where: str = "") -> str:
 
 def _phase_tract_query(where: str = "") -> str:
     return (
-        "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_source, "
+        "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_geom_cent, "
+        "tr.effective_geom, tr.boundary_source, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
-        "tp.tract_phase_pk, tp.phase_id, tp.coverage_status, tp.active_run_id, "
+        "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tp.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
-        "tf.footprint_geom, tf.footprint_bbox, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
+        "tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
         "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, "
         "tf.dtype, tf.nodata, tf.inference_status "
         "FROM tract_phases tp "
@@ -125,6 +166,10 @@ def _tract_row(row: dict) -> dict:
     out = dict(row)
     out["status"] = out.get("coverage_status") or out.get("tract_coverage_status")
     out["source_path"] = _latest_path(out.get("path_versions"))
+    if out.get("center_lng") is None or out.get("center_lat") is None:
+        center = _parse_wkt_polygon_centroid(out.get("boundary_geom")) or _parse_wkt_point(out.get("boundary_geom_cent"))
+        if center:
+            out["center_lng"], out["center_lat"] = center
     return out
 
 
@@ -336,6 +381,68 @@ def list_tracts(*, url: str | None = None) -> list[dict]:
     return tracts
 
 
+def list_tiffs(*, url: str | None = None) -> list[dict]:
+    """返回全部 TIFF 资产明细，供地图总览与看板按影像维度聚合。"""
+    conn = _connect(url)
+    try:
+        rows = conn.execute(
+            "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, "
+            "tr.boundary_geom, tr.boundary_geom_cent, tr.effective_geom, "
+            "tp.tract_phase_pk, tp.phase_id, tp.active_run_id, "
+            "tf.tiff_id, tf.file_name, tf.path_versions, tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, "
+            "tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
+            "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, tf.dtype, tf.nodata, "
+            "tf.inference_status, tf.created_at, tf.updated_at, "
+            "r.run_id, r.status AS run_status, COALESCE(r.ended_at, r.started_at) AS detected_at, "
+            "(SELECT COUNT(*) FROM tree_observations o WHERE o.tiff_id=tf.tiff_id AND o.phase_id=tf.phase_id) AS observation_count "
+            "FROM tiffs tf "
+            "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
+            "JOIN tracts tr ON tr.tract_pk=tp.tract_pk "
+            "LEFT JOIN runs r ON r.rowid=("
+            "  SELECT r2.rowid FROM runs r2 "
+            "  WHERE r2.tiff_id=tf.tiff_id AND r2.phase_id=tf.phase_id "
+            "  ORDER BY r2.started_at DESC LIMIT 1"
+            ") "
+            "ORDER BY tr.tract_id, tp.phase_id DESC, tf.file_name"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    out: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        source_path = _latest_path(item.get("path_versions"))
+        center = None
+        if item.get("center_lng") is not None and item.get("center_lat") is not None:
+            center = (float(item["center_lng"]), float(item["center_lat"]))
+        if center is None:
+            center = _parse_wkt_point(item.get("center_geom"))
+        if center is None:
+            center = _parse_wkt_polygon_centroid(item.get("footprint_geom"))
+        if center is None:
+            center = _parse_wkt_point(item.get("boundary_geom_cent"))
+        count = int(item.get("observation_count") or 0)
+        run_status = item.get("run_status")
+        inference_status = item.get("inference_status")
+        status = "已检测" if run_status == "succeeded" or inference_status == "inferred" or count > 0 else "未检测"
+        if run_status == "running":
+            status = "检测中"
+        elif run_status == "failed":
+            status = "检测失败"
+        item.update(
+            {
+                "source_path": source_path,
+                "path_exists": bool(source_path and Path(source_path).expanduser().exists()),
+                "center_lng": center[0] if center else None,
+                "center_lat": center[1] if center else None,
+                "status": status,
+                "has_detection": status == "已检测",
+            }
+        )
+        out.append(item)
+    return out
+
+
 def find_cached_tiles(input_path: str, *, url: str | None = None) -> Path | None:
     """查找该图像最近一次成功运行保留的切片目录。"""
     p = Path(input_path)
@@ -387,6 +494,48 @@ def latest_tiff_path_for_tract(tract_id: str, *, url: str | None = None) -> str 
             "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
             "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) ORDER BY tp.phase_id DESC, tf.updated_at DESC LIMIT 1",
             (tract_id, tract_id),
+        ).fetchone()
+    finally:
+        conn.close()
+    return _latest_path(row["path_versions"]) if row else None
+
+
+def tiff_path(
+    *,
+    tract_id: str | None = None,
+    phase_id: str | None = None,
+    tiff_id: str | None = None,
+    file_name: str | None = None,
+    tract_phase_pk: str | None = None,
+    url: str | None = None,
+) -> str | None:
+    clauses: list[str] = []
+    params: list[str] = []
+    if tract_id:
+        clauses.append("tp.tract_id=?")
+        params.append(tract_id)
+    if phase_id:
+        clauses.append("tp.phase_id=?")
+        params.append(phase_id)
+    if tract_phase_pk:
+        clauses.append("tp.tract_phase_pk=?")
+        params.append(tract_phase_pk)
+    if tiff_id:
+        clauses.append("tf.tiff_id=?")
+        params.append(tiff_id)
+    if file_name:
+        clauses.append("(tf.file_name=? OR tf.file_name=? OR tf.file_name LIKE ?)")
+        params.extend([file_name, Path(file_name).name, Path(file_name).stem + ".%"])
+    if not clauses:
+        return None
+    conn = _connect(url)
+    try:
+        row = conn.execute(
+            "SELECT tf.path_versions FROM tiffs tf "
+            "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
+            "WHERE " + " AND ".join(clauses) + " "
+            "ORDER BY tp.phase_id DESC, tf.updated_at DESC LIMIT 1",
+            params,
         ).fetchone()
     finally:
         conn.close()

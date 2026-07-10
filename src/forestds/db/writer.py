@@ -12,7 +12,7 @@ from typing import Any
 
 from loguru import logger as log
 
-from ..geo_admin import (
+from ..geo.admin import (
     UNKNOWN_CITY,
     UNKNOWN_COUNTY,
     UNKNOWN_TOWN,
@@ -126,6 +126,79 @@ def _wkt_polygon(coords: list[tuple[float, float]]) -> str:
     return "POLYGON((" + ", ".join(f"{x} {y}" for x, y in closed) + "))"
 
 
+def _wkt_point(x: float, y: float) -> str:
+    return f"POINT({x} {y})"
+
+
+def _tiff_type(image_path: str | None) -> str:
+    if not image_path:
+        return "invalid"
+    try:
+        from ..preprocess.cog import inspect_tiff_format
+
+        return inspect_tiff_format(image_path)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("TIFF 类型检测失败: path={} err={}", image_path, exc)
+        return "invalid"
+
+
+def _geo_area_from_wgs84(coords: list[tuple[float, float]]) -> float | None:
+    if len(coords) < 3:
+        return None
+    try:
+        from pyproj import Geod
+
+        geod = Geod(ellps="WGS84")
+        xs = [p[0] for p in coords]
+        ys = [p[1] for p in coords]
+        area, _ = geod.polygon_area_perimeter(xs, ys)
+        return abs(float(area))
+    except Exception as exc:  # noqa: BLE001
+        log.debug("WGS84 footprint 面积计算失败: err={}", exc)
+        return None
+
+
+def _polygon_centroid(coords: list[tuple[float, float]]) -> tuple[float, float] | None:
+    if not coords:
+        return None
+    if len(coords) < 3:
+        x = sum(p[0] for p in coords) / len(coords)
+        y = sum(p[1] for p in coords) / len(coords)
+        return x, y
+    pts = coords + [coords[0]]
+    signed_area = 0.0
+    cx = 0.0
+    cy = 0.0
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        cross = x0 * y1 - x1 * y0
+        signed_area += cross
+        cx += (x0 + x1) * cross
+        cy += (y0 + y1) * cross
+    if abs(signed_area) < 1e-12:
+        x = sum(p[0] for p in coords) / len(coords)
+        y = sum(p[1] for p in coords) / len(coords)
+        return x, y
+    area = signed_area * 0.5
+    return cx / (6 * area), cy / (6 * area)
+
+
+def _centroid_from_wkt_polygon(wkt: str | None) -> tuple[float, float] | None:
+    if not wkt or "POLYGON" not in wkt.upper() or "EMPTY" in wkt.upper():
+        return None
+    try:
+        inner = wkt[wkt.index("((") + 2 : wkt.rindex("))")]
+        coords: list[tuple[float, float]] = []
+        for item in inner.split(","):
+            parts = item.strip().split()
+            if len(parts) >= 2:
+                coords.append((float(parts[0]), float(parts[1])))
+        if len(coords) > 1 and coords[0] == coords[-1]:
+            coords = coords[:-1]
+        return _polygon_centroid(coords)
+    except (ValueError, IndexError):
+        return None
+
+
 def _compute_tiff_metadata(
     image_path: str | None,
     *,
@@ -152,9 +225,12 @@ def _compute_tiff_metadata(
         "file_name": file_name,
         "path_versions": _path_version(image_path),
         "multisource_path_versions": "{}",
+        "tiff_type": _tiff_type(image_path),
         "footprint_geom": "POLYGON EMPTY",
         "footprint_bbox": None,
-        "corner_hash_input": fallback_input,
+        "center_geom": None,
+        "center_lng": None,
+        "center_lat": None,
         "crs_epsg": crs_epsg,
         "crs_wkt": crs_wkt,
         "geotransform": None,
@@ -188,17 +264,33 @@ def _compute_tiff_metadata(
             normalized = ";".join(f"{round(x, 3):.3f},{round(y, 3):.3f}" for x, y in coords)
             minx, miny = min(x for x, _ in coords), min(y for _, y in coords)
             maxx, maxy = max(x for x, _ in coords), max(y for _, y in coords)
+            center = _polygon_centroid(coords)
+            pixel_area = abs(src.transform.a * src.transform.e - src.transform.b * src.transform.d)
+            inferred_area = geo_area
+            inferred_unit = area_unit
+            if inferred_area is None and pixel_area > 0:
+                if src.crs and getattr(src.crs, "is_projected", False):
+                    inferred_area = float(pixel_area * width * height)
+                    inferred_unit = inferred_unit or "m²"
+                else:
+                    inferred_area = _geo_area_from_wgs84(coords)
+                    inferred_unit = inferred_unit or ("m²" if inferred_area is not None else None)
             meta.update(
-                {
-                    "tiff_id": _hash(normalized, 5),
-                    "corner_hash_input": normalized,
-                    "footprint_geom": _wkt_polygon(coords),
-                    "footprint_bbox": _dump([minx, miny, maxx, maxy]),
-                    "crs_epsg": src.crs.to_epsg() if src.crs and hasattr(src.crs, "to_epsg") else crs_epsg,
+                    {
+                        "tiff_id": _hash(f"{phase_id}|{normalized}|{path.resolve()}", 5),
+                        "footprint_geom": _wkt_polygon(coords),
+                        "footprint_bbox": _dump([minx, miny, maxx, maxy]),
+                        "center_geom": _wkt_point(*center) if center else None,
+                        "center_lng": center[0] if center else None,
+                        "center_lat": center[1] if center else None,
+                        "crs_epsg": src.crs.to_epsg() if src.crs and hasattr(src.crs, "to_epsg") else crs_epsg,
                     "crs_wkt": src.crs.to_wkt() if src.crs and hasattr(src.crs, "to_wkt") else crs_wkt,
                     "geotransform": _dump(tuple(src.transform)),
                     "pixel_width": width,
                     "pixel_height": height,
+                    "gsd": gsd if gsd is not None else (float(pixel_area ** 0.5) if pixel_area > 0 and src.crs and getattr(src.crs, "is_projected", False) else None),
+                    "geo_area": inferred_area,
+                    "area_unit": inferred_unit,
                     "band_count": int(src.count),
                     "dtype": str(src.dtypes[0]) if src.dtypes else None,
                     "nodata": src.nodata,
@@ -338,17 +430,26 @@ def ensure_tract(
         image_path=image_path,
     )
     tract_pk = _safe_pk("tract", resolved_region_id, tract_id)
-    tract_phase_pk = _safe_pk("phase", tract_pk, phase_id)
     now = _now()
+    boundary_center = _centroid_from_wkt_polygon(boundary_geom)
+    boundary_geom_cent = _wkt_point(*boundary_center) if boundary_center else None
 
     conn = _connect(url)
     try:
+        existing_tract = conn.execute(
+            "SELECT tract_pk FROM tracts WHERE region_id=? AND tract_id=? LIMIT 1",
+            (resolved_region_id, tract_id),
+        ).fetchone()
+        if existing_tract:
+            tract_pk = existing_tract["tract_pk"]
+        tract_phase_pk = _safe_pk("phase", tract_pk, phase_id)
         conn.execute(
             "INSERT INTO tracts "
-            "(tract_pk, region_id, city, county, town, tract_id, boundary_geom, boundary_source, coverage_status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "(tract_pk, region_id, city, county, town, tract_id, boundary_geom, boundary_geom_cent, effective_geom, boundary_source, coverage_status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tract_pk) DO UPDATE SET region_id=excluded.region_id, city=excluded.city, county=excluded.county, "
-            "town=excluded.town, updated_at=excluded.updated_at",
+            "town=excluded.town, boundary_geom=COALESCE(excluded.boundary_geom, tracts.boundary_geom), "
+            "boundary_geom_cent=COALESCE(excluded.boundary_geom_cent, tracts.boundary_geom_cent), updated_at=excluded.updated_at",
             (
                 tract_pk,
                 resolved_region_id,
@@ -357,6 +458,8 @@ def ensure_tract(
                 town,
                 tract_id,
                 boundary_geom,
+                boundary_geom_cent,
+                None,
                 "manual" if boundary_geom else "unset",
                 "none",
                 now,
@@ -365,22 +468,18 @@ def ensure_tract(
         )
         conn.execute(
             "INSERT INTO tract_phases "
-            "(tract_phase_pk, tract_pk, region_id, city, county, town, tract_id, phase_id, boundary_geom, coverage_status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(tract_pk, phase_id) DO UPDATE SET region_id=excluded.region_id, city=excluded.city, county=excluded.county, "
-            "town=excluded.town, updated_at=excluded.updated_at",
+            "(tract_phase_pk, tract_pk, region_id, tract_id, phase_id, boundary_geom, active_run_id, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(tract_pk, phase_id) DO UPDATE SET region_id=excluded.region_id, "
+            "tract_id=excluded.tract_id, updated_at=excluded.updated_at",
             (
                 tract_phase_pk,
                 tract_pk,
                 resolved_region_id,
-                city,
-                county,
-                town,
                 tract_id,
                 phase_id,
                 None,
-                "none",
-                now,
+                None,
                 now,
             ),
         )
@@ -408,13 +507,16 @@ def ensure_tract(
             conn.execute(
                 "INSERT INTO tiffs "
                 "(tiff_id, phase_id, tract_phase_pk, file_name, path_versions, multisource_path_versions, "
-                " footprint_geom, footprint_bbox, corner_hash_input, crs_epsg, crs_wkt, geotransform, "
+                " tiff_type, footprint_geom, footprint_bbox, center_geom, center_lng, center_lat, crs_epsg, crs_wkt, geotransform, "
                 " pixel_width, pixel_height, gsd, geo_area, area_unit, band_count, dtype, nodata, "
                 " inference_status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(tiff_id, phase_id) DO UPDATE SET "
                 " tract_phase_pk=excluded.tract_phase_pk, path_versions=excluded.path_versions, "
-                " multisource_path_versions=excluded.multisource_path_versions, updated_at=excluded.updated_at",
+                " multisource_path_versions=excluded.multisource_path_versions, tiff_type=excluded.tiff_type, "
+                " footprint_geom=excluded.footprint_geom, footprint_bbox=excluded.footprint_bbox, "
+                " center_geom=excluded.center_geom, center_lng=excluded.center_lng, "
+                " center_lat=excluded.center_lat, updated_at=excluded.updated_at",
                 (
                     tiff_meta["tiff_id"],
                     phase_id,
@@ -422,9 +524,12 @@ def ensure_tract(
                     tiff_meta["file_name"],
                     tiff_meta["path_versions"],
                     tiff_meta["multisource_path_versions"],
+                    tiff_meta["tiff_type"],
                     tiff_meta["footprint_geom"],
                     tiff_meta["footprint_bbox"],
-                    tiff_meta["corner_hash_input"],
+                    tiff_meta["center_geom"],
+                    tiff_meta["center_lng"],
+                    tiff_meta["center_lat"],
                     tiff_meta["crs_epsg"],
                     tiff_meta["crs_wkt"],
                     tiff_meta["geotransform"],
@@ -447,9 +552,16 @@ def ensure_tract(
             ).fetchone()["c"]
             tract = conn.execute("SELECT boundary_source FROM tracts WHERE tract_pk=?", (tract_pk,)).fetchone()
             if int(tiff_count) == 1 and tract and tract["boundary_source"] == "unset" and tiff_meta["footprint_geom"] != "POLYGON EMPTY":
+                tiff_center = _centroid_from_wkt_polygon(tiff_meta["footprint_geom"])
                 conn.execute(
-                    "UPDATE tracts SET boundary_geom=?, boundary_source=?, updated_at=? WHERE tract_pk=?",
-                    (tiff_meta["footprint_geom"], "auto_from_single_tiff", now, tract_pk),
+                    "UPDATE tracts SET boundary_geom=?, boundary_geom_cent=?, boundary_source=?, updated_at=? WHERE tract_pk=?",
+                    (
+                        tiff_meta["footprint_geom"],
+                        _wkt_point(*tiff_center) if tiff_center else None,
+                        "auto_from_single_tiff",
+                        now,
+                        tract_pk,
+                    ),
                 )
 
         conn.commit()

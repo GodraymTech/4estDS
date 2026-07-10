@@ -6,8 +6,8 @@ export interface TractMarkerHandlers {
   onLeave: () => void;
 }
 
-const PUBLISHED_COLOR = "#0e6e63"; // 潮青(已发布)
-const DRAFT_COLOR = "#8a9a94"; // 静灰(未发布)
+const PUBLISHED_COLOR = "#1f8f68"; // 已检测
+const DRAFT_COLOR = "#c6922e"; // 未检测
 
 export function createTractMarkerElement(
   published: boolean,

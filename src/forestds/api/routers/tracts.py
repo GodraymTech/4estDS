@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from ..deps import get_db_url
 from ..geojson import rows_to_featurecollection
-from ..schemas import ChangeCompareOut, TractImageryOut, TractOut, TractSummaryOut
+from ..schemas import ChangeCompareOut, TiffOut, TractImageryOut, TractOut, TractSummaryOut
 
 router = APIRouter(prefix="/tracts", tags=["tracts"])
 
@@ -103,6 +103,13 @@ def list_tract_summaries(db_url: str | None = Depends(get_db_url)) -> list[Tract
     ]
 
 
+@router.get("/tiffs", response_model=list[TiffOut], summary="全部 TIFF 影像资产")
+def list_tiffs(db_url: str | None = Depends(get_db_url)) -> list[TiffOut]:
+    from ...db import reader
+
+    return [TiffOut(**t) for t in reader.list_tiffs(url=db_url)]
+
+
 @router.get("/{tract_id}/summary", response_model=TractSummaryOut, summary="地块统计摘要")
 def get_tract_summary(
     tract_id: str,
@@ -147,24 +154,38 @@ def _derive_imagery(tract: dict) -> dict:
     }
 
 
-def _latest_input_imagery(tract_id: str, db_url: str | None) -> dict:
+def _latest_input_imagery(
+    tract_id: str,
+    db_url: str | None,
+    *,
+    tract_phase_pk: str | None = None,
+    phase_id: str | None = None,
+    tiff_name: str | None = None,
+) -> dict:
     """从最新成功 run 的 input_path 派生 TiTiler 瓦片模板。"""
     from ...db import reader
-    from ...preprocess.cog import check_cog_format
 
-    run_id = reader.latest_run_for_tract(tract_id, url=db_url)
-    run = reader.get_run(run_id, url=db_url) if run_id else None
-    input_path = run.get("input_path") if run else None
+    input_path = None
+    if phase_id or tiff_name:
+        input_path = reader.tiff_path(
+            tract_id=tract_id,
+            tract_phase_pk=tract_phase_pk,
+            phase_id=phase_id,
+            file_name=tiff_name,
+            url=db_url,
+        )
     if not input_path:
-      input_path = reader.latest_tiff_path_for_tract(tract_id, url=db_url)
+        run_id = reader.latest_run_for_tract(tract_id, url=db_url)
+        run = reader.get_run(run_id, url=db_url) if run_id else None
+        input_path = run.get("input_path") if run else None
+    if not input_path:
+        input_path = reader.latest_tiff_path_for_tract(tract_id, url=db_url)
     if not input_path:
         return {"tiles": None, "source_path": None, "source_format": None, "tile_service": None}
 
-    path = Path(input_path).expanduser()
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    fmt = check_cog_format(path)
-    if fmt not in {"cog", "tiled_tiff"}:
+    path = _resolve_local_path(input_path)
+    fmt = _imagery_format(path)
+    if not _is_imagery_tile_ready(fmt):
         return {
             "tiles": None,
             "source_path": str(path),
@@ -174,8 +195,15 @@ def _latest_input_imagery(tract_id: str, db_url: str | None) -> dict:
 
     titiler = os.environ.get("FORESTDS_TITILER_URL") or os.environ.get("TITILER_BASE_URL")
     if not titiler:
+        if phase_id and tiff_name:
+            tile_path = (
+                f"/api/v1/tiles/tiffs/{quote(phase_id, safe='')}/"
+                f"{quote(tiff_name, safe='')}/{{z}}/{{x}}/{{y}}"
+            )
+        else:
+            tile_path = f"/api/v1/tiles/tracts/{quote(tract_id, safe='')}/{{z}}/{{x}}/{{y}}"
         return {
-            "tiles": [f"/api/v1/tiles/tracts/{quote(tract_id, safe='')}/{{z}}/{{x}}/{{y}}"],
+            "tiles": [tile_path],
             "source_path": str(path),
             "source_format": fmt,
             "tile_service": "forestds-inline",
@@ -199,8 +227,32 @@ def _latest_input_imagery(tract_id: str, db_url: str | None) -> dict:
     }
 
 
+def _resolve_local_path(raw_path: str) -> Path:
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path
+
+
+def _imagery_format(path: Path) -> str:
+    from ...preprocess.cog import inspect_tiff_format
+
+    return inspect_tiff_format(path)
+
+
+def _is_imagery_tile_ready(fmt: str | None) -> bool:
+    from ...preprocess.cog import is_tiff_tile_ready
+
+    return is_tiff_tile_ready(fmt)
+
+
 @router.get("/{tract_id}/imagery", response_model=TractImageryOut, summary="多时相真影像瓦片")
-def get_imagery(tract_id: str, db_url: str | None = Depends(get_db_url)) -> TractImageryOut:
+def get_imagery(
+    tract_id: str,
+    phase_id: str | None = Query(None),
+    tiff_name: str | None = Query(None),
+    db_url: str | None = Depends(get_db_url),
+) -> TractImageryOut:
     from ...db import reader
 
     tract = reader.get_tract(tract_id, url=db_url)
@@ -208,7 +260,15 @@ def get_imagery(tract_id: str, db_url: str | None = Depends(get_db_url)) -> Trac
         raise HTTPException(status_code=404, detail=f"地块不存在: {tract_id}")
     d = _derive_imagery(tract)
     if not d["tiles"]:
-        d.update(_latest_input_imagery(tract_id, db_url))
+        d.update(
+            _latest_input_imagery(
+                tract.get("tract_id") or tract_id,
+                db_url,
+                tract_phase_pk=tract.get("tract_phase_pk"),
+                phase_id=phase_id,
+                tiff_name=tiff_name,
+            )
+        )
     return TractImageryOut(
         tract_id=tract_id,
         phase_id=tract.get("phase_id"),

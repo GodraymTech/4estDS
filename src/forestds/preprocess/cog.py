@@ -18,55 +18,124 @@ try:
 except ImportError:
     rasterio = None
 
+TIFF_NORMAL = "normal"
+TIFF_TILED = "tiled"
+TIFF_TILED_EXTERNAL_OVERVIEW = "ext_ovr"
+TIFF_COG = "COG"
+TIFF_INVALID = "invalid"
+TIFF_FORMAT_LABELS = {
+    TIFF_NORMAL: "normal TIFF",
+    TIFF_TILED: "tiled TIFF",
+    TIFF_TILED_EXTERNAL_OVERVIEW: "tiled TIFF with external overview",
+    TIFF_COG: "COG",
+    TIFF_INVALID: "invalid",
+}
+
 
 def check_cog_format(image_path: str | Path) -> str:
-    """检测输入影像的 COG 格式状态。
-    
+    """检测输入影像的严格 COG 状态。
+
     返回下列之一:
-        - "cog": 标准云优化 GeoTIFF
-        - "tiled_tiff": 已分块但未构建金字塔的 TIFF
-        - "normal_tiff": 普通未分块（Striped）的 TIFF
+        - "COG": 标准云优化 GeoTIFF
+        - "ext_ovr": TIFF 本体分块, 金字塔在外部 .ovr
+        - "tiled": 已分块但未构建金字塔的 TIFF
+        - "normal": 普通未分块（Striped）的 TIFF
         - "invalid": 非 TIFF 格式或损坏文件
     """
+    return inspect_tiff_format(image_path)
+
+
+def inspect_tiff_format(image_path: str | Path) -> str:
+    """只检查指定 tif(f) 单文件本体；外部 .ovr 不计入 COG。"""
     if rasterio is None:
         log.warning("rasterio 未安装，无法执行 COG 检测。")
-        return "invalid"
+        return TIFF_INVALID
 
     path = Path(image_path)
     if not path.exists():
         log.error(f"文件不存在: {path}")
-        return "invalid"
+        return TIFF_INVALID
 
     if path.suffix.lower() not in (".tif", ".tiff"):
         log.debug(f"非 TIFF 后缀，跳过格式检测: {path.name}")
-        return "invalid"
-
-    # 优先检测同目录下是否已存在带 _cog 后缀的同名优化文件
-    if not path.stem.endswith("_cog"):
-        cog_path = path.parent / f"{path.stem}_cog{path.suffix}"
-        if cog_path.exists():
-            log.info(f"检测到同目录下存在 {cog_path.name}，优先对其进行 COG 格式检测。")
-            path = cog_path
+        return TIFF_INVALID
 
     try:
         with rasterio.open(path) as src:
             if not src.is_tiled:
-                return "normal_tiff"
-            
-            # 检查是否有金字塔过载层 (overviews)
-            has_overviews = False
-            for i in src.indexes:
-                if len(src.overviews(i)) > 0:
-                    has_overviews = True
-                    break
-            
-            if has_overviews:
-                return "cog"
-            else:
-                return "tiled_tiff"
+                return TIFF_NORMAL
+
+            has_overviews = any(src.overviews(i) for i in src.indexes)
+            if not has_overviews:
+                return TIFF_TILED
+
+            current = str(path.resolve())
+            sidecars = [str(Path(f).resolve()) for f in src.files if str(f).lower().endswith(".ovr")]
+            if any(f != current for f in sidecars):
+                return TIFF_TILED_EXTERNAL_OVERVIEW
+            layout = str(src.tags(ns="IMAGE_STRUCTURE").get("LAYOUT", "")).upper()
+            return TIFF_COG if layout == "COG" else TIFF_TILED
     except Exception as e:
         log.error(f"打开并检测 TIFF 格式失败 {path.name}: {e}")
-        return "invalid"
+        return TIFF_INVALID
+
+
+def is_tiff_tile_ready(tiff_type: str | None) -> bool:
+    """项目内瓦片服务可高效窗口读取的 TIFF 类型。"""
+    return tiff_type in {TIFF_TILED_EXTERNAL_OVERVIEW, TIFF_COG}
+
+
+def prepared_cog_path(
+    image_path: str | Path,
+    *,
+    block_size: int = 512,
+    compress: str = "deflate",
+    resampling: str = "nearest",
+    min_overview_dim: int = 256,
+    force: bool = False,
+) -> tuple[Path, str]:
+    """返回可用于瓦片服务的严格 COG 路径；必要时复用或生成同目录 *_cog.tif。"""
+    path = Path(image_path).expanduser()
+    if not path.exists() or path.suffix.lower() not in {".tif", ".tiff"}:
+        return path, TIFF_INVALID
+
+    status = inspect_tiff_format(path)
+    if is_tiff_tile_ready(status):
+        return path, status
+
+    if not force:
+        candidate = path if path.stem.endswith("_cog") else path.parent / f"{path.stem}_cog.tif"
+        if candidate.exists():
+            candidate_status = inspect_tiff_format(candidate)
+            if candidate_status == TIFF_COG:
+                log.info("复用已存在的严格 COG: {}", candidate)
+                return candidate, TIFF_COG
+
+    if status in {TIFF_NORMAL, TIFF_TILED}:
+        out_path = _default_cog_path(path)
+        log.info(
+            "影像不是严格 COG，准备转换: source={} status={} target={}",
+            path,
+            TIFF_FORMAT_LABELS.get(status, status),
+            out_path,
+        )
+        ok = convert_to_cog(
+            path,
+            out_path,
+            block_size=block_size,
+            compress=compress,
+            resampling=resampling,
+            min_overview_dim=min_overview_dim,
+        )
+        if ok and inspect_tiff_format(out_path) == TIFF_COG:
+            return out_path, TIFF_COG
+    return path, status
+
+
+def _default_cog_path(path: Path) -> Path:
+    if path.stem.endswith("_cog"):
+        return path.parent / f"{path.stem}_strict.tif"
+    return path.parent / f"{path.stem}_cog.tif"
 
 
 def convert_to_cog(
@@ -93,6 +162,16 @@ def convert_to_cog(
         return False
 
     log.info(f"开始将 {in_p.name} 转换为 COG 格式...")
+    if _convert_with_cog_driver(
+        in_p,
+        out_p,
+        block_size=block_size,
+        compress=compress,
+        resampling=resampling,
+    ):
+        return True
+
+    log.warning("GDAL COG driver 转换失败，回退到 rasterio 手写转换路径: {}", in_p)
     try:
         # 1. 拷贝元数据并写入分块 Tiled 影像
         with rasterio.open(in_p) as src:
@@ -123,28 +202,36 @@ def convert_to_cog(
                     data = src.read(i, window=window)
                     dst.write(data, indexes=i, window=window)
                     
-        # 2. 以读写模式重新打开，构建多层金字塔 Overviews
-        with rasterio.open(out_p, "r+") as dst:
-            w, h = dst.width, dst.height
-            factors = []
-            f = 2
-            # 持续下采样直到最小维度的分辨率在 min_overview_dim 左右即可停止
-            while min(w // f, h // f) >= min_overview_dim:
-                factors.append(f)
-                f *= 2
-            
-            if factors:
-                log.debug(f"构建金字塔 Overviews 层级因子: {factors}")
-                resampling_map = {
-                    "nearest": Resampling.nearest,
-                    "bilinear": Resampling.bilinear,
-                    "cubic": Resampling.cubic,
-                    "average": Resampling.average,
-                }
-                algo = resampling_map.get(resampling.lower(), Resampling.nearest)
-                dst.build_overviews(factors, algo)
-                # 记录重采样标签
-                dst.update_tags(ns="rio_overview", resampling=resampling.lower())
+        # 2. 以读写模式重新打开，构建多层内部 Overviews。GDAL 不会可靠地继承主图
+        # 压缩参数，必须显式指定 *_OVERVIEW，否则小图层可能近似裸写，体积暴涨。
+        overview_env = {
+            "COMPRESS_OVERVIEW": compress.upper(),
+            "INTERLEAVE_OVERVIEW": "PIXEL",
+            "GDAL_TIFF_OVR_BLOCKSIZE": str(block_size),
+            "BIGTIFF_OVERVIEW": "IF_SAFER",
+        }
+        with rasterio.Env(**overview_env):
+            with rasterio.open(out_p, "r+") as dst:
+                w, h = dst.width, dst.height
+                factors = []
+                f = 2
+                # 持续下采样直到最小维度的分辨率在 min_overview_dim 左右即可停止
+                while min(w // f, h // f) >= min_overview_dim:
+                    factors.append(f)
+                    f *= 2
+
+                if factors:
+                    log.debug(f"构建金字塔 Overviews 层级因子: {factors}")
+                    resampling_map = {
+                        "nearest": Resampling.nearest,
+                        "bilinear": Resampling.bilinear,
+                        "cubic": Resampling.cubic,
+                        "average": Resampling.average,
+                    }
+                    algo = resampling_map.get(resampling.lower(), Resampling.nearest)
+                    dst.build_overviews(factors, algo)
+                    # 记录重采样标签
+                    dst.update_tags(ns="rio_overview", resampling=resampling.lower())
         
         log.info(f"COG 转换完成: {out_p.name}")
         return True
@@ -156,3 +243,49 @@ def convert_to_cog(
             except Exception:
                 pass
         return False
+
+
+def _convert_with_cog_driver(
+    in_p: Path,
+    out_p: Path,
+    *,
+    block_size: int,
+    compress: str,
+    resampling: str,
+) -> bool:
+    try:
+        from rasterio.shutil import copy as rio_copy
+
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        if out_p.exists():
+            out_p.unlink()
+        log.info(
+            "使用 GDAL COG driver 转换: source={} target={} block={} compress={} resampling={}",
+            in_p,
+            out_p,
+            block_size,
+            compress.upper(),
+            resampling.upper(),
+        )
+        rio_copy(
+            str(in_p),
+            str(out_p),
+            driver="COG",
+            COMPRESS=compress.upper(),
+            BLOCKSIZE=block_size,
+            OVERVIEWS="AUTO",
+            RESAMPLING=resampling.upper(),
+            BIGTIFF="IF_SAFER",
+        )
+        if inspect_tiff_format(out_p) == TIFF_COG:
+            log.info("COG 转换完成: {}", out_p.name)
+            return True
+        log.warning("COG driver 输出未通过严格 COG 检测: {}", out_p)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("COG driver 转换异常: {} - {}", type(exc).__name__, exc)
+    if out_p.exists():
+        try:
+            out_p.unlink()
+        except Exception:
+            pass
+    return False

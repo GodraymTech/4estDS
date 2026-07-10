@@ -3,6 +3,7 @@ import type {
   FeatureCollection,
   AssetInspectRequest,
   AssetInspectResult,
+  AssetCogConvertResult,
   AssetPatch,
   AssetRow,
   AssetTiffCreate,
@@ -23,6 +24,7 @@ import type {
   Tract,
   TractImagery,
   TractSummary,
+  TiffAsset,
   UploadResponse,
 } from "./types";
 
@@ -30,10 +32,15 @@ import type {
 export const endpoints = {
   listTracts: (): Promise<Tract[]> => apiGet("/tracts"),
 
+  listTiffs: (): Promise<TiffAsset[]> => apiGet("/tracts/tiffs"),
+
   listAssets: (): Promise<AssetRow[]> => apiGet("/assets"),
 
   inspectAssetImage: (body: AssetInspectRequest): Promise<AssetInspectResult> =>
     apiPostJson("/assets/inspect-image", body),
+
+  convertAssetCog: (inputPath: string): Promise<AssetCogConvertResult> =>
+    apiPostJson("/assets/convert-cog", { input_path: inputPath }),
 
   searchGeo: (q: string, city = "广东", limit = 10): Promise<GeoSearchResult> =>
     apiGet(`/geo/search?q=${encodeURIComponent(q)}&city=${encodeURIComponent(city)}&limit=${limit}`),
@@ -74,8 +81,16 @@ export const endpoints = {
     apiPostJson("/jobs/inspect-input", body),
 
   // 地块多时相真影像瓦片(时相卷帘刷开真影像)。
-  getImagery: (tractId: string): Promise<TractImagery> =>
-    apiGet(`/tracts/${encodeURIComponent(tractId)}/imagery`),
+  getImagery: (
+    tractId: string,
+    params?: { phaseId?: string; tiffName?: string },
+  ): Promise<TractImagery> => {
+    const query = new URLSearchParams();
+    if (params?.phaseId) query.set("phase_id", params.phaseId);
+    if (params?.tiffName) query.set("tiff_name", params.tiffName);
+    const suffix = query.toString() ? "?" + query.toString() : "";
+    return apiGet(`/tracts/${encodeURIComponent(tractId)}/imagery${suffix}`);
+  },
 
   getTractSummary: (tractId: string): Promise<TractSummary> =>
     apiGet(`/tracts/${encodeURIComponent(tractId)}/summary`),

@@ -25,6 +25,8 @@ DDL: tuple[str, ...] = (
         town            TEXT,
         tract_id        TEXT NOT NULL,
         boundary_geom   TEXT,
+        boundary_geom_cent TEXT,
+        effective_geom  TEXT,
         boundary_source TEXT NOT NULL DEFAULT 'unset'
             CHECK (boundary_source IN ('manual', 'auto_from_single_tiff', 'unset')),
         coverage_status TEXT NOT NULL DEFAULT 'none'
@@ -40,17 +42,11 @@ DDL: tuple[str, ...] = (
         tract_phase_pk  TEXT PRIMARY KEY,
         tract_pk        TEXT NOT NULL REFERENCES tracts(tract_pk) ON DELETE CASCADE,
         region_id       TEXT NOT NULL,
-        city            TEXT,
-        county          TEXT,
-        town            TEXT,
         tract_id        TEXT NOT NULL,
         phase_id        TEXT NOT NULL
             CHECK (phase_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
         boundary_geom   TEXT,
-        coverage_status TEXT NOT NULL DEFAULT 'none'
-            CHECK (coverage_status IN ('none', 'partial', 'full')),
         active_run_id   TEXT,
-        created_at      TEXT NOT NULL,
         updated_at      TEXT NOT NULL,
         UNIQUE (tract_pk, phase_id)
     )
@@ -64,9 +60,13 @@ DDL: tuple[str, ...] = (
         file_name                  TEXT,
         path_versions              TEXT NOT NULL DEFAULT '{}',
         multisource_path_versions  TEXT NOT NULL DEFAULT '{}',
+        tiff_type                  TEXT NOT NULL DEFAULT 'invalid'
+            CHECK (tiff_type IN ('normal', 'tiled', 'ext_ovr', 'COG', 'invalid')),
         footprint_geom             TEXT NOT NULL,
         footprint_bbox             TEXT,
-        corner_hash_input          TEXT NOT NULL,
+        center_geom                TEXT,
+        center_lng                 REAL,
+        center_lat                 REAL,
         crs_epsg                   INTEGER,
         crs_wkt                    TEXT,
         geotransform               TEXT,
@@ -187,9 +187,9 @@ def _assert_new_schema(conn: sqlite3.Connection) -> None:
     if _table_exists(conn, "run_logs") or _table_exists(conn, "tract_sources") or _table_exists(conn, "tract_trees"):
         raise RuntimeError("检测到旧版数据库表；请先备份并创建新的 4estDS 数据库。")
     required = {
-        "tracts": {"tract_pk", "region_id", "tract_id"},
+        "tracts": {"tract_pk", "region_id", "tract_id", "boundary_geom_cent", "effective_geom"},
         "tract_phases": {"tract_phase_pk", "tract_pk", "phase_id"},
-        "tiffs": {"tiff_id", "phase_id", "tract_phase_pk"},
+        "tiffs": {"tiff_id", "phase_id", "tract_phase_pk", "center_geom", "tiff_type"},
         "runs": {"run_id", "tract_phase_pk", "task_type"},
         "tree_observations": {"observation_id", "run_id", "tract_phase_pk"},
     }

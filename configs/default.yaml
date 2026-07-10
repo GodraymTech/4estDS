@@ -86,9 +86,9 @@ fusion:
   max_valid_height: 8.0          # 最大有效高度 (米)，高于该配置的高程或点云在预处理时均被截断为该值，过滤电塔/电线/建筑干扰
 
 
-
-
-
-
-
-
+# 瓦片服务器
+tiles:
+  render_concurrency: 8  # 并发渲染数，正比于内存占用峰值
+  gdal_cache_mb: 640      # GDAL 常驻缓存，调高可改善重复读取但会增加内存
+  warp_mem_mb: 320        # 单瓦片重投影缓存，调高可改善重投影但会增加内存
+  cache_enabled: true    # 缓存已渲染 PNG 瓦片，提升重复浏览流畅度

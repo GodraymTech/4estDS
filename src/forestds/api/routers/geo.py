@@ -11,8 +11,8 @@ from urllib.request import urlopen
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ...geo_admin import UNKNOWN_COUNTY, UNKNOWN_TOWN, normalize_city, normalize_county, region_id
-from ...geo_coords import gcj02_to_wgs84, wgs84_to_gcj02
+from ...geo.admin import UNKNOWN_COUNTY, UNKNOWN_TOWN, normalize_city, normalize_county, region_id
+from ...geo.coords import gcj02_to_wgs84, wgs84_to_gcj02
 from ..schemas import GeoPlaceOut, GeoReverseOut, GeoSearchOut
 
 router = APIRouter(prefix="/geo", tags=["geo"])

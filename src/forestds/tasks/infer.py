@@ -297,6 +297,8 @@ def run_infer_pipeline(
         "tract_id": tract_id,
         "phase_id": final_phase_id,
     }
+    if prep.get("cog_conversion"):
+        metrics["cog_conversion"] = prep["cog_conversion"]
     writer.finish_run_log(run_id, "succeeded", metrics=metrics, duration_s=dur)
 
     # ── 8. 推理报告（自动生成，失败不阻断）────────────────────────────────────

@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -156,6 +156,36 @@ class TractOut(BaseModel):
     status: Optional[str] = None
 
 
+class TiffOut(BaseModel):
+    """TIFF 影像资产行(地图标注与看板聚合的影像维度事实源)。"""
+    model_config = {"extra": "allow"}
+    tract_id: str
+    tract_phase_pk: str
+    phase_id: str
+    tiff_id: str
+    file_name: Optional[str] = None
+    source_path: Optional[str] = None
+    path_exists: bool = False
+    tiff_type: Optional[Literal["normal", "tiled", "ext_ovr", "COG", "invalid"]] = None
+    center_geom: Optional[str] = None
+    center_lng: Optional[float] = None
+    center_lat: Optional[float] = None
+    crs_epsg: Optional[int] = None
+    crs_wkt: Optional[str] = None
+    geotransform: Optional[str] = None
+    pixel_width: Optional[int] = None
+    pixel_height: Optional[int] = None
+    gsd: Optional[float] = None
+    geo_area: Optional[float] = None
+    area_unit: Optional[str] = None
+    band_count: Optional[int] = None
+    dtype: Optional[str] = None
+    nodata: Optional[float] = None
+    observation_count: int = 0
+    status: str = "未检测"
+    has_detection: bool = False
+
+
 class TractImageryOut(BaseModel):
     """地块多时相真影像瓦片配置(供前端时相卷帘刷开真影像)。
 
@@ -230,7 +260,35 @@ class AssetInspectOut(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     crs_epsg: Optional[int] = None
+    tiff_type: Optional[
+        Literal[
+            "normal",
+            "tiled",
+            "ext_ovr",
+            "COG",
+            "invalid",
+        ]
+    ] = None
+    tiff_type_label: Optional[str] = None
+    cog_required: bool = False
+    suggested_cog_path: Optional[str] = None
+    suggested_cog_display_path: Optional[str] = None
     geo_error: Optional[str] = None
+
+
+class AssetCogConvertRequest(BaseModel):
+    input_path: str
+
+
+class AssetCogConvertOut(BaseModel):
+    input_path: str
+    source_path: str
+    source_display_path: str
+    cog_path: str
+    cog_display_path: str
+    tiff_type: str
+    tiff_type_label: str
+    converted: bool = False
 
 
 class AssetTiffCreate(BaseModel):
@@ -267,6 +325,7 @@ class AssetRow(BaseModel):
     tiff_id: Optional[str] = None
     image_name: Optional[str] = None
     source_path: Optional[str] = None
+    tiff_type: Optional[Literal["normal", "tiled", "ext_ovr", "COG", "invalid"]] = None
     run_id: Optional[str] = None
     status: str = "未检测"
     geo_area: Optional[float] = None

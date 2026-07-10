@@ -10,6 +10,7 @@ export function MapFloatingToolbar({
   onBasemapChange,
   roadVisible,
   onRoadVisibleChange,
+  pixelSizeLabel,
   zoomLabel,
   homeTitle = "回到地块视野",
   onZoomIn,
@@ -22,6 +23,7 @@ export function MapFloatingToolbar({
   onBasemapChange: (value: string) => void;
   roadVisible: boolean;
   onRoadVisibleChange: (value: boolean) => void;
+  pixelSizeLabel?: string;
   zoomLabel?: string;
   homeTitle?: string;
   onZoomIn: () => void;
@@ -47,8 +49,17 @@ export function MapFloatingToolbar({
           </Space>
         </div>
         <div style={RIGHT_TOOLS}>
+          {pixelSizeLabel ? (
+            <Tooltip title="像元尺寸(米)" placement="bottom">
+              <div style={METRIC_BADGE}>{pixelSizeLabel}</div>
+            </Tooltip>
+          ) : null}
+          {zoomLabel ? (
+            <Tooltip title="缩放级别" placement="bottom">
+              <div style={ZOOM_BADGE}>{zoomLabel}</div>
+            </Tooltip>
+          ) : null}
           <ToolbarButton title="放大" icon={<PlusOutlined />} onClick={onZoomIn} />
-          {zoomLabel ? <div style={ZOOM_BADGE}>{zoomLabel}</div> : null}
           <ToolbarButton title="缩小" icon={<MinusOutlined />} onClick={onZoomOut} />
           <ToolbarButton title={homeTitle} icon={<HomeOutlined />} onClick={onHome} />
           {extraActions}
@@ -125,6 +136,14 @@ const TOOL_BUTTON: CSSProperties = {
   height: 34,
   borderRadius: 11,
   color: "var(--glass-text)",
+};
+const METRIC_BADGE: CSSProperties = {
+  minWidth: 56,
+  textAlign: "center",
+  color: "var(--glass-text)",
+  fontSize: 12,
+  fontWeight: 700,
+  fontVariantNumeric: "tabular-nums",
 };
 const ZOOM_BADGE: CSSProperties = {
   minWidth: 38,

@@ -27,7 +27,8 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate to="/map" replace /> },
       { path: "map", element: <MapWorkspacePage /> },
-      { path: "map/:tractId", element: <MapWorkspacePage /> },
+      { path: "map/:city/:county/:tractId/:phaseId", element: <MapWorkspacePage /> },
+      { path: "map/:city/:county/:tractId/:phaseId/:tiffName", element: <MapWorkspacePage /> },
       { path: "overview", element: <Navigate to="/map" replace /> },
       { path: "atlas", element: <Navigate to="/map" replace /> },
       { path: "atlas/:tractId", element: <AtlasRedirect /> },

@@ -3,6 +3,7 @@ import {
   polygonAreaMeters,
   polylineLengthMeters,
 } from "../../shared/lib/geodesy";
+import { formatAreaValue } from "../../shared/lib/format";
 
 export type MeasureMode = "idle" | "distance" | "area";
 
@@ -81,8 +82,5 @@ export function formatLength(m: number): string {
 }
 
 export function formatArea(m2: number): string {
-  if (m2 <= 0) return "-";
-  if (m2 >= 1000000) return (m2 / 1000000).toFixed(3) + " km\u00b2";
-  const ha = m2 / 10000;
-  return ha >= 1 ? ha.toFixed(3) + " hm\u00b2" : m2.toFixed(1) + " m\u00b2";
+  return formatAreaValue(m2);
 }

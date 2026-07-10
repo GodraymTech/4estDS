@@ -18,6 +18,42 @@ export interface Tract {
   [k: string]: unknown;
 }
 
+export interface TiffAsset {
+  tract_pk?: string;
+  city?: string | null;
+  county?: string | null;
+  town?: string | null;
+  tract_id: string;
+  tract_phase_pk: string;
+  phase_id: string;
+  tiff_id: string;
+  file_name?: string | null;
+  source_path?: string | null;
+  path_exists: boolean;
+  tiff_type?: "normal" | "tiled" | "ext_ovr" | "COG" | "invalid" | null;
+  footprint_bbox?: string | null;
+  center_geom?: string | null;
+  center_lng?: number | null;
+  center_lat?: number | null;
+  crs_epsg?: number | null;
+  crs_wkt?: string | null;
+  geotransform?: string | null;
+  pixel_width?: number | null;
+  pixel_height?: number | null;
+  gsd?: number | null;
+  geo_area?: number | null;
+  area_unit?: string | null;
+  band_count?: number | null;
+  dtype?: string | null;
+  nodata?: number | null;
+  observation_count: number;
+  status: string;
+  has_detection: boolean;
+  run_id?: string | null;
+  detected_at?: string | null;
+  [k: string]: unknown;
+}
+
 export type JobState = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
 export interface JobStatus {
@@ -155,6 +191,7 @@ export interface AssetRow {
   tiff_id?: string | null;
   image_name?: string | null;
   source_path?: string | null;
+  tiff_type?: "normal" | "tiled" | "ext_ovr" | "COG" | "invalid" | null;
   run_id?: string | null;
   status: string;
   geo_area?: number | null;
@@ -186,7 +223,23 @@ export interface AssetInspectResult {
   width?: number | null;
   height?: number | null;
   crs_epsg?: number | null;
+  tiff_type?: "normal" | "tiled" | "ext_ovr" | "COG" | "invalid" | null;
+  tiff_type_label?: string | null;
+  cog_required?: boolean;
+  suggested_cog_path?: string | null;
+  suggested_cog_display_path?: string | null;
   geo_error?: string | null;
+}
+
+export interface AssetCogConvertResult {
+  input_path: string;
+  source_path: string;
+  source_display_path: string;
+  cog_path: string;
+  cog_display_path: string;
+  tiff_type: string;
+  tiff_type_label: string;
+  converted: boolean;
 }
 
 export interface AssetTiffCreate {
