@@ -40,6 +40,7 @@ export interface MapController {
   zoomIn(): void;
   zoomOut(): void;
   getZoom(): number;
+  getBounds(): BBox;
   setMaxBounds(bounds: BBox | null): void;
   setMinZoom(zoom: number | null): void;
 

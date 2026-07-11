@@ -70,6 +70,10 @@ export:
   drop_pixel_columns: true
   drop_source_column: true
 
+# COG 转换
+cog:
+  compress: zstd                # COG 输出压缩方式。zstd 通常比 deflate 更快且体积可控；如需最高兼容性可改 deflate，如需更快但体积更大可试 lzw
+
 # 多源融合指标提取参数
 fusion:
   height_stat: "max"             # 树高采样统计量 (max / p95 / median / mean)
@@ -88,7 +92,12 @@ fusion:
 
 # 瓦片服务器
 tiles:
-  render_concurrency: 8  # 并发渲染数，正比于内存占用峰值
-  gdal_cache_mb: 640      # GDAL 常驻缓存，调高可改善重复读取但会增加内存
-  warp_mem_mb: 320        # 单瓦片重投影缓存，调高可改善重投影但会增加内存
-  cache_enabled: true    # 缓存已渲染 PNG 瓦片，提升重复浏览流畅度
+  render_concurrency: 8   # 同时渲染 TIFF 瓦片的最大请求数；调高可提升当前视口首屏并发，但会线性增加 GDAL/warp 内存峰值
+  gdal_cache_mb: 640      # 每个渲染进程可用的 GDAL 读取缓存上限；调高可减少重复读取，过高会让多并发时内存快速上涨
+  warp_mem_mb: 320        # 单张瓦片重投影/重采样的工作内存上限；调高可能改善复杂投影速度，过高会放大并发内存峰值
+  cache_enabled: true     # 是否把已渲染的 PNG 瓦片写入本地磁盘缓存；开启后重复访问同一区域会直接命中缓存
+  cache_max_gb: 20        # 瓦片磁盘缓存目录的软上限(GB)；超过该值后后台按最近访问时间清理旧瓦片
+  cache_trim_to_gb: 18    # 触发清理后回收至该容量(GB)再停止；应低于 cache_max_gb，避免频繁反复清理
+  cache_trim_interval_s: 60 # 两次缓存容量检查的最小间隔(秒)；调低会更积极控盘，调高可减少目录扫描开销
+  preheat_max_tiles: 96   # 单次视口预热最多提交的瓦片数；控制预热范围，避免后台任务挤占实时浏览资源
+  preheat_concurrency: 2  # 后台预热瓦片的并发数；建议低于 render_concurrency，让当前屏幕的实时请求优先

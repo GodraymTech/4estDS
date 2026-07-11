@@ -440,8 +440,31 @@ def ensure_tract(
             "SELECT tract_pk FROM tracts WHERE region_id=? AND tract_id=? LIMIT 1",
             (resolved_region_id, tract_id),
         ).fetchone()
+        if not existing_tract and (city == UNKNOWN_CITY or county == UNKNOWN_COUNTY):
+            existing_tract = conn.execute(
+                "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town "
+                "FROM tracts tr "
+                "JOIN tract_phases tp ON tp.tract_pk=tr.tract_pk "
+                "WHERE tr.tract_id=? AND tp.phase_id=? "
+                "ORDER BY CASE WHEN tr.city<>? AND tr.county<>? THEN 0 ELSE 1 END, tr.updated_at DESC "
+                "LIMIT 1",
+                (tract_id, phase_id, UNKNOWN_CITY, UNKNOWN_COUNTY),
+            ).fetchone()
+        if not existing_tract and (city == UNKNOWN_CITY or county == UNKNOWN_COUNTY):
+            existing_tract = conn.execute(
+                "SELECT tract_pk, region_id, city, county, town FROM tracts "
+                "WHERE tract_id=? "
+                "ORDER BY CASE WHEN city<>? AND county<>? THEN 0 ELSE 1 END, updated_at DESC "
+                "LIMIT 1",
+                (tract_id, UNKNOWN_CITY, UNKNOWN_COUNTY),
+            ).fetchone()
         if existing_tract:
             tract_pk = existing_tract["tract_pk"]
+            if "region_id" in existing_tract.keys():
+                resolved_region_id = existing_tract["region_id"] or resolved_region_id
+                city = existing_tract["city"] or city
+                county = existing_tract["county"] or county
+                town = existing_tract["town"] or town
         tract_phase_pk = _safe_pk("phase", tract_pk, phase_id)
         conn.execute(
             "INSERT INTO tracts "
@@ -512,11 +535,14 @@ def ensure_tract(
                 " inference_status, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(tiff_id, phase_id) DO UPDATE SET "
-                " tract_phase_pk=excluded.tract_phase_pk, path_versions=excluded.path_versions, "
+                " tract_phase_pk=excluded.tract_phase_pk, file_name=excluded.file_name, path_versions=excluded.path_versions, "
                 " multisource_path_versions=excluded.multisource_path_versions, tiff_type=excluded.tiff_type, "
                 " footprint_geom=excluded.footprint_geom, footprint_bbox=excluded.footprint_bbox, "
                 " center_geom=excluded.center_geom, center_lng=excluded.center_lng, "
-                " center_lat=excluded.center_lat, updated_at=excluded.updated_at",
+                " center_lat=excluded.center_lat, crs_epsg=excluded.crs_epsg, crs_wkt=excluded.crs_wkt, "
+                " geotransform=excluded.geotransform, pixel_width=excluded.pixel_width, pixel_height=excluded.pixel_height, "
+                " gsd=excluded.gsd, geo_area=excluded.geo_area, area_unit=excluded.area_unit, "
+                " band_count=excluded.band_count, dtype=excluded.dtype, nodata=excluded.nodata, updated_at=excluded.updated_at",
                 (
                     tiff_meta["tiff_id"],
                     phase_id,
@@ -598,10 +624,27 @@ def _resolve_context(
         ).fetchone()
     if row is None:
         raise ValueError(f"无法解析地块时相: tract_id={tract_id} phase_id={phase_id}")
-    tiff_row = conn.execute(
-        "SELECT tiff_id FROM tiffs WHERE tract_phase_pk=? ORDER BY created_at DESC LIMIT 1",
-        (row["tract_phase_pk"],),
-    ).fetchone()
+    tiff_row = None
+    if image_path:
+        image_name = Path(image_path).name
+        resolved_image_path = str(Path(image_path).expanduser().resolve())
+        tiff_row = conn.execute(
+            "SELECT tiff_id FROM tiffs "
+            "WHERE tract_phase_pk=? AND (path_versions LIKE ? OR path_versions LIKE ? OR file_name=? OR file_name=?) "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (
+                row["tract_phase_pk"],
+                f"%{image_path}%",
+                f"%{resolved_image_path}%",
+                image_name,
+                Path(image_name).stem,
+            ),
+        ).fetchone()
+    if tiff_row is None:
+        tiff_row = conn.execute(
+            "SELECT tiff_id FROM tiffs WHERE tract_phase_pk=? ORDER BY created_at DESC LIMIT 1",
+            (row["tract_phase_pk"],),
+        ).fetchone()
     return row["tract_phase_pk"], row["phase_id"], (tiff_row["tiff_id"] if tiff_row else None)
 
 

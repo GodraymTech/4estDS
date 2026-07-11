@@ -59,6 +59,7 @@ export interface MarkerSpec {
   id: string;
   lngLat: LngLat;
   element: HTMLElement;
+  offset?: [number, number];
 }
 
 /** 相机状态(中立): 用于时相卷帘的双图联动同步。 */

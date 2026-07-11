@@ -22,6 +22,7 @@ import {
   StopOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
+import { useSearchParams } from "react-router-dom";
 import { ApiError, endpoints, type InferSubmit, type InputInspectResult } from "../../shared/api";
 import { useJobsStore } from "./jobsStore";
 
@@ -46,6 +47,7 @@ export function UploadForm({
   onSubmitted?: (jobId: string) => void;
   onCancelled?: (jobId: string) => void;
 }) {
+  const [searchParams] = useSearchParams();
   const [inputPath, setInputPath] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [inspect, setInspect] = useState<InputInspectResult | null>(null);
@@ -64,6 +66,15 @@ export function UploadForm({
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
   const addJob = useJobsStore((s) => s.addJob);
+
+  useEffect(() => {
+    const nextInputPath = searchParams.get("input_path") || "";
+    const nextTractId = searchParams.get("tract_id") || "";
+    const nextPhaseId = searchParams.get("phase_id") || "";
+    if (nextInputPath) setInputPath(nextInputPath);
+    if (nextTractId) setTractId(nextTractId);
+    if (nextPhaseId) setPhaseId(nextPhaseId);
+  }, [searchParams]);
 
   useEffect(() => {
     const path = inputPath.trim();

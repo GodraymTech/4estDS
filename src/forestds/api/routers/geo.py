@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
@@ -11,6 +13,7 @@ from urllib.request import urlopen
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ...env import load_local_env
 from ...geo.admin import UNKNOWN_COUNTY, UNKNOWN_TOWN, normalize_city, normalize_county, region_id
 from ...geo.coords import gcj02_to_wgs84, wgs84_to_gcj02
 from ..schemas import GeoPlaceOut, GeoReverseOut, GeoSearchOut
@@ -44,6 +47,7 @@ class ReverseAdmin:
 
 
 def _key() -> str:
+    load_local_env()
     key = os.environ.get("AMAP_WEB_SERVICE_KEY") or os.environ.get("FORESTDS_AMAP_KEY")
     if not key:
         raise AmapConfigError("未配置 AMAP_WEB_SERVICE_KEY")
@@ -58,6 +62,14 @@ def _first_text(value: Any) -> str | None:
             text = _first_text(item)
             if text:
                 return text
+    return None
+
+
+def _province_city_fallback(province: str | None) -> str | None:
+    if not province or province in {"中国", "中华人民共和国"}:
+        return None
+    if province.endswith(("市", "特别行政区")):
+        return province
     return None
 
 
@@ -185,6 +197,33 @@ def search_places(query: str, *, city: str = "广东", limit: int = 10) -> list[
     return results[:limit]
 
 
+def admin_district_tree(region: str, *, subdistrict: int = 3) -> list[dict[str, Any]]:
+    query = region.replace("含海域", "").replace("省", "").strip() or region
+    body = _request(
+        "config/district",
+        {
+            "keywords": query,
+            "subdistrict": max(0, min(subdistrict, 3)),
+            "extensions": "base",
+            "output": "json",
+        },
+    )
+
+    def convert(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "name": _first_text(item.get("name")) or "",
+            "adcode": _first_text(item.get("adcode")),
+            "level": _first_text(item.get("level")),
+            "districts": [
+                convert(child)
+                for child in (item.get("districts") or [])
+                if isinstance(child, dict)
+            ],
+        }
+
+    return [convert(item) for item in (body.get("districts") or []) if isinstance(item, dict)]
+
+
 def _search_request(path: str, params: dict[str, Any]) -> dict[str, Any]:
     try:
         return _request(path, params)
@@ -192,6 +231,84 @@ def _search_request(path: str, params: dict[str, Any]) -> dict[str, Any]:
         if exc.info == "ENGINE_RESPONSE_DATA_ERROR":
             return {}
         raise
+
+
+_NATIONAL_ADDRESSES = {"中国", "中华人民共和国"}
+_TOWN_RE = re.compile(r"(?:^|[省市县区旗])([\u4e00-\u9fff]{2,12}(?:镇|乡|街道|农场))")
+
+
+def _is_unknown_admin(city: str, county: str, formatted_address: str | None) -> bool:
+    return (
+        city == "未知市"
+        or county == UNKNOWN_COUNTY
+        or (formatted_address or "").strip() in _NATIONAL_ADDRESSES
+    )
+
+
+def _extract_town_from_poi(item: dict[str, Any]) -> str | None:
+    for key in ("address", "name", "business_area"):
+        text = _first_text(item.get(key))
+        if not text:
+            continue
+        match = _TOWN_RE.search(text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _poi_admin_fallback(gcj_lng: float, gcj_lat: float) -> ReverseAdmin | None:
+    candidates: list[tuple[str, str, str, str | None, str | None]] = []
+    for radius in (3000, 10000, 30000):
+        body = _search_request(
+            "place/around",
+            {
+                "location": f"{gcj_lng:.8f},{gcj_lat:.8f}",
+                "radius": radius,
+                "offset": 25,
+                "page": 1,
+                "extensions": "base",
+                "output": "json",
+            },
+        )
+        for item in body.get("pois") or []:
+            if not isinstance(item, dict):
+                continue
+            city = _first_text(item.get("cityname"))
+            county = _first_text(item.get("adname"))
+            if not city or not county:
+                continue
+            town = _extract_town_from_poi(item) or UNKNOWN_TOWN
+            name = _first_text(item.get("name"))
+            address = _first_text(item.get("address"))
+            formatted = " ".join(part for part in (name, address) if part) or None
+            candidates.append(
+                (
+                    normalize_city(city),
+                    normalize_county(county),
+                    town,
+                    formatted,
+                    _first_text(item.get("adcode")),
+                )
+            )
+        if candidates:
+            break
+    if not candidates:
+        return None
+
+    (city, county), _count = Counter((item[0], item[1]) for item in candidates).most_common(1)[0]
+    matches = [item for item in candidates if item[0] == city and item[1] == county]
+    preferred = next((item for item in matches if item[2] != UNKNOWN_TOWN), matches[0] if matches else None)
+    if preferred:
+        _item_city, _item_county, town, formatted, adcode = preferred
+        return ReverseAdmin(
+            city=city,
+            county=county,
+            town=town,
+            region_id=region_id(city, county),
+            formatted_address=formatted,
+            adcode=adcode,
+        )
+    return None
 
 
 def reverse_admin(lng: float | None, lat: float | None) -> ReverseAdmin:
@@ -210,17 +327,22 @@ def reverse_admin(lng: float | None, lat: float | None) -> ReverseAdmin:
     regeo = body.get("regeocode") or {}
     component = regeo.get("addressComponent") or {}
     province = _first_text(component.get("province"))
-    city = _first_text(component.get("city")) or province
+    city = _first_text(component.get("city")) or _province_city_fallback(province)
     county = _first_text(component.get("district"))
     town = _first_text(component.get("township")) or UNKNOWN_TOWN
     normalized_city = normalize_city(city)
     normalized_county = normalize_county(county)
+    formatted_address = _first_text(regeo.get("formatted_address"))
+    if _is_unknown_admin(normalized_city, normalized_county, formatted_address):
+        fallback = _poi_admin_fallback(gcj_lng, gcj_lat)
+        if fallback is not None:
+            return fallback
     return ReverseAdmin(
         city=normalized_city,
         county=normalized_county,
         town=town,
         region_id=region_id(normalized_city, normalized_county),
-        formatted_address=_first_text(regeo.get("formatted_address")),
+        formatted_address=formatted_address,
         adcode=_first_text(component.get("adcode")),
     )
 
@@ -248,3 +370,17 @@ def reverse_endpoint(lng: float = Query(...), lat: float = Query(...)) -> GeoRev
     except AmapServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return GeoReverseOut(**item.__dict__, lng=lng, lat=lat)
+
+
+@router.get("/admin-districts", summary="高德行政区划树")
+def admin_districts_endpoint(
+    region: str = Query("广东", min_length=1),
+    subdistrict: int = Query(3, ge=0, le=3),
+) -> dict[str, Any]:
+    try:
+        districts = admin_district_tree(region, subdistrict=subdistrict)
+    except AmapConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AmapServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"region": region, "districts": districts}

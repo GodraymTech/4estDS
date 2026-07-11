@@ -237,9 +237,21 @@ export interface AssetCogConvertResult {
   source_display_path: string;
   cog_path: string;
   cog_display_path: string;
-  tiff_type: string;
+  tiff_type: "normal" | "tiled" | "ext_ovr" | "COG" | "invalid";
   tiff_type_label: string;
   converted: boolean;
+}
+
+export interface TilePreheatRequest {
+  bounds: [[number, number], [number, number]];
+  zoom: number;
+  include_adjacent_zooms?: boolean;
+}
+
+export interface TilePreheatResult {
+  accepted: number;
+  cached: number;
+  skipped: number;
 }
 
 export interface AssetTiffCreate {
@@ -260,6 +272,7 @@ export interface AssetPatch {
   phase_id?: string | null;
   image_name?: string | null;
   new_path?: string | null;
+  tiff_type?: "normal" | "tiled" | "ext_ovr" | "COG" | "invalid" | null;
 }
 
 export type GeometryKind = "point" | "crown";
@@ -291,6 +304,18 @@ export interface GeoReverseResult {
   region_id: string;
   formatted_address?: string | null;
   adcode?: string | null;
+}
+
+export interface AdminDistrict {
+  name: string;
+  adcode?: string | null;
+  level?: string | null;
+  districts?: AdminDistrict[];
+}
+
+export interface AdminDistrictResult {
+  region: string;
+  districts: AdminDistrict[];
 }
 
 export interface GeoFeature {

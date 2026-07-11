@@ -309,6 +309,7 @@ class AssetPatch(BaseModel):
     phase_id: Optional[str] = None
     image_name: Optional[str] = None
     new_path: Optional[str] = None
+    tiff_type: Optional[Literal["normal", "tiled", "ext_ovr", "COG", "invalid"]] = None
 
 
 class AssetRow(BaseModel):

@@ -6,34 +6,18 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __codename__, __version__
+from ..env import load_local_env
 from .routers import assets, geo, health, jobs, tiles, tracts, uploads
 
 API_PREFIX = "/api/v1"
 
-
-def _load_local_env() -> None:
-    candidates = (Path.cwd() / ".env", Path(__file__).resolve().parents[3] / ".env")
-    env_path = next((path for path in candidates if path.exists()), None)
-    if env_path is None:
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        raw = line.strip()
-        if not raw or raw.startswith("#") or "=" not in raw:
-            continue
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if key and key not in os.environ:
-            os.environ[key] = value.strip().strip('"').strip("'")
-
-
 def create_app() -> FastAPI:
-    _load_local_env()
+    load_local_env()
     app = FastAPI(
         title=f"{__codename__} API",
         version=__version__,

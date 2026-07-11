@@ -7,6 +7,7 @@ import type {
   AssetPatch,
   AssetRow,
   AssetTiffCreate,
+  AdminDistrictResult,
   GeoReverseResult,
   GeoSearchResult,
   GeometryKind,
@@ -25,6 +26,8 @@ import type {
   TractImagery,
   TractSummary,
   TiffAsset,
+  TilePreheatRequest,
+  TilePreheatResult,
   UploadResponse,
 } from "./types";
 
@@ -42,11 +45,24 @@ export const endpoints = {
   convertAssetCog: (inputPath: string): Promise<AssetCogConvertResult> =>
     apiPostJson("/assets/convert-cog", { input_path: inputPath }),
 
+  preheatTiffTiles: (
+    phaseId: string,
+    tiffRef: string,
+    body: TilePreheatRequest,
+  ): Promise<TilePreheatResult> =>
+    apiPostJson(
+      `/tiles/tiffs/${encodeURIComponent(phaseId)}/${encodeURIComponent(tiffRef)}/preheat`,
+      body,
+    ),
+
   searchGeo: (q: string, city = "广东", limit = 10): Promise<GeoSearchResult> =>
     apiGet(`/geo/search?q=${encodeURIComponent(q)}&city=${encodeURIComponent(city)}&limit=${limit}`),
 
   reverseGeo: (lng: number, lat: number): Promise<GeoReverseResult> =>
     apiGet(`/geo/reverse?lng=${encodeURIComponent(lng)}&lat=${encodeURIComponent(lat)}`),
+
+  listAdminDistricts: (region = "广东", subdistrict = 3): Promise<AdminDistrictResult> =>
+    apiGet(`/geo/admin-districts?region=${encodeURIComponent(region)}&subdistrict=${subdistrict}`),
 
   createAssetTiff: (body: AssetTiffCreate): Promise<AssetRow[]> =>
     apiPostJson("/assets/tiffs", body),

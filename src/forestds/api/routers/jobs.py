@@ -41,6 +41,10 @@ from ..schemas import (
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
+
+def _queue_unavailable(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=503, detail=f"推理队列不可用，请确认 Redis/worker 已启动: {exc}")
+
 _FORMAT_PREFIX_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+\|\s+"
     r"[A-Z]+\s+\|\s+[^|]+\|\s+[^|]+\|\s+"
@@ -172,7 +176,10 @@ def submit_infer(
 
         from ...worker import enqueue_inference
 
-        job_id = enqueue_inference(req)
+        try:
+            job_id = enqueue_inference(req)
+        except Exception as exc:  # noqa: BLE001
+            raise _queue_unavailable(exc) from exc
     else:
         try:
             kind, normalized_path, _images = inspect_input_path(body.input_path or "")
@@ -197,7 +204,10 @@ def submit_infer(
             )
             from ...worker import enqueue_batch_inference
 
-            job_id = enqueue_batch_inference(batch_req)
+            try:
+                job_id = enqueue_batch_inference(batch_req)
+            except Exception as exc:  # noqa: BLE001
+                raise _queue_unavailable(exc) from exc
         else:
             req = InferenceRequest(
                 image_path=str(normalized_path),
@@ -214,7 +224,10 @@ def submit_infer(
             )
             from ...worker import enqueue_inference
 
-            job_id = enqueue_inference(req)
+            try:
+                job_id = enqueue_inference(req)
+            except Exception as exc:  # noqa: BLE001
+                raise _queue_unavailable(exc) from exc
 
     response.headers["Location"] = f"/api/v1/jobs/{job_id}"
     return JobRef(job_id=job_id, status=JobStatus.queued)

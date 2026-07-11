@@ -149,6 +149,7 @@ export function MapWorkspacePage() {
   const detectionLayerIds = useRef<string[]>([]);
   const imageryLayerIds = useRef<string[]>([]);
   const fittedTract = useRef<string | null>(null);
+  const preheatTimer = useRef<number | null>(null);
 
   const overviewBoundary = useMemo(
     () => provinceBoundaryByName(env.overviewRegion),
@@ -210,6 +211,7 @@ export function MapWorkspacePage() {
     );
   }, [requestedCity, requestedCounty, requestedPhaseId, requestedTiffName, tiffs, tractId]);
   const isSingleImageView = Boolean(requestedTiffName);
+  const preheatTiffRef = requestedTiff?.tiff_id || requestedTiff?.file_name || requestedTiffName;
   const phaseTiffs = useMemo(
     () =>
       validPathTiffs.filter(
@@ -227,14 +229,33 @@ export function MapWorkspacePage() {
   }, [checkedTiffKeys, isSingleImageView, phaseTiffs, requestedTiff]);
 
   const observations = useObservations(activeTractId, "crown");
+  const visibleObservations = useMemo(() => {
+    const data = observations.data;
+    if (!data) return undefined;
+    if (isSingleImageView && requestedTiff) return filterObservationsByTiffs(data, [requestedTiff.tiff_id]);
+    if (!isSingleImageView && selectedPhaseTiffs.length > 0) {
+      return filterObservationsByTiffs(data, selectedPhaseTiffs.map((tiff) => tiff.tiff_id));
+    }
+    return data;
+  }, [isSingleImageView, observations.data, requestedTiff, selectedPhaseTiffs]);
+  const visibleSummary = useMemo(
+    () =>
+      visibleObservations
+        ? summaryFromObservations(
+            visibleObservations,
+            isSingleImageView ? requestedTiff?.geo_area : selectedPhaseTiffs.reduce((sum, tiff) => sum + (tiff.geo_area ?? 0), 0),
+          )
+        : undefined,
+    [isSingleImageView, requestedTiff?.geo_area, selectedPhaseTiffs, visibleObservations],
+  );
   const imagery = useTractImagery(isSingleImageView ? activeTractId : undefined, {
     phaseId: requestedTiff?.phase_id ?? requestedPhaseId,
     tiffName: requestedTiff?.file_name ?? requestedTiffName,
   });
   const summary = useTractSummary(activeTractId);
   const speciesList = useMemo(
-    () => extractSpecies(observations.data),
-    [observations.data],
+    () => extractSpecies(visibleObservations),
+    [visibleObservations],
   );
   const speciesColors = useMemo(
     () => buildSpeciesColorMap(speciesList),
@@ -352,6 +373,33 @@ export function MapWorkspacePage() {
     return off;
   }, [map, ready]);
 
+  const scheduleTiffPreheat = useCallback(() => {
+    if (!map || !ready || !isSingleImageView || !requestedPhaseId || !preheatTiffRef) return;
+    if (preheatTimer.current) window.clearTimeout(preheatTimer.current);
+    preheatTimer.current = window.setTimeout(() => {
+      const bounds = map.getBounds();
+      const currentZoom = map.getZoom();
+      void endpoints.preheatTiffTiles(requestedPhaseId, preheatTiffRef, {
+        bounds,
+        zoom: currentZoom,
+        include_adjacent_zooms: true,
+      }).catch(() => undefined);
+    }, 400);
+  }, [isSingleImageView, map, preheatTiffRef, ready, requestedPhaseId]);
+
+  useEffect(() => {
+    if (!map || !ready || !isSingleImageView) return;
+    scheduleTiffPreheat();
+    const off = map.on("moveend", scheduleTiffPreheat);
+    return () => {
+      off();
+      if (preheatTimer.current) {
+        window.clearTimeout(preheatTimer.current);
+        preheatTimer.current = null;
+      }
+    };
+  }, [isSingleImageView, map, ready, scheduleTiffPreheat]);
+
   useEffect(() => {
     if (!map || !ready) return;
     map.setBasemap(basemapById(basemapId));
@@ -388,8 +436,8 @@ export function MapWorkspacePage() {
       });
       return { id: `${tiff.phase_id}:${tiff.tiff_id}`, lngLat: [tiff.center_lng, tiff.center_lat] as LngLat, element };
     }).filter((item): item is MarkerSpec => Boolean(item));
-    map.setMarkers(markers);
-  }, [map, mappableTiffs, ready, selectedId, tractGroups]);
+    map.setMarkers(spreadNearbyMarkers(markers, map.getZoom()));
+  }, [map, mappableTiffs, ready, selectedId, tractGroups, zoom]);
 
   useEffect(() => {
     if (!map || !ready) return;
@@ -436,17 +484,17 @@ export function MapWorkspacePage() {
     if (!map || !ready) return;
     clearDetectionLayers(map, detectionLayerIds.current);
     detectionLayerIds.current = [];
-    if (!showDetections || !observations.data) return;
+    if (!showDetections || !visibleObservations) return;
     if (speciesList.length > 0 && selectedSpecies.length === 0) return;
-    const layers = buildSpeciesLayers(observations.data, selectedSpecies, speciesColors);
+    const layers = buildSpeciesLayers(visibleObservations, selectedSpecies, speciesColors);
     for (const layer of layers) {
       map.setGeoJsonLayer(layer);
       detectionLayerIds.current.push(layer.id);
     }
-  }, [map, observations.data, ready, selectedSpecies, showDetections, speciesColors, speciesList.length]);
+  }, [map, ready, selectedSpecies, showDetections, speciesColors, speciesList.length, visibleObservations]);
 
   useEffect(() => {
-    if (!map || !ready || !activeTract || !observations.data) return;
+    if (!map || !ready || !activeTract || !visibleObservations) return;
     const fitKey = requestedTiff ? `${activeTract.tract_id}:${requestedTiff.tiff_id}` : activeTract.tract_id;
     if (fittedTract.current === fitKey) return;
     fittedTract.current = fitKey;
@@ -459,14 +507,14 @@ export function MapWorkspacePage() {
       map.flyTo([requestedTiff.center_lng, requestedTiff.center_lat], 16);
       return;
     }
-    const b = boundsOf(observations.data as GeoJson);
+    const b = boundsOf(visibleObservations as GeoJson);
     if (b) {
       map.fitBounds(b, 88);
       return;
     }
     const group = groupByTract.get(tractRequestId(activeTract));
     if (group) map.flyTo(group.center, 15);
-  }, [activeTract, groupByTract, map, observations.data, ready, requestedTiff]);
+  }, [activeTract, groupByTract, map, ready, requestedTiff, visibleObservations]);
 
   useEffect(() => {
     if (!map || !ready || measureMode === "idle") return;
@@ -729,11 +777,11 @@ export function MapWorkspacePage() {
           tract={activeTract}
           group={selectedGroup}
           imagery={imagery.data}
-          summary={summary.data}
+        summary={visibleSummary ?? summary.data}
           phaseTiffs={phaseTiffs}
           speciesColors={speciesColors}
           onSelectPhase={selectPhaseTract}
-          loading={observations.isFetching || imagery.isFetching || summary.isFetching}
+        loading={observations.isFetching || imagery.isFetching || summary.isFetching}
         />
       ) : null}
 
@@ -914,7 +962,75 @@ function phaseNodeKey(phaseId: string): string {
 }
 
 function tiffTileUrl(tiff: TiffAsset): string {
-  return `/api/v1/tiles/tiffs/${encodeURIComponent(tiff.phase_id)}/${encodeURIComponent(tiff.file_name || tiff.tiff_id)}/{z}/{x}/{y}`;
+  return `/api/v1/tiles/tiffs/${encodeURIComponent(tiff.phase_id)}/${encodeURIComponent(tiff.tiff_id)}/{z}/{x}/{y}`;
+}
+
+function filterObservationsByTiffs(data: FeatureCollection, tiffIds: string[]): FeatureCollection {
+  const allowed = new Set(tiffIds.filter(Boolean));
+  if (!allowed.size) return data;
+  return {
+    ...data,
+    features: data.features.filter((feature) => allowed.has(String(feature.properties?.tiff_id ?? ""))),
+  };
+}
+
+function summaryFromObservations(data: FeatureCollection, area?: number | null): TractSummary {
+  const species: Record<string, number> = {};
+  for (const feature of data.features) {
+    const label = String(feature.properties?.species || "未知");
+    species[label] = (species[label] ?? 0) + 1;
+  }
+  const treeCount = data.features.length;
+  const speciesAnalysis = Object.fromEntries(
+    Object.entries(species).map(([label, count]) => [
+      label,
+      {
+        count,
+        ratio: treeCount > 0 ? count / treeCount : 0,
+      },
+    ]),
+  );
+  return {
+    tree_count: treeCount,
+    species,
+    meta: {
+      area_m2: area ?? null,
+      species_analysis: speciesAnalysis,
+    },
+  };
+}
+
+function spreadNearbyMarkers(markers: MarkerSpec[], zoom: number): MarkerSpec[] {
+  const groups: MarkerSpec[][] = [];
+  for (const marker of markers) {
+    const point = projectLngLat(marker.lngLat, zoom);
+    const group = groups.find((items) => {
+      const first = projectLngLat(items[0].lngLat, zoom);
+      return Math.hypot(first[0] - point[0], first[1] - point[1]) < 28;
+    });
+    if (group) group.push(marker);
+    else groups.push([marker]);
+  }
+  return groups.flatMap((group) => {
+    if (group.length === 1) return group;
+    const radius = Math.min(18, 8 + group.length * 2);
+    return group.map((marker, idx) => {
+      const angle = (Math.PI * 2 * idx) / group.length - Math.PI / 2;
+      return {
+        ...marker,
+        offset: [Math.cos(angle) * radius, Math.sin(angle) * radius],
+      };
+    });
+  });
+}
+
+function projectLngLat([lng, lat]: LngLat, zoom: number): [number, number] {
+  const scale = 256 * 2 ** zoom;
+  const sin = Math.sin((Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI) / 180);
+  return [
+    ((lng + 180) / 360) * scale,
+    (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale,
+  ];
 }
 
 function buildSearchOptions(groups: TractGroup[], tracts: Tract[], places: GeoPlace[]) {

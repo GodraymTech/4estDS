@@ -97,7 +97,7 @@ def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
             "(SELECT COUNT(*) FROM tree_observations o WHERE o.tiff_id=tf.tiff_id AND o.phase_id=tf.phase_id) AS observation_count "
             "FROM tract_phases tp "
             "JOIN tracts tr ON tr.tract_pk=tp.tract_pk "
-            "LEFT JOIN tiffs tf ON tf.tract_phase_pk=tp.tract_phase_pk "
+            "JOIN tiffs tf ON tf.tract_phase_pk=tp.tract_phase_pk "
             "LEFT JOIN runs r ON r.rowid=("
             "  SELECT r2.rowid FROM runs r2 "
             "  WHERE r2.tiff_id=tf.tiff_id AND r2.phase_id=tf.phase_id "
@@ -168,11 +168,19 @@ def inspect_asset_image(body: AssetInspectRequest) -> AssetInspectOut:
                 normalized_path = str(path)
                 lng, lat = inspect_image_center(normalized_path)
                 if path.suffix.lower() in {".tif", ".tiff"}:
-                    from ...preprocess.cog import TIFF_FORMAT_LABELS, inspect_tiff_format, is_tiff_tile_ready
+                    from ...preprocess.cog import (
+                        TIFF_FORMAT_LABELS,
+                        TIFF_INVALID,
+                        inspect_tiff_error,
+                        inspect_tiff_format,
+                        is_tiff_tile_ready,
+                    )
 
                     tiff_type = inspect_tiff_format(path)
                     tiff_type_label = TIFF_FORMAT_LABELS.get(tiff_type, tiff_type)
-                    if not is_tiff_tile_ready(tiff_type):
+                    if tiff_type == TIFF_INVALID:
+                        inspect_error = inspect_tiff_error(path) or "TIFF 无法被 GDAL/rasterio 读取"
+                    if tiff_type != TIFF_INVALID and not is_tiff_tile_ready(tiff_type):
                         suggested_cog_path = str(path.parent / f"{path.stem}_cog.tif")
 
     geo_error: str | None = None
@@ -312,14 +320,20 @@ def patch_tiff(
         if not row:
             raise HTTPException(status_code=404, detail="TIFF 不存在")
         path_versions = row["path_versions"]
+        tiff_type = body.tiff_type
         if body.new_path:
             data = _loads(path_versions, {})
             data[Path(body.new_path).name + ":" + str(len(data) + 1)] = body.new_path
             path_versions = _dump(data)
+            if not tiff_type:
+                from ...preprocess.cog import inspect_tiff_format
+
+                tiff_type = inspect_tiff_format(normalize_user_path(body.new_path))
         conn.execute(
-            "UPDATE tiffs SET file_name=COALESCE(?, file_name), path_versions=?, updated_at=datetime('now') "
+            "UPDATE tiffs SET file_name=COALESCE(?, file_name), path_versions=?, "
+            "tiff_type=COALESCE(?, tiff_type), updated_at=datetime('now') "
             "WHERE phase_id=? AND tiff_id=?",
-            (body.image_name, path_versions, phase_id, tiff_id),
+            (body.image_name, path_versions, tiff_type, phase_id, tiff_id),
         )
         conn.commit()
     finally:

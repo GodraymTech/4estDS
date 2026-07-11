@@ -14,6 +14,7 @@ _PROPERTY_KEYS = (
     "species", "confidence", "height", "height_source",
     "crown_area_geo_real", "crown_area_geo_est",
     "crown_volume_geo_real", "crown_volume_geo_est",
+    "phase_id", "tiff_id",
 )
 
 

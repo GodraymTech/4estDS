@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Progress,
   Segmented,
+  Select,
   Space,
   Table,
   Tag,
@@ -35,6 +36,7 @@ import {
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys, type ArtifactNode, type AssetRow } from "../../shared/api";
+import { env } from "../../shared/config/env";
 import { formatAreaValue } from "../../shared/lib/format";
 
 const { Text } = Typography;
@@ -52,12 +54,20 @@ export function LedgerTable() {
   const [editing, setEditing] = useState<AssetRow | null>(null);
   const [expanded, setExpanded] = useState<readonly string[]>([]);
   const [cogProgress, setCogProgress] = useState(0);
+  const [rowCogProgress, setRowCogProgress] = useState(0);
   const [skipCogSuggestion, setSkipCogSuggestion] = useState(false);
   const lastInspectedPath = useRef("");
 
   const assets = useQuery({
     queryKey: queryKeys.assets,
     queryFn: endpoints.listAssets,
+  });
+  const adminDistricts = useQuery({
+    queryKey: ["admin-districts", env.overviewRegion],
+    queryFn: () => endpoints.listAdminDistricts(env.overviewRegion, 3),
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
+    retry: false,
   });
   const inspect = useMutation({
     mutationFn: endpoints.inspectAssetImage,
@@ -106,16 +116,22 @@ export function LedgerTable() {
       const data = await endpoints.patchAssetTiff(row.phase_id, row.tiff_id, {
         new_path: converted.cog_path,
         image_name: stripTiffSuffix(converted.cog_display_path),
+        tiff_type: converted.tiff_type,
       });
       return { data, converted };
     },
     onSuccess: ({ data, converted }) => {
+      setRowCogProgress(100);
       queryClient.setQueryData(queryKeys.assets, data);
       queryClient.invalidateQueries({ queryKey: queryKeys.assets });
       queryClient.invalidateQueries({ queryKey: queryKeys.tiffs });
       message.success(`已转换为 COG：${converted.cog_display_path}`);
+      window.setTimeout(() => setRowCogProgress(0), 900);
     },
-    onError: (e) => message.error(e instanceof Error ? e.message : "COG 转换失败"),
+    onError: (e) => {
+      setRowCogProgress(0);
+      message.error(e instanceof Error ? e.message : "COG 转换失败");
+    },
   });
 
   const createTiff = useMutation({
@@ -199,6 +215,40 @@ export function LedgerTable() {
   }, [assets.data, q]);
 
   const inputPath = Form.useWatch("input_path", form);
+  const cityValue = Form.useWatch("city", form);
+  const countyValue = Form.useWatch("county", form);
+  const adminRoot = adminDistricts.data?.districts[0];
+  const cityDistricts = adminRoot?.districts ?? [];
+  const activeCity = cityDistricts.find((item) => item.name === cityValue);
+  const countyDistricts = activeCity?.districts ?? [];
+  const activeCounty = countyDistricts.find((item) => item.name === countyValue);
+  const townDistricts = activeCounty?.districts ?? [];
+  const cityOptions = useMemo(
+    () => adminOptions([...cityDistricts.map((item) => item.name), ...GUANGDONG_CITY_OPTIONS, ...(assets.data ?? []).map((r) => r.city), inspect.data?.city]),
+    [assets.data, cityDistricts, inspect.data?.city],
+  );
+  const countyOptions = useMemo(
+    () =>
+      adminOptions([
+        ...countyDistricts.map((item) => item.name),
+        ...(assets.data ?? [])
+          .filter((r) => !cityValue || r.city === cityValue)
+          .map((r) => r.county),
+        inspect.data?.county,
+      ]),
+    [assets.data, cityValue, countyDistricts, inspect.data?.county],
+  );
+  const townOptions = useMemo(
+    () =>
+      adminOptions([
+        ...townDistricts.map((item) => item.name),
+        ...(assets.data ?? [])
+          .filter((r) => (!cityValue || r.city === cityValue) && (!countyValue || r.county === countyValue))
+          .map((r) => r.town),
+        inspect.data?.town,
+      ]),
+    [assets.data, cityValue, countyValue, inspect.data?.town, townDistricts],
+  );
 
   useEffect(() => {
     if (!convertCog.isPending) return;
@@ -208,6 +258,15 @@ export function LedgerTable() {
     }, 700);
     return () => window.clearInterval(timer);
   }, [convertCog.isPending]);
+
+  useEffect(() => {
+    if (!convertRowCog.isPending) return;
+    setRowCogProgress(6);
+    const timer = window.setInterval(() => {
+      setRowCogProgress((value) => Math.min(94, value + Math.max(2, Math.round((94 - value) * 0.1))));
+    }, 800);
+    return () => window.clearInterval(timer);
+  }, [convertRowCog.isPending]);
 
   useEffect(() => {
     if (modalMode !== "create") return;
@@ -226,15 +285,21 @@ export function LedgerTable() {
     { title: "地块", dataIndex: "tract_id", key: "tract_id", width: 120, ellipsis: true, render: empty },
     { title: "时相", dataIndex: "phase_id", key: "phase_id", width: 96, render: empty },
     { title: "影像名", dataIndex: "image_name", key: "image_name", ellipsis: true, render: empty },
-    { title: "运行ID", dataIndex: "run_id", key: "run_id", width: 86, render: (v?: string | null) => (v ? <Text code>{v}</Text> : "") },
-    { title: "状态", dataIndex: "status", key: "status", width: 96, render: statusTag },
     {
       title: "TIFF状态",
       dataIndex: "tiff_type",
       key: "tiff_type",
-      width: 168,
+      width: 188,
       render: (_: unknown, row) => tiffStatusCell(row),
     },
+    {
+      title: "推理状态",
+      dataIndex: "status",
+      key: "status",
+      width: 112,
+      render: (_: unknown, row) => inferenceStatusCell(row),
+    },
+    { title: "运行ID", dataIndex: "run_id", key: "run_id", width: 86, render: (v?: string | null) => (v ? <Text code>{v}</Text> : "") },
     {
       title: "面积",
       dataIndex: "geo_area",
@@ -300,6 +365,17 @@ export function LedgerTable() {
     navigate(base);
   }
 
+  function openTractMap(row: AssetRow) {
+    if (!row.city || !row.county || !row.tract_id || !row.phase_id) return;
+    navigate([
+      "/map",
+      encodeURIComponent(row.city),
+      encodeURIComponent(row.county),
+      encodeURIComponent(row.tract_id),
+      encodeURIComponent(row.phase_id),
+    ].join("/"));
+  }
+
   function openCreate() {
     setEditing(null);
     setModalMode("create");
@@ -351,15 +427,38 @@ export function LedgerTable() {
         && convertRowCog.variables?.phase_id === row.phase_id
         && convertRowCog.variables?.tiff_id === row.tiff_id;
       return (
-        <Space size={4}>
-          <Tag color="warning">{tiffTypeLabel(type)}</Tag>
-          <Button size="small" type="link" loading={converting} disabled={!row.source_path} onClick={() => convertRowCog.mutate(row)}>
-            转 COG
-          </Button>
-        </Space>
+        <div style={TIFF_STATUS_CELL}>
+          <Space size={4}>
+            <Tag color="warning">{tiffTypeLabel(type)}</Tag>
+            <Button
+              size="small"
+              type="link"
+              loading={converting}
+              disabled={!row.source_path}
+              onClick={() => {
+                setRowCogProgress(4);
+                convertRowCog.mutate(row);
+              }}
+            >
+              转 COG
+            </Button>
+          </Space>
+          {converting ? <Progress percent={rowCogProgress} showInfo={false} size="small" style={ROW_PROGRESS} /> : null}
+        </div>
       );
     }
     return <Tag color="error">{tiffTypeLabel(type)}</Tag>;
+  }
+
+  function inferenceStatusCell(row: AssetRow) {
+    if (row.status === "未检测") {
+      return (
+        <Button type="link" size="small" disabled={!row.source_path} onClick={() => navigate(taskInferPath(row))}>
+          未检测
+        </Button>
+      );
+    }
+    return statusTag(row.status);
   }
 
   return (
@@ -412,7 +511,7 @@ export function LedgerTable() {
         />
       ) : (
         <div style={TREE_PANEL}>
-          {rows.length ? <Tree showLine defaultExpandAll treeData={buildAssetTree(rows, openMap, openEdit)} /> : <Empty description="暂无资产" />}
+          {rows.length ? <Tree showLine defaultExpandAll treeData={buildAssetTree(rows, openMap, openTractMap, openEdit)} /> : <Empty description="暂无资产" />}
         </div>
       )}
 
@@ -490,13 +589,13 @@ export function LedgerTable() {
           ) : null}
           <div style={FORM_GRID}>
             <Form.Item name="city" label="市">
-              <Input placeholder="默认识别市" />
+              <Select showSearch allowClear placeholder="默认识别市" options={cityOptions} optionFilterProp="label" />
             </Form.Item>
             <Form.Item name="county" label="县 / 区">
-              <Input placeholder="默认识别县/区" />
+              <Select showSearch allowClear placeholder="默认识别县/区" options={countyOptions} optionFilterProp="label" />
             </Form.Item>
             <Form.Item name="town" label="乡镇">
-              <Input placeholder="默认识别乡镇" />
+              <Select showSearch allowClear placeholder="默认识别乡镇" options={townOptions} optionFilterProp="label" />
             </Form.Item>
             <Form.Item name="tract_id" label="地块名">
               <Input placeholder="默认使用影像文件名" />
@@ -585,7 +684,12 @@ function PreviewModal({ runId, node, onClose }: { runId: string; node: ArtifactN
   );
 }
 
-function buildAssetTree(rows: AssetRow[], openMap: (row: AssetRow) => void, openEdit: (row: AssetRow) => void): DataNode[] {
+function buildAssetTree(
+  rows: AssetRow[],
+  openMap: (row: AssetRow) => void,
+  openTractMap: (row: AssetRow) => void,
+  openEdit: (row: AssetRow) => void,
+): DataNode[] {
   const root = new Map<string, Map<string, Map<string, Map<string, AssetRow[]>>>>();
   for (const row of rows) {
     const city = row.city || "未知";
@@ -613,7 +717,7 @@ function buildAssetTree(rows: AssetRow[], openMap: (row: AssetRow) => void, open
         title: tract,
         children: [...phases.entries()].map(([phase, leaves]) => ({
           key: "phase:" + city + ":" + county + ":" + tract + ":" + phase,
-          title: phase,
+          title: <PhaseNodeTitle phase={phase} row={leaves[0]} openTractMap={openTractMap} />,
           children: leaves.map((row) => ({
             key: rowKey(row),
             title: <TreeLeaf row={row} openMap={openMap} openEdit={openEdit} />,
@@ -624,6 +728,27 @@ function buildAssetTree(rows: AssetRow[], openMap: (row: AssetRow) => void, open
   }));
 }
 
+function PhaseNodeTitle({ phase, row, openTractMap }: { phase: string; row?: AssetRow; openTractMap: (row: AssetRow) => void }) {
+  return (
+    <Space size={8}>
+      <Text>{phase}</Text>
+      {row ? (
+        <Button
+          size="small"
+          type="link"
+          icon={<EyeOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            openTractMap(row);
+          }}
+        >
+          地块视野
+        </Button>
+      ) : null}
+    </Space>
+  );
+}
+
 function TreeLeaf({ row, openMap, openEdit }: { row: AssetRow; openMap: (row: AssetRow) => void; openEdit: (row: AssetRow) => void }) {
   return (
     <Space size={8} wrap>
@@ -632,7 +757,7 @@ function TreeLeaf({ row, openMap, openEdit }: { row: AssetRow; openMap: (row: As
       {row.run_id ? <Text code>{row.run_id}</Text> : null}
       <Text type="secondary">{row.observation_count ? row.observation_count.toLocaleString() + " 株" : ""}</Text>
       <Button size="small" type="link" icon={<EyeOutlined />} onClick={(e) => { e.stopPropagation(); openMap(row); }}>
-        地块视野
+        查看地图
       </Button>
       <Button size="small" type="link" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); openEdit(row); }}>
         编辑
@@ -647,6 +772,15 @@ function empty(value?: string | null) {
 
 function rowKey(row: AssetRow): string {
   return [row.city, row.county, row.tract_id, row.phase_id, row.tiff_id, row.run_id].filter(Boolean).join(":");
+}
+
+function taskInferPath(row: AssetRow): string {
+  const query = new URLSearchParams();
+  if (row.source_path) query.set("input_path", row.source_path);
+  if (row.tract_id) query.set("tract_id", row.tract_id);
+  if (row.phase_id) query.set("phase_id", row.phase_id);
+  const suffix = query.toString();
+  return suffix ? `/tasks?${suffix}` : "/tasks";
 }
 
 function stripTiffSuffix(path: string): string {
@@ -671,7 +805,46 @@ function tiffTypeLabel(value?: string | null) {
   return "不可用";
 }
 
+function adminOptions(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((v) => String(v || "").trim()).filter(isValidAdminOption))]
+    .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+    .map((value) => ({ value, label: value }));
+}
+
+function isValidAdminOption(value: string) {
+  return Boolean(value)
+    && !value.startsWith("未知")
+    && !value.includes("中华人民共和国")
+    && value !== "中国";
+}
+
+const GUANGDONG_CITY_OPTIONS = [
+  "广州市",
+  "深圳市",
+  "珠海市",
+  "汕头市",
+  "佛山市",
+  "韶关市",
+  "河源市",
+  "梅州市",
+  "惠州市",
+  "汕尾市",
+  "东莞市",
+  "中山市",
+  "江门市",
+  "阳江市",
+  "湛江市",
+  "茂名市",
+  "肇庆市",
+  "清远市",
+  "潮州市",
+  "揭阳市",
+  "云浮市",
+];
+
 const FULL: CSSProperties = { width: "100%" };
+const TIFF_STATUS_CELL: CSSProperties = { width: "100%", minWidth: 150 };
+const ROW_PROGRESS: CSSProperties = { marginTop: 2, marginBottom: 0 };
 const TOOL_ROW: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",

@@ -155,6 +155,7 @@ export class MapLibreController implements MapController {
       const marker = new maplibregl.Marker({
         element: m.element,
         anchor: "bottom",
+        offset: m.offset,
       })
         .setLngLat(m.lngLat)
         .addTo(map);
@@ -190,6 +191,14 @@ export class MapLibreController implements MapController {
 
   getZoom(): number {
     return this.map?.getZoom() ?? 0;
+  }
+
+  getBounds(): BBox {
+    const bounds = this.requireMap().getBounds();
+    return [
+      [bounds.getWest(), bounds.getSouth()],
+      [bounds.getEast(), bounds.getNorth()],
+    ];
   }
 
   setMaxBounds(bounds: BBox | null): void {

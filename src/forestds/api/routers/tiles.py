@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
-from math import pi
+from math import cos, floor, log, pi, radians, tan
 from pathlib import Path
-from threading import Semaphore
+from threading import Lock, Semaphore, Thread
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
 
 from ..deps import get_db_url
 
@@ -41,6 +44,20 @@ router = APIRouter(prefix="/tiles", tags=["tiles"])
 WEB_MERCATOR_EXTENT = pi * 6378137.0
 TILE_SIZE = 256
 MAX_TILE_ZOOM = 24
+MIN_TILE_ZOOM = 0
+MAX_MERCATOR_LAT = 85.05112878
+
+
+class TilePreheatRequest(BaseModel):
+    bounds: list[list[float]] = Field(..., min_length=2, max_length=2)
+    zoom: float = Field(..., ge=MIN_TILE_ZOOM, le=MAX_TILE_ZOOM)
+    include_adjacent_zooms: bool = True
+
+
+class TilePreheatOut(BaseModel):
+    accepted: int
+    cached: int
+    skipped: int
 
 
 def _tile_int_setting(key: str, env_name: str, default: int, *, minimum: int) -> int:
@@ -72,11 +89,46 @@ def _tile_bool_setting(key: str, env_name: str, default: bool) -> bool:
     return str(raw).strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _tile_float_setting(key: str, env_name: str, default: float, *, minimum: float) -> float:
+    raw = os.environ.get(env_name)
+    if raw is None:
+        try:
+            from ...config import load_settings
+
+            raw = load_settings().get(f"tiles.{key}", default)
+        except Exception:
+            raw = default
+    try:
+        return max(minimum, float(raw))
+    except (TypeError, ValueError):
+        return max(minimum, default)
+
+
 TILE_RENDER_CONCURRENCY = _tile_int_setting("render_concurrency", "FORESTDS_TILE_RENDER_CONCURRENCY", 2, minimum=1)
 TILE_GDAL_CACHE_MB = _tile_int_setting("gdal_cache_mb", "FORESTDS_TILE_GDAL_CACHE_MB", 64, minimum=8)
 TILE_WARP_MEM_MB = _tile_int_setting("warp_mem_mb", "FORESTDS_TILE_WARP_MEM_MB", 32, minimum=8)
 TILE_CACHE_ENABLED = _tile_bool_setting("cache_enabled", "FORESTDS_TILE_CACHE_ENABLED", True)
+TILE_CACHE_MAX_GB = _tile_float_setting("cache_max_gb", "FORESTDS_TILE_CACHE_MAX_GB", 20.0, minimum=0.0)
+TILE_CACHE_TRIM_TO_GB = _tile_float_setting("cache_trim_to_gb", "FORESTDS_TILE_CACHE_TRIM_TO_GB", 18.0, minimum=0.0)
+TILE_CACHE_TRIM_INTERVAL_S = _tile_int_setting(
+    "cache_trim_interval_s",
+    "FORESTDS_TILE_CACHE_TRIM_INTERVAL_S",
+    60,
+    minimum=1,
+)
+TILE_PREHEAT_MAX_TILES = _tile_int_setting("preheat_max_tiles", "FORESTDS_TILE_PREHEAT_MAX_TILES", 96, minimum=1)
+TILE_PREHEAT_CONCURRENCY = _tile_int_setting(
+    "preheat_concurrency",
+    "FORESTDS_TILE_PREHEAT_CONCURRENCY",
+    2,
+    minimum=1,
+)
 _TILE_RENDER_SEMAPHORE = Semaphore(TILE_RENDER_CONCURRENCY)
+_TILE_CACHE_TRIM_LOCK = Lock()
+_TILE_CACHE_LAST_TRIM_AT = 0.0
+_TILE_CACHE_TRIM_RUNNING = False
+_TILE_PREHEAT_LOCK = Lock()
+_TILE_PREHEATING = set[str]()
 
 
 @router.get("/tracts/{tract_id}/{z}/{x}/{y}", summary="地块本地 TIFF XYZ PNG 瓦片")
@@ -116,12 +168,143 @@ def get_tiff_tile(
     )
 
 
+@router.post("/tiffs/{phase_id}/{tiff_ref}/preheat", response_model=TilePreheatOut, summary="后台预热单 TIFF 当前视口瓦片")
+def preheat_tiff_tiles(
+    phase_id: str,
+    tiff_ref: str,
+    body: TilePreheatRequest,
+    db_url: str | None = Depends(get_db_url),
+) -> TilePreheatOut:
+    path = _resolve_tiff_image_path(phase_id, tiff_ref, db_url)
+    candidates = _preheat_candidates(path, body)
+    if not TILE_CACHE_ENABLED:
+        return TilePreheatOut(accepted=0, cached=0, skipped=len(candidates))
+    accepted: list[tuple[Path, int, int, int, str]] = []
+    cached = 0
+    skipped = 0
+    with _TILE_PREHEAT_LOCK:
+        for z, x, y in candidates:
+            cache_path = _tile_cache_path(path, z, x, y)
+            if cache_path.is_file():
+                _touch_cache_file(cache_path)
+                cached += 1
+                continue
+            key = str(cache_path)
+            if key in _TILE_PREHEATING:
+                skipped += 1
+                continue
+            _TILE_PREHEATING.add(key)
+            accepted.append((path, z, x, y, key))
+    if accepted:
+        Thread(target=_run_preheat, args=(accepted,), daemon=True).start()
+    return TilePreheatOut(accepted=len(accepted), cached=cached, skipped=skipped)
+
+
 def _validate_xyz(z: int, x: int, y: int) -> None:
     if z < 0 or z > MAX_TILE_ZOOM:
         raise HTTPException(status_code=400, detail=f"瓦片层级超出范围: {z}")
     limit = 2**z
     if x < 0 or y < 0 or x >= limit or y >= limit:
         raise HTTPException(status_code=400, detail="瓦片 x/y 超出当前层级范围")
+
+
+def _preheat_candidates(path: Path, body: TilePreheatRequest) -> list[tuple[int, int, int]]:
+    try:
+        (west, south), (east, north) = body.bounds
+        west, south, east, north = float(west), float(south), float(east), float(north)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="bounds 必须是 [[west,south],[east,north]]") from exc
+
+    if east < west:
+        west, east = east, west
+    if north < south:
+        south, north = north, south
+    src_bounds = _source_bounds_4326(path)
+    if src_bounds:
+        west, south, east, north = _intersect_lnglat_bounds((west, south, east, north), src_bounds)
+    if west >= east or south >= north:
+        return []
+
+    z0 = int(round(body.zoom))
+    zooms = [z0]
+    if body.include_adjacent_zooms:
+        zooms.extend([z0 - 1, z0 + 1])
+    out: list[tuple[int, int, int]] = []
+    seen: set[tuple[int, int, int]] = set()
+    for z in [z for z in zooms if MIN_TILE_ZOOM <= z <= MAX_TILE_ZOOM]:
+        for tile in _tiles_for_bounds(west, south, east, north, z, margin=1):
+            if tile in seen:
+                continue
+            seen.add(tile)
+            out.append(tile)
+            if len(out) >= TILE_PREHEAT_MAX_TILES:
+                return out
+    return out
+
+
+def _source_bounds_4326(path: Path) -> tuple[float, float, float, float] | None:
+    if rasterio is None or transform_bounds is None:
+        return None
+    try:
+        with rasterio.Env(GDAL_CACHEMAX=TILE_GDAL_CACHE_MB, GDAL_NUM_THREADS="1", NUM_THREADS="1"):
+            with rasterio.open(path, sharing=False) as src:
+                if not src.crs:
+                    return None
+                return tuple(transform_bounds(src.crs, "EPSG:4326", *src.bounds, densify_pts=21))
+    except Exception:
+        return None
+
+
+def _intersect_lnglat_bounds(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    return max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])
+
+
+def _tiles_for_bounds(
+    west: float,
+    south: float,
+    east: float,
+    north: float,
+    z: int,
+    *,
+    margin: int,
+) -> list[tuple[int, int, int]]:
+    min_x, max_y = _lnglat_to_tile(west, south, z)
+    max_x, min_y = _lnglat_to_tile(east, north, z)
+    limit = 2**z
+    min_x = max(0, min_x - margin)
+    max_x = min(limit - 1, max_x + margin)
+    min_y = max(0, min_y - margin)
+    max_y = min(limit - 1, max_y + margin)
+    return [(z, x, y) for y in range(min_y, max_y + 1) for x in range(min_x, max_x + 1)]
+
+
+def _lnglat_to_tile(lng: float, lat: float, z: int) -> tuple[int, int]:
+    lat = min(MAX_MERCATOR_LAT, max(-MAX_MERCATOR_LAT, lat))
+    n = 2**z
+    x = floor((lng + 180.0) / 360.0 * n)
+    lat_rad = radians(lat)
+    y = floor((1.0 - log(tan(lat_rad) + 1.0 / cos(lat_rad)) / pi) / 2.0 * n)
+    return min(n - 1, max(0, x)), min(n - 1, max(0, y))
+
+
+def _run_preheat(tasks: list[tuple[Path, int, int, int, str]]) -> None:
+    workers = min(len(tasks), TILE_PREHEAT_CONCURRENCY, max(1, TILE_RENDER_CONCURRENCY // 2))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(_preheat_one, tasks))
+
+
+def _preheat_one(task: tuple[Path, int, int, int, str]) -> None:
+    path, z, x, y, key = task
+    try:
+        _render_tile_cached(path, z, x, y)
+    except Exception:
+        pass
+    finally:
+        with _TILE_PREHEAT_LOCK:
+            _TILE_PREHEATING.discard(key)
 
 
 def _resolve_tract_image_path(tract_id: str, db_url: str | None) -> Path:
@@ -151,7 +334,7 @@ def _resolve_tract_image_path(tract_id: str, db_url: str | None) -> Path:
 def _resolve_tiff_image_path(phase_id: str, tiff_ref: str, db_url: str | None) -> Path:
     from ...db import reader
 
-    raw_path = reader.tiff_path(phase_id=phase_id, file_name=tiff_ref, url=db_url)
+    raw_path = reader.tiff_path(phase_id=phase_id, tiff_id=tiff_ref, file_name=tiff_ref, url=db_url)
     if not raw_path:
         raise HTTPException(status_code=404, detail="该 TIFF 没有关联可切片的原始影像")
     return _validate_image_path(raw_path)
@@ -175,6 +358,7 @@ def _render_tile_cached(path: Path, z: int, x: int, y: int) -> tuple[bytes, str]
 
     cache_path = _tile_cache_path(path, z, x, y)
     if cache_path.is_file():
+        _touch_cache_file(cache_path)
         return cache_path.read_bytes(), "HIT"
 
     content = _render_tile(path, z, x, y)
@@ -183,6 +367,7 @@ def _render_tile_cached(path: Path, z: int, x: int, y: int) -> tuple[bytes, str]
         tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
         tmp_path.write_bytes(content)
         os.replace(tmp_path, cache_path)
+        _maybe_trim_tile_cache()
     except OSError:
         pass
     return content, "MISS"
@@ -206,6 +391,70 @@ def _tile_cache_path(path: Path, z: int, x: int, y: int) -> Path:
     )
     digest = hashlib.sha1(raw.encode("utf-8", errors="replace")).hexdigest()
     return paths.subdir("cache") / "tiles" / digest[:2] / digest[2:4] / f"{digest}.png"
+
+
+def _touch_cache_file(path: Path) -> None:
+    try:
+        os.utime(path, None)
+    except OSError:
+        pass
+
+
+def _maybe_trim_tile_cache() -> None:
+    if TILE_CACHE_MAX_GB <= 0:
+        return
+    global _TILE_CACHE_LAST_TRIM_AT, _TILE_CACHE_TRIM_RUNNING
+    now = time.monotonic()
+    with _TILE_CACHE_TRIM_LOCK:
+        if _TILE_CACHE_TRIM_RUNNING or now - _TILE_CACHE_LAST_TRIM_AT < TILE_CACHE_TRIM_INTERVAL_S:
+            return
+        _TILE_CACHE_LAST_TRIM_AT = now
+        _TILE_CACHE_TRIM_RUNNING = True
+    Thread(target=_trim_tile_cache, daemon=True).start()
+
+
+def _trim_tile_cache() -> None:
+    from ... import paths
+
+    global _TILE_CACHE_TRIM_RUNNING
+    try:
+        root = paths.subdir("cache") / "tiles"
+        max_bytes = int(TILE_CACHE_MAX_GB * 1024**3)
+        trim_to_gb = TILE_CACHE_TRIM_TO_GB if TILE_CACHE_TRIM_TO_GB < TILE_CACHE_MAX_GB else TILE_CACHE_MAX_GB * 0.9
+        target_bytes = max(0, int(trim_to_gb * 1024**3))
+        entries: list[tuple[int, int, Path]] = []
+        total = 0
+        if not root.exists():
+            return
+        for item in root.rglob("*.png"):
+            try:
+                stat = item.stat()
+            except OSError:
+                continue
+            total += stat.st_size
+            entries.append((stat.st_atime_ns, stat.st_size, item))
+        if total <= max_bytes:
+            return
+        for _, size, item in sorted(entries):
+            if total <= target_bytes:
+                break
+            try:
+                item.unlink()
+            except OSError:
+                continue
+            total -= size
+        _prune_empty_cache_dirs(root)
+    finally:
+        with _TILE_CACHE_TRIM_LOCK:
+            _TILE_CACHE_TRIM_RUNNING = False
+
+
+def _prune_empty_cache_dirs(root: Path) -> None:
+    for directory in sorted((p for p in root.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
 
 
 def _render_tile(path: Path, z: int, x: int, y: int) -> bytes:
@@ -300,7 +549,7 @@ def _to_png(data) -> bytes:
     rgba = np.dstack([rgb, alpha])
     img = Image.fromarray(rgba)
     buf = BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.save(buf, format="PNG", compress_level=1)
     return buf.getvalue()
 
 
@@ -330,5 +579,5 @@ def _scale_to_uint8(band, mask) -> "np.ndarray":
 def _transparent_png() -> bytes:
     img = Image.fromarray(np.zeros((TILE_SIZE, TILE_SIZE, 4), dtype="uint8"))
     buf = BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.save(buf, format="PNG", compress_level=1)
     return buf.getvalue()
