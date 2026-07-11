@@ -103,6 +103,11 @@ export interface CancelAllJobsResult {
   message: string;
 }
 
+export interface WorkerStopResult extends CancelAllJobsResult {
+  worker_pids: number[];
+  worker_found: boolean;
+}
+
 export interface ArtifactNode {
   key: string;
   name: string;
@@ -198,6 +203,13 @@ export interface AssetRow {
   area_unit?: string | null;
   observation_count: number;
   detected_at?: string | null;
+}
+
+export interface AssetDeletePreview {
+  phase_id: string;
+  tiff_id: string;
+  observation_count: number;
+  requires_confirmation: boolean;
 }
 
 export interface AssetInspectRequest {
@@ -351,6 +363,8 @@ export interface DistributionSummary {
   max?: number;
   mean?: number;
   median?: number;
+  p25?: number;
+  p75?: number;
   p10?: number;
   p90?: number;
   std?: number;
@@ -374,6 +388,7 @@ export interface SpeciesAnalysis {
   crown_width_geo?: DistributionSummary;
   crown_height_geo?: DistributionSummary;
   crown_area_geo?: DistributionSummary;
+  crown_size_geo?: DistributionSummary;
   height?: DistributionSummary;
 }
 
@@ -387,6 +402,7 @@ export interface TractSummary {
   density_per_ha?: number | null;
   crown_width_geo?: DistributionSummary;
   crown_height_geo?: DistributionSummary;
+  crown_size_geo?: DistributionSummary;
   crown_area_geo?: DistributionSummary;
   height?: DistributionSummary;
   meta?: {

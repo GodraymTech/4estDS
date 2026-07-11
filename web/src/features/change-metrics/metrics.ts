@@ -23,6 +23,8 @@ export interface ChangeMetrics {
 }
 
 function featureArea(f: GeoFeature): number {
+  const measured = f.properties?.crown_area_geo_real ?? f.properties?.crown_area_geo_est;
+  if (typeof measured === "number" && Number.isFinite(measured)) return measured;
   const geom = f.geometry as { type?: string; coordinates?: unknown } | null;
   if (!geom || !geom.coordinates) return 0;
   if (geom.type === "Polygon") {

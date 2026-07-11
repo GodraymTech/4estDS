@@ -114,6 +114,11 @@ class CancelAllJobsOut(BaseModel):
     message: str
 
 
+class WorkerStopOut(CancelAllJobsOut):
+    worker_pids: list[int] = Field(default_factory=list)
+    worker_found: bool = False
+
+
 class ArtifactNode(BaseModel):
     key: str
     name: str
@@ -310,6 +315,13 @@ class AssetPatch(BaseModel):
     image_name: Optional[str] = None
     new_path: Optional[str] = None
     tiff_type: Optional[Literal["normal", "tiled", "ext_ovr", "COG", "invalid"]] = None
+
+
+class AssetDeletePreview(BaseModel):
+    phase_id: str
+    tiff_id: str
+    observation_count: int = 0
+    requires_confirmation: bool = False
 
 
 class AssetRow(BaseModel):

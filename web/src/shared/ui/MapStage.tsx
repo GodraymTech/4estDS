@@ -24,6 +24,7 @@ export function MapStage({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<MapController | null>(null);
+  const overlayIdRef = useRef<string | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -43,6 +44,7 @@ export function MapStage({
       disposed = true;
       controller.destroy();
       controllerRef.current = null;
+      overlayIdRef.current = null;
       setReady(false);
     };
     // 仅挂载一次。
@@ -52,8 +54,16 @@ export function MapStage({
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller || !ready) return;
-    if (!overlay) return;
+    if (!overlay) {
+      if (overlayIdRef.current) controller.removeLayer(overlayIdRef.current);
+      overlayIdRef.current = null;
+      return;
+    }
+    if (overlayIdRef.current && overlayIdRef.current !== overlay.id) {
+      controller.removeLayer(overlayIdRef.current);
+    }
     controller.setGeoJsonLayer(overlay);
+    overlayIdRef.current = overlay.id;
     const b = boundsOf(overlay.data);
     if (b) controller.fitBounds(b, 40);
   }, [ready, overlay]);

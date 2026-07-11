@@ -50,7 +50,7 @@ export function MapFloatingToolbar({
         </div>
         <div style={RIGHT_TOOLS}>
           {pixelSizeLabel ? (
-            <Tooltip title="像元尺寸(米)" placement="bottom">
+            <Tooltip title="像素尺寸(米)" placement="bottom">
               <div style={METRIC_BADGE}>{pixelSizeLabel}</div>
             </Tooltip>
           ) : null}
@@ -67,7 +67,7 @@ export function MapFloatingToolbar({
       </div>
       {onResetNorth ? (
         <div style={COMPASS_PANEL}>
-          <ToolbarButton title="指北" icon={<CompassOutlined />} onClick={onResetNorth} />
+          <ToolbarButton title="" icon={<CompassOutlined />} onClick={onResetNorth} />
         </div>
       ) : null}
     </>

@@ -37,6 +37,7 @@ from ..schemas import (
     JobLogsOut,
     JobRef,
     JobStatusOut,
+    WorkerStopOut,
 )
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -299,8 +300,7 @@ def cancel_job(job_id: str, db_url: str | None = Depends(get_db_url)) -> CancelJ
     return CancelJobOut(job_id=job_id, status=JobStatus.failed, message="已请求终止，worker 将在最近检查点停止")
 
 
-@router.post("/cancel-all", response_model=CancelAllJobsOut, summary="终止全部推理作业")
-def cancel_all_jobs(db_url: str | None = Depends(get_db_url)) -> CancelAllJobsOut:
+def _cancel_all_jobs(db_url: str | None) -> CancelAllJobsOut:
     from ...cancellation import request_cancel
     from ...db import reader, writer
     from ...worker.broker import broker
@@ -335,6 +335,31 @@ def cancel_all_jobs(db_url: str | None = Depends(get_db_url)) -> CancelAllJobsOu
         cancelled=cancelled,
         purged_queues=purged,
         message=f"已终止全部推理作业：清空队列 {', '.join(purged)}，标记 {cancelled} 个运行中/排队作业",
+    )
+
+
+@router.post("/cancel-all", response_model=CancelAllJobsOut, summary="终止全部推理作业")
+def cancel_all_jobs(db_url: str | None = Depends(get_db_url)) -> CancelAllJobsOut:
+    return _cancel_all_jobs(db_url)
+
+
+@router.post("/stop-worker", response_model=WorkerStopOut, summary="停止本机推理 Worker 并释放模型内存")
+def stop_worker(db_url: str | None = Depends(get_db_url)) -> WorkerStopOut:
+    """先取消作业，再停止当前项目下由同一用户启动的本机 worker。"""
+    from ...worker.control import stop_local_workers
+
+    cancelled = _cancel_all_jobs(db_url)
+    worker_pids = stop_local_workers()
+    if worker_pids:
+        message = cancelled.message + "；已请求停止本机推理 worker，模型内存将随进程退出释放"
+    else:
+        message = cancelled.message + "；未发现可由当前 API 控制的本机 worker"
+    payload = cancelled.model_dump()
+    payload["message"] = message
+    return WorkerStopOut(
+        **payload,
+        worker_pids=worker_pids,
+        worker_found=bool(worker_pids),
     )
 
 

@@ -27,8 +27,8 @@ DDL: tuple[str, ...] = (
         boundary_geom   TEXT,
         boundary_geom_cent TEXT,
         effective_geom  TEXT,
-        boundary_source TEXT NOT NULL DEFAULT 'unset'
-            CHECK (boundary_source IN ('manual', 'auto_from_single_tiff', 'unset')),
+        boundary_source TEXT NOT NULL DEFAULT 'auto'
+            CHECK (boundary_source IN ('auto', 'manual')),
         coverage_status TEXT NOT NULL DEFAULT 'none'
             CHECK (coverage_status IN ('none', 'partial', 'full')),
         notes           TEXT,

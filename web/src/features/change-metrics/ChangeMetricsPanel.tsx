@@ -121,7 +121,7 @@ const PANEL: CSSProperties = {
   position: "absolute",
   left: 16,
   bottom: 16,
-  width: 260,
+  width: 200,
   zIndex: 6,
 };
 const GRID: CSSProperties = {

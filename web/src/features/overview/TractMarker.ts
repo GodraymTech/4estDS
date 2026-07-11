@@ -6,12 +6,13 @@ export interface TractMarkerHandlers {
   onLeave: () => void;
 }
 
-const PUBLISHED_COLOR = "#1f8f68"; // 已检测
-const DRAFT_COLOR = "#c6922e"; // 未检测
+const PUBLISHED_COLOR = "#62c59a"; // 已检测
+const DRAFT_COLOR = "#e4bf68"; // 未检测
 
 export function createTractMarkerElement(
   published: boolean,
   handlers: TractMarkerHandlers,
+  outlineColor = "#ffffff",
 ): HTMLElement {
   const el = document.createElement("div");
   el.style.cursor = "pointer";
@@ -25,7 +26,9 @@ export function createTractMarkerElement(
     '<path d="M12 0 C5.4 0 0 5.4 0 12 C0 21 12 32 12 32 C12 32 24 21 24 12 C24 5.4 18.6 0 12 0 Z" ' +
     'fill="' +
     color +
-    '" stroke="#ffffff" stroke-width="1.5"/>' +
+    '" stroke="' +
+    outlineColor +
+    '" stroke-width="3"/>' +
     '<circle cx="12" cy="12" r="4.5" fill="#ffffff"/>' +
     "</svg>";
   el.addEventListener("mouseenter", () => {

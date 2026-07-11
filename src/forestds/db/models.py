@@ -22,7 +22,7 @@ class Tract(Base):
     boundary_geom: Mapped[str | None] = mapped_column(Text)
     boundary_geom_cent: Mapped[str | None] = mapped_column(Text)
     effective_geom: Mapped[str | None] = mapped_column(Text)
-    boundary_source: Mapped[str] = mapped_column(String, default="unset")
+    boundary_source: Mapped[str] = mapped_column(String, default="auto")
     coverage_status: Mapped[str] = mapped_column(String, default="none")
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(String, nullable=False)

@@ -216,7 +216,8 @@ def _compute_tiff_metadata(
         return None
 
     path = Path(image_path)
-    file_name = path.name
+    # 资产台账的影像名统一使用 stem；真实路径仍完整保存在 path_versions。
+    file_name = path.stem
     fallback_input = f"{phase_id}|{image_path}"
     meta: dict[str, Any] = {
         "tiff_id": _hash(fallback_input, 5),
@@ -483,7 +484,7 @@ def ensure_tract(
                 boundary_geom,
                 boundary_geom_cent,
                 None,
-                "manual" if boundary_geom else "unset",
+                "manual" if boundary_geom else "auto",
                 "none",
                 now,
                 now,
@@ -572,23 +573,7 @@ def ensure_tract(
                     now,
                 ),
             )
-            tiff_count = conn.execute(
-                "SELECT COUNT(*) AS c FROM tiffs WHERE tract_phase_pk=?",
-                (tract_phase_pk,),
-            ).fetchone()["c"]
-            tract = conn.execute("SELECT boundary_source FROM tracts WHERE tract_pk=?", (tract_pk,)).fetchone()
-            if int(tiff_count) == 1 and tract and tract["boundary_source"] == "unset" and tiff_meta["footprint_geom"] != "POLYGON EMPTY":
-                tiff_center = _centroid_from_wkt_polygon(tiff_meta["footprint_geom"])
-                conn.execute(
-                    "UPDATE tracts SET boundary_geom=?, boundary_geom_cent=?, boundary_source=?, updated_at=? WHERE tract_pk=?",
-                    (
-                        tiff_meta["footprint_geom"],
-                        _wkt_point(*tiff_center) if tiff_center else None,
-                        "auto_from_single_tiff",
-                        now,
-                        tract_pk,
-                    ),
-                )
+            update_tract_geom_from_tiffs(conn, tract_pk)
 
         conn.commit()
     finally:
@@ -929,3 +914,76 @@ def persist_individuals(individuals, *, url: str | None = None) -> int:
         conn.close()
     log.info("个体持久化: {} 个体, 回填观测 {} 条", n, linked)
     return n
+
+
+def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> None:
+    """如果地块的 boundary_source 为 'auto'，则重新计算并更新该地块下所有 TIFF 的合并外接正矩形。"""
+    import json
+    row = conn.execute(
+        "SELECT boundary_source FROM tracts WHERE tract_pk=?", (tract_pk,)
+    ).fetchone()
+    if not row or row["boundary_source"] == "manual":
+        return
+
+    # 获取该地块下所有的 TIFF 资产 footprint_bbox
+    # bbox 存储格式为 JSON 字符串: [minx, miny, maxx, maxy]
+    bbox_rows = conn.execute(
+        "SELECT tf.footprint_bbox FROM tiffs tf "
+        "JOIN tract_phases tp ON tp.tract_phase_pk = tf.tract_phase_pk "
+        "WHERE tp.tract_pk=?",
+        (tract_pk,),
+    ).fetchall()
+
+    now = _now()
+    if not bbox_rows:
+        # 无 TIFF 资产，重置边界为空，但保持 auto 来源状态
+        conn.execute(
+            "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, updated_at=? WHERE tract_pk=?",
+            (now, tract_pk),
+        )
+        return
+
+    # 解析所有 bbox 并合并
+    min_lng, min_lat = float("inf"), float("inf")
+    max_lng, max_lat = float("-inf"), float("-inf")
+    valid_bbox_found = False
+
+    for r in bbox_rows:
+        bbox_str = r["footprint_bbox"]
+        if not bbox_str:
+            continue
+        try:
+            bbox = json.loads(bbox_str)
+            if isinstance(bbox, list) and len(bbox) == 4:
+                min_lng = min(min_lng, float(bbox[0]))
+                min_lat = min(min_lat, float(bbox[1]))
+                max_lng = max(max_lng, float(bbox[2]))
+                max_lat = max(max_lat, float(bbox[3]))
+                valid_bbox_found = True
+        except (TypeError, ValueError):
+            continue
+
+    if not valid_bbox_found:
+        conn.execute(
+            "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, updated_at=? WHERE tract_pk=?",
+            (now, tract_pk),
+        )
+        return
+
+    # 构造外接正矩形 WKT 多边形
+    coords = [
+        (min_lng, min_lat),
+        (max_lng, min_lat),
+        (max_lng, max_lat),
+        (min_lng, max_lat),
+        (min_lng, min_lat)
+    ]
+    boundary_geom = _wkt_polygon(coords)
+    center = ((min_lng + max_lng) / 2.0, (min_lat + max_lat) / 2.0)
+    boundary_geom_cent = _wkt_point(*center)
+
+    conn.execute(
+        "UPDATE tracts SET boundary_geom=?, boundary_geom_cent=?, boundary_source='auto', updated_at=? WHERE tract_pk=?",
+        (boundary_geom, boundary_geom_cent, now, tract_pk),
+    )
+

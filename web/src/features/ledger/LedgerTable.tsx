@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Alert,
+  AutoComplete,
   Button,
   Empty,
   Form,
@@ -26,6 +26,7 @@ import {
   ApartmentOutlined,
   DatabaseOutlined,
   DeleteOutlined,
+  DownOutlined,
   EditOutlined,
   EyeOutlined,
   FileAddOutlined,
@@ -191,7 +192,7 @@ export function LedgerTable() {
       if (msg.includes("409") && !vars.force) {
         Modal.confirm({
           title: "确认删除已检测 TIFF",
-          content: msg + "。该操作不可恢复。",
+          content: msg.replace(/^请求失败 \(409\):\s*/, "") + "。该操作不可恢复。",
           okText: "确认删除",
           okButtonProps: { danger: true },
           cancelText: "取消",
@@ -201,6 +202,28 @@ export function LedgerTable() {
       }
       message.error(msg);
     },
+  });
+
+  const previewTiffDelete = useMutation({
+    mutationFn: (row: AssetRow) => {
+      if (!row.phase_id || !row.tiff_id) throw new Error("该 TIFF 缺少资产标识");
+      return endpoints.previewAssetTiffDelete(row.phase_id, row.tiff_id);
+    },
+    onSuccess: (preview, row) => {
+      if (!preview.requires_confirmation) {
+        deleteTiff.mutate({ row, force: false });
+        return;
+      }
+      Modal.confirm({
+        title: "最终确认：删除推理成果",
+        content: `将移除 ${preview.observation_count.toLocaleString()} 株推理结果、观测和相关运行记录。该操作不可恢复。`,
+        okText: "确认永久删除",
+        okButtonProps: { danger: true },
+        cancelText: "取消",
+        onOk: () => deleteTiff.mutate({ row, force: true }),
+      });
+    },
+    onError: (e) => message.error(e instanceof Error ? e.message : "无法读取删除影响范围"),
   });
 
   const rows = useMemo(() => {
@@ -250,6 +273,19 @@ export function LedgerTable() {
     [assets.data, cityValue, countyValue, inspect.data?.town, townDistricts],
   );
 
+  const tractOptions = useMemo(
+    () => {
+      const ids = [
+        ...(assets.data ?? []).map((r) => r.tract_id),
+        inspect.data?.suggested_tract_id,
+      ].filter((x): x is string => Boolean(x));
+      return [...new Set(ids)]
+        .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+        .map((value) => ({ value, label: value }));
+    },
+    [assets.data, inspect.data?.suggested_tract_id],
+  );
+
   useEffect(() => {
     if (!convertCog.isPending) return;
     setCogProgress(8);
@@ -283,7 +319,27 @@ export function LedgerTable() {
     { title: "市", dataIndex: "city", key: "city", width: 92, render: empty },
     { title: "县", dataIndex: "county", key: "county", width: 106, render: empty },
     { title: "地块", dataIndex: "tract_id", key: "tract_id", width: 120, ellipsis: true, render: empty },
-    { title: "时相", dataIndex: "phase_id", key: "phase_id", width: 96, render: empty },
+    {
+      title: "时相",
+      dataIndex: "phase_id",
+      key: "phase_id",
+      width: 96,
+      render: (v: string, row) => {
+        if (!v) return "-";
+        const clickable = row.city && row.county && row.tract_id && row.phase_id;
+        if (!clickable) return v;
+        return (
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0, height: "auto" }}
+            onClick={() => openTractMap(row)}
+          >
+            {v}
+          </Button>
+        );
+      }
+    },
     { title: "影像名", dataIndex: "image_name", key: "image_name", ellipsis: true, render: empty },
     {
       title: "TIFF状态",
@@ -320,28 +376,26 @@ export function LedgerTable() {
     {
       title: "操作",
       key: "actions",
-      width: 230,
+      width: 150,
       render: (_: unknown, row) => (
-        <Space size={2}>
-          <Tooltip title="地块视野">
-            <Button type="link" size="small" icon={<EyeOutlined />} disabled={!row.tract_id} onClick={() => openMap(row)}>
-              操作台
-            </Button>
+        <Space size={6}>
+          <Tooltip title="查看地图">
+            <Button type="link" size="small" icon={<EyeOutlined />} disabled={!row.tract_id} onClick={() => openMap(row)} />
           </Tooltip>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
-            编辑
-          </Button>
+          <Tooltip title="编辑">
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(row)} />
+          </Tooltip>
           {row.tiff_id && row.phase_id ? (
             <Popconfirm
               title="删除 TIFF"
-              description={row.status === "已检测" ? "该 TIFF 已检测，下一步会要求危险确认。" : "确认删除该未检测 TIFF？"}
+              description={row.status === "已检测" ? "该 TIFF 已推理，确认删除?" : "该 TIFF 未推理，确认删除?"}
               okText="删除"
               cancelText="取消"
-              onConfirm={() => deleteTiff.mutate({ row, force: false })}
+              onConfirm={() => previewTiffDelete.mutate(row)}
             >
-              <Button danger type="link" size="small" icon={<DeleteOutlined />}>
-                删除
-              </Button>
+              <Tooltip title="删除">
+                <Button danger type="link" size="small" icon={<DeleteOutlined />} />
+              </Tooltip>
             </Popconfirm>
           ) : null}
         </Space>
@@ -475,22 +529,41 @@ export function LedgerTable() {
             value={mode}
             onChange={(v) => setMode(v as ViewMode)}
             options={[
-              { label: "列表展示", value: "list", icon: <DatabaseOutlined /> },
-              { label: "树状展示", value: "tree", icon: <ApartmentOutlined /> },
+              {
+                value: "list",
+                label: (
+                  <Tooltip title="列表模式">
+                    <span style={{ display: "inline-block", verticalAlign: "middle" }}>
+                      <DatabaseOutlined />
+                    </span>
+                  </Tooltip>
+                ),
+              },
+              {
+                value: "tree",
+                label: (
+                  <Tooltip title="树状模式">
+                    <span style={{ display: "inline-block", verticalAlign: "middle" }}>
+                      <ApartmentOutlined />
+                    </span>
+                  </Tooltip>
+                ),
+              },
             ]}
           />
           <Button icon={<FileAddOutlined />} type="primary" onClick={openCreate}>
-            录入 TIFF
+            导入TIFF
           </Button>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => {
-              queryClient.invalidateQueries({ queryKey: queryKeys.assets });
-              queryClient.invalidateQueries({ queryKey: queryKeys.tiffs });
-            }}
-          >
-            刷新
-          </Button>
+          <Tooltip title="刷新">
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey: queryKeys.assets });
+                queryClient.invalidateQueries({ queryKey: queryKeys.tiffs });
+              }}
+            >
+            </Button>
+          </Tooltip>
         </Space>
       </div>
 
@@ -517,7 +590,7 @@ export function LedgerTable() {
 
       <Modal
         open={Boolean(modalMode)}
-        title={modalMode === "create" ? "录入 TIFF" : "编辑资产"}
+        title={modalMode === "create" ? "导入TIFF" : "编辑资产"}
         onCancel={() => {
           setModalMode(null);
           inspect.reset();
@@ -569,7 +642,7 @@ export function LedgerTable() {
                         <Button size="small" disabled={convertCog.isPending} onClick={() => setSkipCogSuggestion(true)}>
                           暂不转换
                         </Button>
-                        <Tooltip title="为缓解内存占用，强烈建议转为 COG（Cloud Optimized GeoTIFF）。">
+                        <Tooltip title="为高效加载TIFF至地图，强烈建议转为 COG（Cloud Optimized GeoTIFF）。该操作比较耗时。">
                           <InfoCircleOutlined style={INFO_ICON} />
                         </Tooltip>
                       </Space>
@@ -584,27 +657,34 @@ export function LedgerTable() {
                   ) : null}
                 </div>
               ) : null}
-              <Alert type="info" showIcon message="确认后会写入地块、时相和 TIFF 表；未检测影像也会出现在资产库。" style={ALERT} />
             </>
           ) : null}
           <div style={FORM_GRID}>
             <Form.Item name="city" label="市">
-              <Select showSearch allowClear placeholder="默认识别市" options={cityOptions} optionFilterProp="label" />
+              <Select showSearch allowClear placeholder="自动" options={cityOptions} optionFilterProp="label" />
             </Form.Item>
             <Form.Item name="county" label="县 / 区">
-              <Select showSearch allowClear placeholder="默认识别县/区" options={countyOptions} optionFilterProp="label" />
+              <Select showSearch allowClear placeholder="自动" options={countyOptions} optionFilterProp="label" />
             </Form.Item>
             <Form.Item name="town" label="乡镇">
-              <Select showSearch allowClear placeholder="默认识别乡镇" options={townOptions} optionFilterProp="label" />
+              <Select showSearch allowClear placeholder="自动" options={townOptions} optionFilterProp="label" />
             </Form.Item>
             <Form.Item name="tract_id" label="地块名">
-              <Input placeholder="默认使用影像文件名" />
+              <AutoComplete
+                placeholder="自动, 可手动选择或输入"
+                options={tractOptions}
+                filterOption={(inputValue, option) =>
+                  String(option?.value ?? "").toUpperCase().indexOf(inputValue.toUpperCase()) !== -1
+                }
+              >
+                <Input suffix={<DownOutlined style={{ color: "var(--color-text-muted)", opacity: 0.6 }} />} />
+              </AutoComplete>
             </Form.Item>
             <Form.Item name="phase_id" label="时相">
-              <Input placeholder="YYYYMMDD" />
+              <Input placeholder="自动, 可手动修改如:20260606" />
             </Form.Item>
             <Form.Item name="image_name" label="影像名">
-              <Input placeholder="默认使用文件名，不含后缀" />
+              <Input placeholder="默认使用文件名" />
             </Form.Item>
             {modalMode === "edit" ? (
               <Form.Item name="new_path" label="新路径">
@@ -624,19 +704,71 @@ function RunArtifacts({ runId }: { runId: string }) {
     queryFn: () => endpoints.getArtifacts(runId),
   });
   const [preview, setPreview] = useState<ArtifactNode | null>(null);
+  const [exportMode, setExportMode] = useState(false);
+  const [checkedPaths, setCheckedPaths] = useState<string[]>([]);
   const treeData = useMemo(() => toTreeData(data?.tree ?? [], setPreview), [data?.tree]);
+  const allKeys = useMemo(() => flattenArtifactKeys(data?.tree ?? []), [data?.tree]);
+  const exportArtifacts = useMutation({
+    mutationFn: () => endpoints.exportArtifacts(runId, checkedPaths.length ? checkedPaths : ["."]),
+    onSuccess: (result) => {
+      window.open(endpoints.downloadArtifactUrl(result.url), "_blank");
+      message.success("已生成导出包");
+    },
+    onError: (e) => message.error(e instanceof Error ? e.message : "导出失败"),
+  });
   if (isLoading) return <div style={ARTIFACT_PANEL}>正在读取成果目录...</div>;
   if (!data?.available) return <Empty description="未找到运行成果目录" />;
   return (
     <div style={ARTIFACT_PANEL}>
-      <div style={RUN_DIR_LINE}>
-        <FolderOpenOutlined />
-        <Text type="secondary" ellipsis>{data.run_dir}</Text>
+      <div style={ARTIFACT_HEAD}>
+        <div style={RUN_DIR_LINE}>
+          <FolderOpenOutlined />
+          <Text type="secondary" ellipsis>{data.run_dir}</Text>
+        </div>
+        <Space size={6}>
+          {exportMode ? (
+            <Button size="small" type="primary" loading={exportArtifacts.isPending} onClick={() => exportArtifacts.mutate()}>
+              导出所选
+            </Button>
+          ) : null}
+          <Button
+            size="small"
+            onClick={() => {
+              setExportMode((value) => !value);
+              setCheckedPaths([]);
+            }}
+          >
+            {exportMode ? "返回" : "选择导出"}
+          </Button>
+        </Space>
       </div>
-      <Tree showLine treeData={treeData} />
+      <Tree
+        showLine
+        checkable={exportMode}
+        selectable={!exportMode}
+        expandedKeys={exportMode ? allKeys : undefined}
+        checkedKeys={checkedPaths}
+        treeData={treeData}
+        onCheck={(keys) => {
+          const next = Array.isArray(keys) ? keys : keys.checked;
+          setCheckedPaths(next.map(String));
+        }}
+      />
       <PreviewModal runId={runId} node={preview} onClose={() => setPreview(null)} />
     </div>
   );
+}
+
+function flattenArtifactKeys(nodes: ArtifactNode[]): string[] {
+  const out: string[] = [];
+  const walk = (items: ArtifactNode[]) => {
+    for (const item of items) {
+      out.push(item.path);
+      if (item.children?.length) walk(item.children);
+    }
+  };
+  walk(nodes);
+  return out;
 }
 
 function toTreeData(nodes: ArtifactNode[], setPreview: (node: ArtifactNode) => void): DataNode[] {
@@ -733,17 +865,17 @@ function PhaseNodeTitle({ phase, row, openTractMap }: { phase: string; row?: Ass
     <Space size={8}>
       <Text>{phase}</Text>
       {row ? (
-        <Button
-          size="small"
-          type="link"
-          icon={<EyeOutlined />}
-          onClick={(e) => {
-            e.stopPropagation();
-            openTractMap(row);
-          }}
-        >
-          地块视野
-        </Button>
+        <Tooltip title="地块视野">
+          <Button
+            size="small"
+            type="link"
+            icon={<EyeOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              openTractMap(row);
+            }}
+          />
+        </Tooltip>
       ) : null}
     </Space>
   );
@@ -756,12 +888,12 @@ function TreeLeaf({ row, openMap, openEdit }: { row: AssetRow; openMap: (row: As
       {statusTag(row.status)}
       {row.run_id ? <Text code>{row.run_id}</Text> : null}
       <Text type="secondary">{row.observation_count ? row.observation_count.toLocaleString() + " 株" : ""}</Text>
-      <Button size="small" type="link" icon={<EyeOutlined />} onClick={(e) => { e.stopPropagation(); openMap(row); }}>
-        查看地图
-      </Button>
-      <Button size="small" type="link" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); openEdit(row); }}>
-        编辑
-      </Button>
+      <Tooltip title="查看地图">
+        <Button size="small" type="link" icon={<EyeOutlined />} onClick={(e) => { e.stopPropagation(); openMap(row); }} />
+      </Tooltip>
+      <Tooltip title="编辑">
+        <Button size="small" type="link" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); openEdit(row); }} />
+      </Tooltip>
     </Space>
   );
 }
@@ -860,7 +992,6 @@ const TREE_PANEL: CSSProperties = {
   padding: 12,
   background: "var(--color-surface)",
 };
-const ALERT: CSSProperties = { marginBottom: 12 };
 const INSPECT_PANEL: CSSProperties = {
   display: "grid",
   gap: 6,
@@ -887,6 +1018,13 @@ const ARTIFACT_PANEL: CSSProperties = {
   padding: 12,
   background: "color-mix(in srgb, var(--color-surface) 90%, var(--color-bg))",
 };
-const RUN_DIR_LINE: CSSProperties = { display: "flex", gap: 8, alignItems: "center", marginBottom: 8 };
+const ARTIFACT_HEAD: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  marginBottom: 8,
+};
+const RUN_DIR_LINE: CSSProperties = { minWidth: 0, display: "flex", gap: 8, alignItems: "center" };
 const PREVIEW_IMAGE: CSSProperties = { maxWidth: "100%", maxHeight: "70vh", display: "block", margin: "0 auto" };
 const PREVIEW_FRAME: CSSProperties = { width: "100%", height: "70vh", border: "1px solid var(--color-border)" };

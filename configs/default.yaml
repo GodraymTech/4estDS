@@ -51,7 +51,7 @@ detect:
   verbose: true           # 推理时是否输出 ultralytics 自身的详细推理日志
   models:
     ultralytics:
-      weights: "m07"
+      weights: "m03"
       # weights: "rtdetr-l.pt"
       # weights: ".4estDS/outputs/20260629_1501_7d20f_train/weights/best.pt"
 

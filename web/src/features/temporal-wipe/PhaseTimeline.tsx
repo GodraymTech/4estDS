@@ -1,5 +1,5 @@
-import { useRef } from "react";
-import type { CSSProperties } from "react";
+import { useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Tooltip, Typography } from "antd";
 import type { Phase } from "../../entities/phase";
 import { phasePositions } from "./phaseTime";
@@ -13,6 +13,11 @@ const COLOR_IDLE = "var(--glass-muted)";
 const pct = (x: number) => `${Math.max(0, Math.min(1, x)) * 100}%`;
 
 type Role = "before" | "after" | "idle";
+type HandleRole = Exclude<Role, "idle">;
+interface DragState {
+  role: HandleRole;
+  position: number;
+}
 
 // 紧凑时相轴: 只做两期选择，不做播放器式控件。
 export function PhaseTimeline({
@@ -26,6 +31,9 @@ export function PhaseTimeline({
 }) {
   const positions = phasePositions(phases);
   const rangeRef = useRef(range);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef<DragState | null>(null);
+  const [dragging, setDragging] = useState<DragState | null>(null);
   rangeRef.current = range;
 
   const setNearer = (i: number) => {
@@ -36,10 +44,103 @@ export function PhaseTimeline({
   };
 
   const [lo, hi] = range;
+  const pointerPosition = (clientX: number) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return null;
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  };
+  const nearestPhase = (ratio: number) => {
+    return positions.reduce(
+      (nearest, position, index) =>
+        Math.abs(position - ratio) < Math.abs(positions[nearest] - ratio) ? index : nearest,
+      0,
+    );
+  };
+  const onHandleDown = (event: ReactPointerEvent<HTMLButtonElement>, role: HandleRole) => {
+    const [currentLo, currentHi] = rangeRef.current;
+    const initial: DragState = {
+      role,
+      position: role === "before" ? positions[currentLo] : positions[currentHi],
+    };
+    draggingRef.current = initial;
+    setDragging(initial);
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!draggingRef.current) return;
+      const position = pointerPosition(e.clientX);
+      if (position === null) return;
+      const next = { ...draggingRef.current, position };
+      draggingRef.current = next;
+      setDragging(next);
+    };
+
+    const handlePointerUp = () => {
+      const activeDrag = draggingRef.current;
+      if (activeDrag) {
+        const index = nearestPhase(activeDrag.position);
+        const [currLo, currHi] = rangeRef.current;
+        const maxIdx = phases.length - 1;
+        let next: [number, number] = [currLo, currHi];
+
+        if (activeDrag.role === "before") {
+          if (index < currHi) {
+            next = [index, currHi];
+          } else if (index === currHi) {
+            if (currHi < maxIdx) {
+              next = [index, currHi + 1];
+            } else {
+              next = [currHi - 1, currHi];
+            }
+          } else {
+            // index > currHi (跨越)
+            next = [currHi, index];
+          }
+        } else {
+          // role === "after"
+          if (index > currLo) {
+            next = [currLo, index];
+          } else if (index === currLo) {
+            if (currLo > 0) {
+              next = [currLo - 1, index];
+            } else {
+              next = [currLo, currLo + 1];
+            }
+          } else {
+            // index < currLo (跨越)
+            next = [index, currLo];
+          }
+        }
+
+        // 最终修正以保证 [lo, hi] 顺序且不重合
+        let finalLo = Math.min(next[0], next[1]);
+        let finalHi = Math.max(next[0], next[1]);
+        if (finalLo === finalHi) {
+          if (finalLo > 0) {
+            finalLo -= 1;
+          } else if (finalHi < maxIdx) {
+            finalHi += 1;
+          }
+        }
+        if (finalLo !== currLo || finalHi !== currHi) {
+          onRangeChange([finalLo, finalHi]);
+        }
+      }
+      draggingRef.current = null;
+      setDragging(null);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    event.preventDefault();
+  };
+  const beforePosition = dragging?.role === "before" ? dragging.position : positions[lo];
+  const afterPosition = dragging?.role === "after" ? dragging.position : positions[hi];
   const spanStyle: CSSProperties = {
     ...SPAN,
-    left: pct(positions[lo]),
-    width: pct(positions[hi] - positions[lo]),
+    left: pct(beforePosition),
+    width: pct(afterPosition - beforePosition),
   };
 
   return (
@@ -49,7 +150,7 @@ export function PhaseTimeline({
         <Text style={RANGE_LABEL}>{phases[hi]?.time || "-"}</Text>
       </div>
 
-      <div style={TRACK}>
+      <div ref={trackRef} style={TRACK}>
         <div style={BASELINE} />
         <div style={spanStyle} />
         {phases.map((p, i) => {
@@ -60,8 +161,11 @@ export function PhaseTimeline({
               <button
                 type="button"
                 aria-label={p.label}
-                onClick={() => setNearer(i)}
-                style={nodeStyle(positions[i], role, active)}
+                onClick={() => {
+                  if (!active) setNearer(i);
+                }}
+                onPointerDown={role === "idle" ? undefined : (event) => onHandleDown(event, role)}
+                style={nodeStyle(i === lo ? beforePosition : i === hi ? afterPosition : positions[i], role, active)}
               />
             </Tooltip>
           );
@@ -78,7 +182,7 @@ function nodeStyle(pos: number, role: Role, active: boolean): CSSProperties {
       : role === "after"
         ? COLOR_AFTER
         : COLOR_IDLE;
-  const size = active ? 12 : 7;
+  const size = active ? 16 : 9;
   return {
     position: "absolute",
     left: pct(pos),
@@ -93,6 +197,7 @@ function nodeStyle(pos: number, role: Role, active: boolean): CSSProperties {
     cursor: "pointer",
     padding: 0,
     zIndex: active ? 3 : 2,
+    touchAction: "none",
     transition: "width .15s, height .15s, margin .15s",
   };
 }
@@ -111,7 +216,7 @@ const RANGE_LABEL: CSSProperties = {
 };
 const TRACK: CSSProperties = {
   position: "relative",
-  height: 18,
+  height: 30,
   margin: "0 5px",
 };
 const BASELINE: CSSProperties = {
@@ -119,15 +224,16 @@ const BASELINE: CSSProperties = {
   top: "50%",
   left: 0,
   right: 0,
-  height: 2,
+  height: 6,
   background: "var(--glass-border)",
   transform: "translateY(-50%)",
+  borderRadius: 3,
 };
 const SPAN: CSSProperties = {
   position: "absolute",
   top: "50%",
-  height: 3,
+  height: 8,
   background: "color-mix(in srgb, var(--glass-text) 28%, transparent)",
   transform: "translateY(-50%)",
-  borderRadius: 2,
+  borderRadius: 4,
 };

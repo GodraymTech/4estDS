@@ -17,6 +17,7 @@ from .geo import AmapConfigError, AmapServiceError, reverse_admin
 from ..schemas import (
     AssetCogConvertOut,
     AssetCogConvertRequest,
+    AssetDeletePreview,
     AssetInspectOut,
     AssetInspectRequest,
     AssetPatch,
@@ -94,7 +95,7 @@ def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
             "tp.tract_phase_pk, tp.phase_id, tf.tiff_id, tf.file_name, tf.path_versions, "
             "tf.tiff_type, tf.geo_area, tf.area_unit, tf.inference_status, r.run_id, r.status AS run_status, "
             "COALESCE(r.ended_at, r.started_at) AS detected_at, "
-            "(SELECT COUNT(*) FROM tree_observations o WHERE o.tiff_id=tf.tiff_id AND o.phase_id=tf.phase_id) AS observation_count "
+            "(SELECT COUNT(*) FROM tree_observations o WHERE o.run_id=r.run_id) AS observation_count "
             "FROM tract_phases tp "
             "JOIN tracts tr ON tr.tract_pk=tp.tract_pk "
             "JOIN tiffs tf ON tf.tract_phase_pk=tp.tract_phase_pk "
@@ -126,7 +127,7 @@ def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
                 tract_phase_pk=row["tract_phase_pk"],
                 phase_id=row["phase_id"],
                 tiff_id=row["tiff_id"],
-                image_name=row["file_name"],
+                image_name=_image_stem(row["file_name"]),
                 source_path=_latest_path(row["path_versions"]),
                 tiff_type=row["tiff_type"],
                 run_id=row["run_id"],
@@ -266,7 +267,7 @@ def create_tiff_asset(body: AssetTiffCreate, db_url: str | None = Depends(get_db
         town=town,
         image_path=image_path,
     )
-    image_name = body.image_name or inspected.image_name or _image_stem(image_path)
+    image_name = _image_stem(body.image_name or inspected.image_name or image_path)
     if image_name:
         conn = _connect(db_url)
         try:
@@ -314,6 +315,8 @@ def patch_tiff(
     body: AssetPatch,
     db_url: str | None = Depends(get_db_url),
 ) -> list[AssetRow]:
+    import re
+
     conn = _connect(db_url)
     try:
         row = conn.execute("SELECT * FROM tiffs WHERE phase_id=? AND tiff_id=?", (phase_id, tiff_id)).fetchone()
@@ -329,13 +332,66 @@ def patch_tiff(
                 from ...preprocess.cog import inspect_tiff_format
 
                 tiff_type = inspect_tiff_format(normalize_user_path(body.new_path))
-        conn.execute(
-            "UPDATE tiffs SET file_name=COALESCE(?, file_name), path_versions=?, "
-            "tiff_type=COALESCE(?, tiff_type), updated_at=datetime('now') "
-            "WHERE phase_id=? AND tiff_id=?",
-            (body.image_name, path_versions, tiff_type, phase_id, tiff_id),
-        )
-        conn.commit()
+        image_name = _image_stem(body.image_name) if body.image_name else None
+
+        new_phase_id = phase_id
+        if body.phase_id:
+            new_phase_id = writer._normalize_phase_id(body.phase_id)
+            if not re.match(r"^\d{8}$", new_phase_id):
+                raise HTTPException(status_code=400, detail="时相格式无效，须为 8 位数字（如 20260711）")
+
+        if new_phase_id != phase_id:
+            old_tract_phase_pk = row["tract_phase_pk"]
+            tp = conn.execute("SELECT * FROM tract_phases WHERE tract_phase_pk=?", (old_tract_phase_pk,)).fetchone()
+            if not tp:
+                raise HTTPException(status_code=404, detail="关联的地块时相信息不存在")
+
+            new_tract_phase_pk = writer._safe_pk("phase", tp["tract_pk"], new_phase_id)
+
+            conn.execute("PRAGMA foreign_keys = OFF")
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO tract_phases (tract_phase_pk, tract_pk, region_id, tract_id, phase_id, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                    (new_tract_phase_pk, tp["tract_pk"], tp["region_id"], tp["tract_id"], new_phase_id),
+                )
+                conn.execute(
+                    "UPDATE runs SET phase_id=?, tract_phase_pk=? WHERE phase_id=? AND tiff_id=?",
+                    (new_phase_id, new_tract_phase_pk, phase_id, tiff_id),
+                )
+                conn.execute(
+                    "UPDATE tree_observations SET phase_id=?, tract_phase_pk=? WHERE phase_id=? AND tiff_id=?",
+                    (new_phase_id, new_tract_phase_pk, phase_id, tiff_id),
+                )
+                conn.execute(
+                    "UPDATE tiffs SET phase_id=?, tract_phase_pk=?, file_name=COALESCE(?, file_name), "
+                    "path_versions=?, tiff_type=COALESCE(?, tiff_type), updated_at=datetime('now') "
+                    "WHERE phase_id=? AND tiff_id=?",
+                    (new_phase_id, new_tract_phase_pk, image_name, path_versions, tiff_type, phase_id, tiff_id),
+                )
+                # Cleanup empty tract_phases
+                c = conn.execute(
+                    "SELECT COUNT(*) AS c FROM tiffs WHERE tract_phase_pk=?",
+                    (old_tract_phase_pk,),
+                ).fetchone()["c"]
+                if c == 0:
+                    conn.execute("DELETE FROM tract_phases WHERE tract_phase_pk=?", (old_tract_phase_pk,))
+                conn.commit()
+            except sqlite3.IntegrityError as e:
+                conn.rollback()
+                if "UNIQUE constraint failed" in str(e):
+                    raise HTTPException(status_code=409, detail="修改后的时相下已存在该 TIFF 资产")
+                raise HTTPException(status_code=500, detail=f"数据库更新失败: {e}")
+            finally:
+                conn.execute("PRAGMA foreign_keys = ON")
+        else:
+            conn.execute(
+                "UPDATE tiffs SET file_name=COALESCE(?, file_name), path_versions=?, "
+                "tiff_type=COALESCE(?, tiff_type), updated_at=datetime('now') "
+                "WHERE phase_id=? AND tiff_id=?",
+                (image_name, path_versions, tiff_type, phase_id, tiff_id),
+            )
+            conn.commit()
     finally:
         conn.close()
     return list_assets(db_url)
@@ -367,7 +423,7 @@ def delete_tiff(
             (phase_id, tiff_id),
         ).fetchone()["c"]
         if int(count) > 0 and not force:
-            raise HTTPException(status_code=409, detail=f"该 TIFF 已检测，删除将移除 {count} 条观测和相关运行记录")
+            raise HTTPException(status_code=409, detail=f"将移除 {count} 株推理结果、观测和相关运行记录，再次确认")
         conn.execute("DELETE FROM tree_observations WHERE phase_id=? AND tiff_id=?", (phase_id, tiff_id))
         conn.execute("DELETE FROM runs WHERE phase_id=? AND tiff_id=?", (phase_id, tiff_id))
         conn.execute("DELETE FROM tiffs WHERE phase_id=? AND tiff_id=?", (phase_id, tiff_id))
@@ -384,7 +440,42 @@ def delete_tiff(
             ).fetchone()["c"]
             if int(tract_children) == 0:
                 conn.execute("DELETE FROM tracts WHERE tract_pk=?", (tract_pk,))
+            else:
+                from ...db.writer import update_tract_geom_from_tiffs
+                update_tract_geom_from_tiffs(conn, tract_pk)
         conn.commit()
     finally:
         conn.close()
     return list_assets(db_url)
+
+
+@router.get(
+    "/tiffs/{phase_id}/{tiff_id}/delete-preview",
+    response_model=AssetDeletePreview,
+    summary="预览删除 TIFF 的影响范围",
+)
+def preview_delete_tiff(
+    phase_id: str,
+    tiff_id: str,
+    db_url: str | None = Depends(get_db_url),
+) -> AssetDeletePreview:
+    conn = _connect(db_url)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM tiffs WHERE phase_id=? AND tiff_id=?",
+            (phase_id, tiff_id),
+        ).fetchone()
+        if not row or int(row["c"] or 0) == 0:
+            raise HTTPException(status_code=404, detail="TIFF 不存在")
+        count = conn.execute(
+            "SELECT COUNT(*) AS c FROM tree_observations WHERE phase_id=? AND tiff_id=?",
+            (phase_id, tiff_id),
+        ).fetchone()["c"]
+    finally:
+        conn.close()
+    return AssetDeletePreview(
+        phase_id=phase_id,
+        tiff_id=tiff_id,
+        observation_count=int(count or 0),
+        requires_confirmation=bool(count),
+    )

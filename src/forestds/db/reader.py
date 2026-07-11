@@ -394,7 +394,7 @@ def list_tiffs(*, url: str | None = None) -> list[dict]:
             "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, tf.dtype, tf.nodata, "
             "tf.inference_status, tf.created_at, tf.updated_at, "
             "r.run_id, r.status AS run_status, COALESCE(r.ended_at, r.started_at) AS detected_at, "
-            "(SELECT COUNT(*) FROM tree_observations o WHERE o.tiff_id=tf.tiff_id AND o.phase_id=tf.phase_id) AS observation_count "
+            "(SELECT COUNT(*) FROM tree_observations o WHERE o.run_id=r.run_id) AS observation_count "
             "FROM tiffs tf "
             "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
             "JOIN tracts tr ON tr.tract_pk=tp.tract_pk "
@@ -411,6 +411,8 @@ def list_tiffs(*, url: str | None = None) -> list[dict]:
     out: list[dict] = []
     for row in rows:
         item = dict(row)
+        if item.get("file_name"):
+            item["file_name"] = Path(str(item["file_name"])).stem
         source_path = _latest_path(item.get("path_versions"))
         center = None
         if item.get("center_lng") is not None and item.get("center_lat") is not None:
@@ -524,8 +526,8 @@ def tiff_path(
         clauses.append("tf.tiff_id=?")
         params.append(tiff_id)
     if file_name:
-        clauses.append("(tf.file_name=? OR tf.file_name=? OR tf.file_name LIKE ?)")
-        params.extend([file_name, Path(file_name).name, Path(file_name).stem + ".%"])
+        clauses.append("(tf.file_name=? OR tf.file_name=? OR tf.file_name=? OR tf.file_name LIKE ?)")
+        params.extend([file_name, Path(file_name).name, Path(file_name).stem, Path(file_name).stem + ".%"])
     if not clauses:
         return None
     conn = _connect(url)
@@ -540,3 +542,25 @@ def tiff_path(
     finally:
         conn.close()
     return _latest_path(row["path_versions"]) if row else None
+
+
+def latest_runs_for_tract_phase(tract_id: str, *, url: str | None = None) -> list[str]:
+    """返回地块时相下每个 TIFF 资产的最新成功 run_id 列表。"""
+    conn = _connect(url)
+    try:
+        rows = conn.execute(
+            "SELECT r.run_id FROM runs r "
+            "JOIN ("
+            "  SELECT r2.tiff_id, MAX(r2.started_at) as max_started "
+            "  FROM runs r2 "
+            "  JOIN tract_phases tp ON tp.tract_phase_pk = r2.tract_phase_pk "
+            "  WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) AND r2.status='succeeded' "
+            "  GROUP BY r2.tiff_id"
+            ") latest ON r.tiff_id = latest.tiff_id AND r.started_at = latest.max_started "
+            "WHERE r.status='succeeded'",
+            (tract_id, tract_id),
+        ).fetchall()
+        return [row["run_id"] for row in rows]
+    finally:
+        conn.close()
+

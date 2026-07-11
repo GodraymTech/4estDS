@@ -53,6 +53,8 @@
   --glass-text: #10221e;
   --glass-muted: #5c6b66;
   --glass-chip: rgba(248, 250, 249, 0.72);
+  --glass-scrollbar-thumb: rgba(16, 48, 43, 0.18);
+  --glass-scrollbar-thumb-hover: rgba(16, 48, 43, 0.32);
 
   /* 布局尺度 */
   --nav-rail-width: 72px;
@@ -86,4 +88,6 @@
   --glass-text: #e6f0ed;
   --glass-muted: #9ab1aa;
   --glass-chip: rgba(255, 255, 255, 0.10);
+  --glass-scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --glass-scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
 }

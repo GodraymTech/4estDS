@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Empty, Table, Tag } from "antd";
+import { Alert, Button, Empty, Modal, Table, Tag, message } from "antd";
 import type { TableProps } from "antd";
-import { ExportOutlined } from "@ant-design/icons";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ExportOutlined, PoweroffOutlined } from "@ant-design/icons";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { endpoints, queryKeys, type JobHistoryItem, type JobState, type JobStatus } from "../../shared/api";
 import { useJob } from "../../entities/run";
@@ -25,6 +25,15 @@ export function TasksCenter() {
   const jobs = useJobsStore((s) => s.jobs);
   const [activeJobId, setActiveJobId] = useState<string | undefined>(jobs[0]?.jobId);
   const queryClient = useQueryClient();
+  const stopWorker = useMutation({
+    mutationFn: endpoints.stopWorker,
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs("infer") });
+      if (activeJobId) void queryClient.invalidateQueries({ queryKey: queryKeys.job(activeJobId) });
+      message.success(result.message);
+    },
+    onError: (error) => message.error(error instanceof Error ? error.message : "停止推理 Worker 失败"),
+  });
 
   useEffect(() => {
     if (!activeJobId && jobs[0]?.jobId) setActiveJobId(jobs[0].jobId);
@@ -91,16 +100,31 @@ export function TasksCenter() {
       </section>
 
       <section className="tasks-panel tasks-panel--history">
-        <div className="tasks-panel__header">
-          <h2>历史作业</h2>
-        </div>
         <HistoryJobs onSelect={setActiveJobId} />
       </section>
 
       <section className="tasks-main">
         <div className="tasks-panel tasks-panel--queue">
-          <div className="tasks-panel__header">
+          <div className="tasks-panel__header tasks-panel__header--split">
             <h2>作业队列</h2>
+            <Button
+              danger
+              size="small"
+              icon={<PoweroffOutlined />}
+              loading={stopWorker.isPending}
+              onClick={() => {
+                Modal.confirm({
+                  title: "停止推理 Worker 并释放模型内存",
+                  content: "将取消全部排队/运行中的推理任务，并停止本机 worker。后续推理前需重新启动 worker。",
+                  okText: "停止并释放内存",
+                  okButtonProps: { danger: true },
+                  cancelText: "取消",
+                  onOk: () => stopWorker.mutate(),
+                });
+              }}
+            >
+              释放 Worker
+            </Button>
           </div>
           <div className="task-scroll-window task-scroll-window--queue">
             <Table<SubmittedJob>
@@ -131,7 +155,7 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
 
   const columns: TableProps<JobHistoryItem>["columns"] = [
     {
-      title: "作业",
+      title: "历史作业",
       dataIndex: "run_id",
       key: "run_id",
       ellipsis: true,

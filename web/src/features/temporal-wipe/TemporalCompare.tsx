@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import { Empty } from "antd";
 import { TemporalWipe, type TemporalWipeApi, type WipeSide } from "../../shared/ui/TemporalWipe";
@@ -19,6 +20,8 @@ import { PhaseTimeline } from "./PhaseTimeline";
 
 const COLOR_BEFORE = "#f0b84f";
 const COLOR_AFTER = "#33b27b";
+const BEFORE_SPECIES_COLORS = ["#f0b84f", "#e76f51", "#d1495b", "#b56576", "#9c6644", "#c77dff"];
+const AFTER_SPECIES_COLORS = ["#33b27b", "#00a6a6", "#2a9d8f", "#4cc9f0", "#3a86ff", "#43aa8b"];
 
 // 时相卷帘编排器(受控): range 由父级持有, 与变化量化面板共用单一真相。
 // 根据选中的两个时相, 分别拉取树冠观测作为卷帘两侧叠加。
@@ -32,6 +35,8 @@ export function TemporalCompare({
   basemap,
   roadOverlay,
   onWipeApi,
+  showDetections,
+  selectedSpecies,
 }: {
   phases: Phase[];
   range: [number, number];
@@ -41,6 +46,8 @@ export function TemporalCompare({
   basemap?: RasterBasemap;
   roadOverlay?: RasterOverlaySpec | null;
   onWipeApi?: (api: TemporalWipeApi | null) => void;
+  showDetections: boolean;
+  selectedSpecies: string[];
 }) {
   const beforePhase = phases[range[0]];
   const afterPhase = phases[range[1]];
@@ -49,6 +56,40 @@ export function TemporalCompare({
   // 各时相真影像底图(后端就绪则刷开真影像, 否则回退默认底图)。
   const beforeImagery = useTractImagery(beforePhase?.id);
   const afterImagery = useTractImagery(afterPhase?.id);
+
+  const before = useMemo<WipeSide>(() => ({
+    overlay: buildOverlay(
+      "obs-before",
+      beforePhase?.id,
+      beforeObs.data,
+      COLOR_BEFORE,
+      showDetections,
+      selectedSpecies,
+    ),
+    basemap: imageryToBasemap(beforeImagery.data),
+  }), [beforeImagery.data, beforeObs.data, beforePhase?.id, selectedSpecies, showDetections]);
+  const after = useMemo<WipeSide>(() => ({
+    overlay: buildOverlay(
+      "obs-after",
+      afterPhase?.id,
+      afterObs.data,
+      COLOR_AFTER,
+      showDetections,
+      selectedSpecies,
+    ),
+    basemap: imageryToBasemap(afterImagery.data),
+  }), [afterImagery.data, afterObs.data, afterPhase?.id, selectedSpecies, showDetections]);
+  const singleOverlay = useMemo(
+    () => buildOverlay(
+      "obs-only",
+      phases[0]?.id,
+      beforeObs.data,
+      COLOR_AFTER,
+      showDetections,
+      selectedSpecies,
+    ),
+    [beforeObs.data, phases, selectedSpecies, showDetections],
+  );
 
   if (phases.length === 0) {
     return (
@@ -61,40 +102,15 @@ export function TemporalCompare({
   // 单一时相: 降级为现状展示, 不渲染卷帘。
   if (phases.length === 1) {
     const only = phases[0];
-    const overlay = buildOverlay(
-      "obs-only",
-      only.id,
-      beforeObs.data,
-      COLOR_AFTER,
-    );
     return (
       <div style={STAGE}>
-        <MapStage center={center} zoom={zoom} overlay={overlay} />
+        <MapStage center={center} zoom={zoom} overlay={singleOverlay} />
         <div style={SINGLE_HINT}>
           单一时相（{only.time || "未知"}），暂无可对比项
         </div>
       </div>
     );
   }
-
-  const before: WipeSide = {
-    overlay: buildOverlay(
-      "obs-before",
-      beforePhase?.id,
-      beforeObs.data,
-      COLOR_BEFORE,
-    ),
-    basemap: imageryToBasemap(beforeImagery.data),
-  };
-  const after: WipeSide = {
-    overlay: buildOverlay(
-      "obs-after",
-      afterPhase?.id,
-      afterObs.data,
-      COLOR_AFTER,
-    ),
-    basemap: imageryToBasemap(afterImagery.data),
-  };
 
   return (
     <div style={STAGE}>
@@ -133,17 +149,32 @@ function buildOverlay(
   phaseId: string | undefined,
   data: unknown,
   color: string,
+  visible: boolean,
+  selectedSpecies: string[],
 ): GeoJsonLayerSpec | undefined {
-  if (!phaseId || !data) return undefined;
+  if (!phaseId || !data || !visible || selectedSpecies.length === 0) return undefined;
+  const allowed = new Set(selectedSpecies);
   const liveData = liveFeatureCollection(data as FeatureCollection);
+  const features = (liveData?.features ?? []).filter((feature) => {
+    const species = typeof feature.properties?.species === "string" && feature.properties.species.trim()
+      ? feature.properties.species
+      : "未知树种";
+    return allowed.has(species);
+  });
   return {
     id,
     kind: "line",
-    data: liveData as GeoJsonLayerSpec["data"],
-    color,
+    data: { type: "FeatureCollection", features } as GeoJsonLayerSpec["data"],
+    color: compareSpeciesColorExpression(selectedSpecies, color),
     opacity: 0.86,
     lineWidth: 1.15,
   };
+}
+
+function compareSpeciesColorExpression(species: string[], phaseColor: string): unknown[] {
+  const palette = phaseColor === COLOR_BEFORE ? BEFORE_SPECIES_COLORS : AFTER_SPECIES_COLORS;
+  const entries = species.flatMap((name, index) => [name, palette[index % palette.length]]);
+  return ["match", ["coalesce", ["get", "species"], "未知树种"], ...entries, palette[0]];
 }
 
 const STAGE: CSSProperties = { position: "absolute", inset: 0 };

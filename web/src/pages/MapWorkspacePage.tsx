@@ -9,10 +9,8 @@ import {
   Space,
   Spin,
   Tooltip,
-  Tree,
   Typography,
 } from "antd";
-import type { DataNode } from "antd/es/tree";
 import {
   BorderOutlined,
   CalendarOutlined,
@@ -92,13 +90,13 @@ const SPECIES_COLOR_OVERRIDES: Record<string, string> = {
 };
 
 const OUTLINE_COLORS = [
-  "#00b4d8",
-  "#ffd166",
-  "#2a9d8f",
-  "#7b2cbf",
-  "#f72585",
-  "#80ffdb",
-  "#ff9f1c",
+  "#3a86c8",
+  "#8338ec",
+  "#ff006e",
+  "#e05300",
+  "#0077b6",
+  "#5c677d",
+  "#a90011",
 ];
 
 interface TractGroup {
@@ -144,8 +142,10 @@ export function MapWorkspacePage() {
   const [measureMode, setMeasureMode] = useState<MeasureMode>("idle");
   const [measureCoords, setMeasureCoords] = useState<LngLat[]>([]);
   const [chromeHidden, setChromeHidden] = useState(false);
+  const [singlePhaseMarkers, setSinglePhaseMarkers] = useState(true);
   const [checkedTiffKeys, setCheckedTiffKeys] = useState<string[]>([]);
-  const [treeWidth, setTreeWidth] = useState(300);
+  const [treeWidth, setTreeWidth] = useState(240);
+  const [profileWidth, setProfileWidth] = useState(420);
   const detectionLayerIds = useRef<string[]>([]);
   const imageryLayerIds = useRef<string[]>([]);
   const fittedTract = useRef<string | null>(null);
@@ -211,7 +211,7 @@ export function MapWorkspacePage() {
     );
   }, [requestedCity, requestedCounty, requestedPhaseId, requestedTiffName, tiffs, tractId]);
   const isSingleImageView = Boolean(requestedTiffName);
-  const preheatTiffRef = requestedTiff?.tiff_id || requestedTiff?.file_name || requestedTiffName;
+  const preheatTiffRef = requestedTiff?.tiff_id;
   const phaseTiffs = useMemo(
     () =>
       validPathTiffs.filter(
@@ -242,9 +242,9 @@ export function MapWorkspacePage() {
     () =>
       visibleObservations
         ? summaryFromObservations(
-            visibleObservations,
-            isSingleImageView ? requestedTiff?.geo_area : selectedPhaseTiffs.reduce((sum, tiff) => sum + (tiff.geo_area ?? 0), 0),
-          )
+          visibleObservations,
+          isSingleImageView ? requestedTiff?.geo_area : selectedPhaseTiffs.reduce((sum, tiff) => sum + (tiff.geo_area ?? 0), 0),
+        )
         : undefined,
     [isSingleImageView, requestedTiff?.geo_area, selectedPhaseTiffs, visibleObservations],
   );
@@ -263,6 +263,15 @@ export function MapWorkspacePage() {
   );
 
   const mappableTiffs = useMemo(() => validPathTiffs.filter(hasTiffCenter), [validPathTiffs]);
+  const overviewMarkerTiffs = useMemo(() => {
+    if (!singlePhaseMarkers) return mappableTiffs;
+    const latestPhaseByGroup = new Map(
+      tractGroups.map((group) => [group.key, group.latest.phase_id]),
+    );
+    return mappableTiffs.filter(
+      (tiff) => latestPhaseByGroup.get(tractGroupKey(tiff)) === tiff.phase_id,
+    );
+  }, [mappableTiffs, singlePhaseMarkers, tractGroups]);
   const missingImageCoords = Math.max(0, validPathTiffs.length - mappableTiffs.length);
 
   useEffect(() => {
@@ -374,7 +383,7 @@ export function MapWorkspacePage() {
   }, [map, ready]);
 
   const scheduleTiffPreheat = useCallback(() => {
-    if (!map || !ready || !isSingleImageView || !requestedPhaseId || !preheatTiffRef) return;
+    if (!map || !ready || !isSingleImageView || !requestedPhaseId || !preheatTiffRef || observations.isFetching) return;
     if (preheatTimer.current) window.clearTimeout(preheatTimer.current);
     preheatTimer.current = window.setTimeout(() => {
       const bounds = map.getBounds();
@@ -384,8 +393,8 @@ export function MapWorkspacePage() {
         zoom: currentZoom,
         include_adjacent_zooms: true,
       }).catch(() => undefined);
-    }, 400);
-  }, [isSingleImageView, map, preheatTiffRef, ready, requestedPhaseId]);
+    }, 900);
+  }, [isSingleImageView, map, observations.isFetching, preheatTiffRef, ready, requestedPhaseId]);
 
   useEffect(() => {
     if (!map || !ready || !isSingleImageView) return;
@@ -425,19 +434,23 @@ export function MapWorkspacePage() {
       map.setMarkers([]);
       return;
     }
-    const markers: MarkerSpec[] = mappableTiffs.map((tiff) => {
+    const markers: MarkerSpec[] = overviewMarkerTiffs.map((tiff) => {
       const group = tractGroups.find((g) => g.latest.tract_id === tiff.tract_id && sameAdmin(tiff, g.latest.city || undefined, g.latest.county || undefined));
       if (!group) return null;
-      const element = createTractMarkerElement(Boolean(tiff.has_detection), {
-        onClick: () => selectTiff(tiff),
-        onEnter: (rect) =>
-          setHovered({ group, tiff, x: rect.left + rect.width / 2, y: rect.top }),
-        onLeave: () => setHovered(null),
-      });
+      const element = createTractMarkerElement(
+        Boolean(tiff.has_detection),
+        {
+          onClick: () => selectTiff(tiff),
+          onEnter: (rect) =>
+            setHovered({ group, tiff, x: rect.left + rect.width / 2, y: rect.top }),
+          onLeave: () => setHovered(null),
+        },
+        outlineColorForTract(tiff),
+      );
       return { id: `${tiff.phase_id}:${tiff.tiff_id}`, lngLat: [tiff.center_lng, tiff.center_lat] as LngLat, element };
     }).filter((item): item is MarkerSpec => Boolean(item));
     map.setMarkers(spreadNearbyMarkers(markers, map.getZoom()));
-  }, [map, mappableTiffs, ready, selectedId, tractGroups, zoom]);
+  }, [map, overviewMarkerTiffs, ready, selectedId, tractGroups, zoom]);
 
   useEffect(() => {
     if (!map || !ready) return;
@@ -465,7 +478,16 @@ export function MapWorkspacePage() {
     }
     for (const id of imageryLayerIds.current) map.removeRasterOverlay(id);
     imageryLayerIds.current = [];
-    if (activeTract && imagery.data?.available && imagery.data.tiles?.length) {
+    if (requestedTiff) {
+      map.setRasterOverlay(
+        IMAGERY_LAYER,
+        rasterBasemap([tiffTileUrl(requestedTiff)], {
+          tileSize: 256,
+          minZoom: 12,
+          maxZoom: 24,
+        }),
+      );
+    } else if (activeTract && imagery.data?.available && imagery.data.tiles?.length) {
       map.setRasterOverlay(
         IMAGERY_LAYER,
         rasterBasemap(imagery.data.tiles, {
@@ -478,7 +500,7 @@ export function MapWorkspacePage() {
     } else {
       map.removeRasterOverlay(IMAGERY_LAYER);
     }
-  }, [activeTract, imagery.data, isSingleImageView, map, ready, selectedPhaseTiffs]);
+  }, [activeTract, imagery.data, isSingleImageView, map, ready, requestedTiff, selectedPhaseTiffs]);
 
   useEffect(() => {
     if (!map || !ready) return;
@@ -659,41 +681,55 @@ export function MapWorkspacePage() {
           <MenuUnfoldOutlined />
           <span>恢复</span>
         </button>
-      ) : searchOpen ? (
-        <div style={SEARCH_PANEL}>
-          <SearchOutlined style={SEARCH_ICON} />
-          <Select
-            autoFocus
-            allowClear
-            showSearch
-            value={selectedGroup?.key}
-            placeholder="搜索"
-            options={searchOptions}
-            filterOption={false}
-            onSearch={setGeoQuery}
-            loading={geoSearching}
-            notFoundContent={geoSearching ? <Spin size="small" /> : "无结果"}
-            onChange={(v) => {
-              if (v) selectSearch(v);
-              else returnOverview();
-              setSearchOpen(false);
-            }}
-            onBlur={() => {
-              if (!selectedGroup) setSearchOpen(false);
-            }}
-            style={SEARCH_SELECT}
-            variant="borderless"
-          />
-        </div>
       ) : (
-        <button
-          type="button"
-          style={SEARCH_TRIGGER}
-          aria-label="搜索"
-          onClick={() => setSearchOpen(true)}
-        >
-          <SearchOutlined />
-        </button>
+        <div style={TOP_LEFT_TOOLS}>
+          {searchOpen ? (
+            <div style={SEARCH_PANEL}>
+              <SearchOutlined style={SEARCH_ICON} />
+              <Select
+                autoFocus
+                allowClear
+                showSearch
+                value={selectedGroup?.key}
+                placeholder="搜索"
+                options={searchOptions}
+                filterOption={false}
+                onSearch={setGeoQuery}
+                loading={geoSearching}
+                notFoundContent={geoSearching ? <Spin size="small" /> : "无结果"}
+                onChange={(v) => {
+                  if (v) selectSearch(v);
+                  else returnOverview();
+                  setSearchOpen(false);
+                }}
+                onBlur={() => {
+                  if (!selectedGroup) setSearchOpen(false);
+                }}
+                style={SEARCH_SELECT}
+                variant="borderless"
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              style={SEARCH_TRIGGER}
+              aria-label="搜索"
+              onClick={() => setSearchOpen(true)}
+            >
+              <SearchOutlined />
+            </button>
+          )}
+          {!selectedGroup ? (
+            <button
+              type="button"
+              aria-pressed={singlePhaseMarkers}
+              onClick={() => setSinglePhaseMarkers((value) => !value)}
+              style={singlePhaseMarkers ? SINGLE_PHASE_BUTTON_ACTIVE : SINGLE_PHASE_BUTTON}
+            >
+              单时相
+            </button>
+          ) : null}
+        </div>
       )}
 
       {!chromeHidden && selectedGroup ? (
@@ -720,36 +756,36 @@ export function MapWorkspacePage() {
           onRoadVisibleChange={setRoadVisible}
           pixelSizeLabel={formatPixelSize(metersPerPixel)}
           zoomLabel={zoom.toFixed(1)}
-          homeTitle="回到总观视野"
+          homeTitle="返回总览"
           onZoomIn={() => map?.zoomIn()}
           onZoomOut={() => map?.zoomOut()}
           onHome={returnOverview}
           onResetNorth={resetNorth}
           extraActions={
             <>
-            <ToolButton
-              title="测长度"
-              active={measureMode === "distance"}
-              icon={<LineChartOutlined />}
-              onClick={() => {
-                setMeasureMode((m) => (m === "distance" ? "idle" : "distance"));
-                setMeasureCoords([]);
-              }}
-            />
-            <ToolButton
-              title="测面积"
-              active={measureMode === "area"}
-              icon={<BorderOutlined />}
-              onClick={() => {
-                setMeasureMode((m) => (m === "area" ? "idle" : "area"));
-                setMeasureCoords([]);
-              }}
-            />
-            <ToolButton
-              title="隐藏浮动模块"
-              icon={<MenuFoldOutlined />}
-              onClick={() => setChromeHidden(true)}
-            />
+              <ToolButton
+                title="测长度"
+                active={measureMode === "distance"}
+                icon={<LineChartOutlined />}
+                onClick={() => {
+                  setMeasureMode((m) => (m === "distance" ? "idle" : "distance"));
+                  setMeasureCoords([]);
+                }}
+              />
+              <ToolButton
+                title="测面积"
+                active={measureMode === "area"}
+                icon={<BorderOutlined />}
+                onClick={() => {
+                  setMeasureMode((m) => (m === "area" ? "idle" : "area"));
+                  setMeasureCoords([]);
+                }}
+              />
+              <ToolButton
+                title="隐藏面板"
+                icon={<MenuFoldOutlined />}
+                onClick={() => setChromeHidden(true)}
+              />
             </>
           }
         />
@@ -777,25 +813,24 @@ export function MapWorkspacePage() {
           tract={activeTract}
           group={selectedGroup}
           imagery={imagery.data}
-        summary={visibleSummary ?? summary.data}
+          summary={visibleSummary ?? summary.data}
           phaseTiffs={phaseTiffs}
           speciesColors={speciesColors}
           onSelectPhase={selectPhaseTract}
-        loading={observations.isFetching || imagery.isFetching || summary.isFetching}
+          loading={observations.isFetching || imagery.isFetching || summary.isFetching}
+          tiffName={requestedTiffName}
+          width={profileWidth}
+          onWidthChange={setProfileWidth}
         />
       ) : null}
 
       {!chromeHidden && selectedGroup && activeTract && !isSingleImageView ? (
         <TiffTreePanel
-          group={selectedGroup}
-          tiffs={validPathTiffs.filter((t) =>
-            sameAdmin(t, requestedCity, requestedCounty) && t.tract_id === tractId
-          )}
+          tiffs={phaseTiffs}
           activePhaseId={requestedPhaseId ?? activeTract.phase_id}
           checkedKeys={checkedTiffKeys}
           width={treeWidth}
           onWidthChange={setTreeWidth}
-          onSelectPhase={selectPhaseTract}
           onCheckedKeysChange={setCheckedTiffKeys}
         />
       ) : null}
@@ -922,6 +957,19 @@ function sameAdmin(
   return (!city || item.city === city) && (!county || item.county === county);
 }
 
+function outlineColorForTract(item: Pick<TiffAsset, "city" | "county" | "tract_id">): string {
+  const key = [item.city || "", item.county || "", item.tract_id || ""].join("\u0000");
+  return OUTLINE_COLORS[Math.abs(hashString(key)) % OUTLINE_COLORS.length];
+}
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return hash;
+}
+
 function mapPhasePath(tract: Tract): string {
   return [
     "/map",
@@ -957,10 +1005,6 @@ function stripTiffSuffix(value: string): string {
   return value.replace(/\.(tif|tiff)$/i, "");
 }
 
-function phaseNodeKey(phaseId: string): string {
-  return "phase:" + phaseId;
-}
-
 function tiffTileUrl(tiff: TiffAsset): string {
   return `/api/v1/tiles/tiffs/${encodeURIComponent(tiff.phase_id)}/${encodeURIComponent(tiff.tiff_id)}/{z}/{x}/{y}`;
 }
@@ -976,28 +1020,99 @@ function filterObservationsByTiffs(data: FeatureCollection, tiffIds: string[]): 
 
 function summaryFromObservations(data: FeatureCollection, area?: number | null): TractSummary {
   const species: Record<string, number> = {};
+  const allCrownAreas: number[] = [];
+  const allCrownSizes: number[] = [];
+  const allHeights: number[] = [];
+  const bySpecies = new Map<string, {
+    count: number;
+    crownAreas: number[];
+    crownSizes: number[];
+    heights: number[];
+  }>();
   for (const feature of data.features) {
     const label = String(feature.properties?.species || "未知");
     species[label] = (species[label] ?? 0) + 1;
+    const crownArea = numericProp(feature, "crown_area_geo_real") ?? numericProp(feature, "crown_area_geo_est");
+    const crownWidth = numericProp(feature, "crown_width_geo");
+    const crownHeight = numericProp(feature, "crown_height_geo");
+    const crownSize = crownWidth && crownHeight ? Math.sqrt(crownWidth * crownHeight) : crownArea ? Math.sqrt(crownArea) : undefined;
+    const height = numericProp(feature, "height");
+    if (crownArea !== undefined) allCrownAreas.push(crownArea);
+    if (crownSize !== undefined) allCrownSizes.push(crownSize);
+    if (height !== undefined && height <= 50) allHeights.push(height);
+    const bucket = bySpecies.get(label) ?? { count: 0, crownAreas: [], crownSizes: [], heights: [] };
+    bucket.count += 1;
+    if (crownArea !== undefined) bucket.crownAreas.push(crownArea);
+    if (crownSize !== undefined) bucket.crownSizes.push(crownSize);
+    if (height !== undefined && height <= 50) bucket.heights.push(height);
+    bySpecies.set(label, bucket);
   }
   const treeCount = data.features.length;
+  const totalCrownArea = allCrownAreas.reduce((sum, value) => sum + value, 0);
   const speciesAnalysis = Object.fromEntries(
-    Object.entries(species).map(([label, count]) => [
-      label,
-      {
-        count,
-        ratio: treeCount > 0 ? count / treeCount : 0,
-      },
-    ]),
+    [...bySpecies.entries()].map(([label, item]) => {
+      const crownArea = item.crownAreas.reduce((sum, value) => sum + value, 0);
+      return [
+        label,
+        {
+          count: item.count,
+          ratio: treeCount > 0 ? item.count / treeCount : 0,
+          total_crown_area: crownArea,
+          crown_area_geo: distributionFromValues(item.crownAreas),
+          crown_size_geo: distributionFromValues(item.crownSizes),
+          height: distributionFromValues(item.heights),
+        },
+      ];
+    }),
   );
   return {
     tree_count: treeCount,
     species,
+    crown_area_geo: distributionFromValues(allCrownAreas),
+    crown_size_geo: distributionFromValues(allCrownSizes),
+    height: distributionFromValues(allHeights),
     meta: {
       area_m2: area ?? null,
+      canopy_cover_rate: area && area > 0 && totalCrownArea > 0 ? totalCrownArea / area : null,
+      total_crown_area: totalCrownArea,
       species_analysis: speciesAnalysis,
     },
   };
+}
+
+function numericProp(feature: GeoFeature, key: string): number | undefined {
+  const value = feature.properties?.[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return value;
+}
+
+function distributionFromValues(values: number[]): DistributionSummary {
+  const xs = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  const n = xs.length;
+  if (!n) return { n: 0 };
+  const mean = xs.reduce((sum, value) => sum + value, 0) / n;
+  const variance = xs.reduce((sum, value) => sum + (value - mean) ** 2, 0) / n;
+  return {
+    n,
+    min: xs[0],
+    max: xs[n - 1],
+    mean,
+    std: Math.sqrt(variance),
+    p25: percentile(xs, 25),
+    median: percentile(xs, 50),
+    p75: percentile(xs, 75),
+    p10: percentile(xs, 10),
+    p90: percentile(xs, 90),
+  };
+}
+
+function percentile(xs: number[], p: number): number {
+  if (xs.length === 1) return xs[0];
+  const idx = (p / 100) * (xs.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return xs[lo];
+  return xs[lo] * (1 - (idx - lo)) + xs[hi] * (idx - lo);
 }
 
 function spreadNearbyMarkers(markers: MarkerSpec[], zoom: number): MarkerSpec[] {
@@ -1013,7 +1128,7 @@ function spreadNearbyMarkers(markers: MarkerSpec[], zoom: number): MarkerSpec[] 
   }
   return groups.flatMap((group) => {
     if (group.length === 1) return group;
-    const radius = Math.min(18, 8 + group.length * 2);
+    const radius = Math.min(10, 5 + group.length * 1.5);
     return group.map((marker, idx) => {
       const angle = (Math.PI * 2 * idx) / group.length - Math.PI / 2;
       return {
@@ -1154,23 +1269,31 @@ function buildSpeciesLayers(
   colors: Map<string, string>,
 ): GeoJsonLayerSpec[] {
   const allowed = new Set(selectedSpecies);
-  const bySpecies = new Map<string, GeoFeature[]>();
-  for (const feature of fc.features) {
+  const features = fc.features.filter((feature) => {
     const raw = feature.properties?.species;
     const species = typeof raw === "string" && raw.trim() ? raw : "未知树种";
-    if (allowed.size > 0 && !allowed.has(species)) continue;
-    const arr = bySpecies.get(species) ?? [];
-    arr.push(feature);
-    bySpecies.set(species, arr);
-  }
-  return [...bySpecies.entries()].map(([species, features], idx) => ({
-    id: DETECTION_PREFIX + safeLayerId(species),
+    return allowed.size === 0 || allowed.has(species);
+  });
+  if (!features.length) return [];
+  const species = [...new Set(features.map(featureSpecies))];
+  return [{
+    id: DETECTION_PREFIX + "all",
     kind: "line" as const,
-    color: colors.get(species) ?? speciesColor(species, idx),
+    color: speciesColorExpression(species, colors),
     opacity: 0.96,
     lineWidth: 2.2,
     data: { type: "FeatureCollection", features } as GeoJson,
-  }));
+  }];
+}
+
+function featureSpecies(feature: GeoFeature): string {
+  const raw = feature.properties?.species;
+  return typeof raw === "string" && raw.trim() ? raw : "未知树种";
+}
+
+function speciesColorExpression(species: string[], colors: Map<string, string>): unknown[] {
+  const entries = species.flatMap((name, index) => [name, colors.get(name) ?? speciesColor(name, index)]);
+  return ["match", ["coalesce", ["get", "species"], "未知树种"], ...entries, "#ffffff"];
 }
 
 function safeLayerId(value: string): string {
@@ -1255,74 +1378,26 @@ function CompactKpi({ label, value, wide }: { label: string; value: ReactNode; w
 }
 
 function TiffTreePanel({
-  group,
   tiffs,
   activePhaseId,
   checkedKeys,
   width,
   onWidthChange,
-  onSelectPhase,
   onCheckedKeysChange,
 }: {
-  group: TractGroup;
   tiffs: TiffAsset[];
   activePhaseId?: string;
   checkedKeys: string[];
   width: number;
   onWidthChange: (width: number) => void;
-  onSelectPhase: (tract: Tract) => void;
   onCheckedKeysChange: (keys: string[]) => void;
 }) {
-  const phaseMap = useMemo(() => {
-    const out = new Map<string, TiffAsset[]>();
-    for (const tiff of tiffs) {
-      const key = tiff.phase_id || "未知时相";
-      const arr = out.get(key) ?? [];
-      arr.push(tiff);
-      out.set(key, arr);
-    }
-    return out;
-  }, [tiffs]);
-
-  const treeData = useMemo<DataNode[]>(() =>
-    group.tracts.map((phase) => {
-      const phaseKey = phase.phase_id || "未知时相";
-      const active = phase.phase_id === activePhaseId;
-      const children = (phaseMap.get(phaseKey) ?? []).map((tiff) => ({
-        key: tiffKey(tiff),
-        title: (
-          <span style={active ? TREE_LEAF_TITLE : TREE_MUTED_TITLE}>
-            {tiff.file_name || tiff.tiff_id}
-            <Text type="secondary"> · {(tiff.observation_count ?? 0).toLocaleString()} 株</Text>
-          </span>
-        ),
-        disabled: !active,
-      }));
-      return {
-        key: phaseNodeKey(phaseKey),
-        title: (
-          <button
-            type="button"
-            style={active ? TREE_PHASE_ACTIVE : TREE_PHASE_MUTED}
-            onClick={() => onSelectPhase(phase)}
-          >
-            <span>{phaseKey}</span>
-            <strong>{children.length} 图</strong>
-          </button>
-        ),
-        disabled: !active,
-        selectable: false,
-        children,
-      };
-    }),
-  [activePhaseId, group.tracts, onSelectPhase, phaseMap]);
-
   function startResize(e: ReactMouseEvent<HTMLDivElement>) {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = width;
     const move = (event: MouseEvent) => {
-      onWidthChange(clamp(startWidth + startX - event.clientX, 260, 520));
+      onWidthChange(clamp(startWidth + startX - event.clientX, 220, 420));
     };
     const up = () => {
       window.removeEventListener("mousemove", move);
@@ -1333,26 +1408,25 @@ function TiffTreePanel({
   }
 
   return (
-    <div style={{ ...TIFF_TREE_PANEL, width }}>
+    <div style={{ ...TIFF_TREE_PANEL, width }} className="custom-glass-scroll">
       <div style={RESIZE_HANDLE} onMouseDown={startResize} />
       <div style={PANEL_HEAD}>
         <span style={PANEL_TITLE}>影像文件</span>
-        <span style={PANEL_SUBTITLE}>{activePhaseId || "未知时相"}</span>
+        <span style={PANEL_SUBTITLE}>{activePhaseId || "未知时相"} · {tiffs.length} 图</span>
       </div>
-      <Tree
-        checkable
-        selectable={false}
-        blockNode
-        checkedKeys={checkedKeys}
-        expandedKeys={activePhaseId ? [phaseNodeKey(activePhaseId)] : []}
-        treeData={treeData}
-        onCheck={(keys) => {
-          const next = (Array.isArray(keys) ? keys : keys.checked)
-            .map(String)
-            .filter((key) => !key.startsWith("phase:"));
-          onCheckedKeysChange(next);
-        }}
-      />
+      <Checkbox.Group
+        value={checkedKeys}
+        onChange={(keys) => onCheckedKeysChange(keys.map(String))}
+        style={TIFF_LIST}
+      >
+        {tiffs.map((tiff) => (
+          <label key={tiffKey(tiff)} style={TIFF_LIST_ROW}>
+            <Checkbox value={tiffKey(tiff)} />
+            <span style={TREE_LEAF_TITLE}>{tiff.file_name || tiff.tiff_id}</span>
+            <Text type="secondary">{(tiff.observation_count ?? 0).toLocaleString()} 株</Text>
+          </label>
+        ))}
+      </Checkbox.Group>
     </div>
   );
 }
@@ -1366,6 +1440,9 @@ function ProfilePanel({
   speciesColors,
   onSelectPhase,
   loading,
+  tiffName,
+  width,
+  onWidthChange,
 }: {
   tract: Tract;
   group: TractGroup;
@@ -1375,15 +1452,37 @@ function ProfilePanel({
   speciesColors: Map<string, string>;
   onSelectPhase: (tract: Tract) => void;
   loading: boolean;
+  tiffName?: string;
+  width: number;
+  onWidthChange: (width: number) => void;
 }) {
-  const meta = summary?.meta;
   const metricSections = buildProfileMetricSections(summary, tract, speciesColors);
   const detectedTiffs = (phaseTiffs ?? []).filter((t) => t.has_detection || t.observation_count > 0);
+
+  function startResize(e: ReactMouseEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = width;
+    const move = (event: MouseEvent) => {
+      onWidthChange(clamp(startWidth + event.clientX - startX, 320, 640));
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
+
+  const overallArea = summary?.meta?.area_m2 ?? tract.geo_area;
+  const overallDensity = summary?.density_per_ha ?? densityFromCount(summary?.tree_count ?? tract.observation_count ?? 0, overallArea);
+
   return (
-    <div style={PROFILE_PANEL}>
+    <div style={{ ...PROFILE_PANEL, width }} className="custom-glass-scroll">
+      <div style={PROFILE_RESIZE_HANDLE} onMouseDown={startResize} />
       <div style={PANEL_HEAD}>
         <div style={PROFILE_TITLE_GROUP}>
-          <span style={PANEL_TITLE}>{tract.tract_id}</span>
+          <span style={PANEL_TITLE}>{tiffName ? `${tract.tract_id} - ${stripTiffSuffix(tiffName)}` : tract.tract_id}</span>
           <span style={PANEL_SUBTITLE}>时相ID {tract.phase_id || "未知时相"}</span>
         </div>
         <Space size={6}>
@@ -1415,8 +1514,8 @@ function ProfilePanel({
         </Space>
       </div>
       <div style={PROFILE_PRIMARY_GRID}>
-        <ProfileBigMetric label="面积" value={formatTractArea(tract)} />
-        <ProfileBigMetric label="覆盖率" value={formatPercent(meta?.canopy_cover_rate)} />
+        <ProfileBigMetric label="面积" value={formatAreaValue(overallArea)} />
+        <ProfileBigMetric label="种植密度" value={formatDensity(overallDensity)} />
       </div>
       <div style={PROFILE_SPECIES_LIST}>
         {metricSections.map((section) => (
@@ -1445,8 +1544,7 @@ interface ProfileMetricSectionData {
   ratio: number | null;
   density: number | null;
   crownArea: number;
-  crownW?: DistributionSummary;
-  crownH?: DistributionSummary;
+  crownSize?: DistributionSummary;
   crownAreaDist?: DistributionSummary;
   height?: DistributionSummary;
 }
@@ -1476,10 +1574,10 @@ function ProfileMetricSection({ section }: { section: ProfileMetricSectionData }
         <MiniMetric label="冠幅和" value={formatAreaValue(section.crownArea)} />
       </div>
       <div style={PROFILE_DIST_STACK}>
-        <ProfileDistRow label="冠尺寸" value={formatCrownSize(section.crownW, section.crownH)} />
-        <ProfileDistRow label="冠面积" value={formatDistribution(section.crownAreaDist, "m²")} />
+        <ProfileDistRow label="冠尺寸(m)" value={<DistributionPills dist={section.crownSize} unit="" />} />
+        <ProfileDistRow label="冠面积(m²)" value={<DistributionPills dist={section.crownAreaDist} unit="" />} />
         {hasDistribution(section.height) ? (
-          <ProfileDistRow label="树高" value={formatDistribution(section.height, "m")} />
+          <ProfileDistRow label="树高(m)" value={<DistributionPills dist={section.height} unit="" />} />
         ) : null}
       </div>
     </div>
@@ -1495,11 +1593,11 @@ function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function ProfileDistRow({ label, value }: { label: string; value: string }) {
+function ProfileDistRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={PROFILE_DIST_ROW}>
       <span>{label}</span>
-      <strong style={PROFILE_DIST_VALUE}>{value}</strong>
+      <div style={PROFILE_DIST_VALUE}>{value}</div>
     </div>
   );
 }
@@ -1519,8 +1617,7 @@ function buildProfileMetricSections(
     ratio: totalCount > 0 ? 1 : null,
     density: summary?.density_per_ha ?? densityFromCount(totalCount, tract.geo_area),
     crownArea: summary?.meta?.total_crown_area ?? 0,
-    crownW: summary?.crown_width_geo,
-    crownH: summary?.crown_height_geo,
+    crownSize: summary?.crown_size_geo ?? equivalentCrownSize(summary?.crown_width_geo, summary?.crown_height_geo),
     crownAreaDist: summary?.crown_area_geo,
     height: summary?.height,
   };
@@ -1536,8 +1633,7 @@ function buildProfileMetricSections(
         ratio: item.ratio ?? (totalCount > 0 ? count / totalCount : null),
         density: item.density_per_ha ?? densityFromCount(count, tract.geo_area),
         crownArea: item.total_crown_area ?? (item.avg_crown_area ?? 0) * count,
-    crownW: item.crown_width_geo,
-    crownH: item.crown_height_geo,
+        crownSize: item.crown_size_geo ?? equivalentCrownSize(item.crown_width_geo, item.crown_height_geo),
         crownAreaDist: item.crown_area_geo,
         height: item.height,
       } satisfies ProfileMetricSectionData;
@@ -1631,27 +1727,62 @@ function formatPercent(value: number | null | undefined): string {
   return (value * 100).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "%";
 }
 
-function formatDistribution(dist: DistributionSummary | undefined, unit = ""): string {
-  if (!dist || !dist.n) return "-";
-  const median = formatMetric(dist.median);
-  const p10 = formatMetric(dist.p10);
-  const p90 = formatMetric(dist.p90);
-  return `P50 ${median} · P10-90 ${p10}-${p90}${unit ? " " + unit : ""}`;
-}
-
-function formatCrownSize(
-  width: DistributionSummary | undefined,
-  height: DistributionSummary | undefined,
-): string {
-  if (!hasDistribution(width) || !hasDistribution(height)) return "-";
-  const p50 = `${formatMetric(width.median)}x${formatMetric(height.median)}`;
-  const p10 = `${formatMetric(width.p10)}x${formatMetric(height.p10)}`;
-  const p90 = `${formatMetric(width.p90)}x${formatMetric(height.p90)}`;
-  return `P50 ${p50} · P10-90 ${p10}-${p90} m`;
-}
-
 function hasDistribution(dist: DistributionSummary | undefined): dist is DistributionSummary {
   return Boolean(dist?.n && dist.n > 0);
+}
+
+function DistributionPills({ dist, unit }: { dist?: DistributionSummary; unit?: string }) {
+  if (!hasDistribution(dist)) return <span>-</span>;
+  const suffix = unit ? " " + unit : "";
+  const values = [
+    { label: "极小值", value: dist.min },
+    { label: "p25", value: dist.p25 ?? dist.p10 },
+    { label: "中值", value: dist.median },
+    { label: "p75", value: dist.p75 ?? dist.p90 },
+    { label: "极大值", value: dist.max },
+  ];
+  return (
+    <div style={DIST_PILL_WRAP}>
+      <span style={DIST_BADGE_STATS}>统计</span>
+      <Tooltip title="均值">
+        <span style={DIST_NUMBER}>{formatMetric(dist.mean)}{suffix}</span>
+      </Tooltip>
+      <span style={DIST_PM}>±</span>
+      <Tooltip title="标准差">
+        <span style={DIST_NUMBER}>{formatMetric(dist.std)}</span>
+      </Tooltip>
+      <span style={DIST_BADGE_QUANTILE}>分位</span>
+      {values.map((item, index) => (
+        <span key={item.label} style={DIST_QUANTILE_ITEM}>
+          {index > 0 ? <span style={DIST_SEPARATOR}>-</span> : null}
+          <Tooltip title={item.label}>
+            <span style={DIST_NUMBER}>{formatMetric(item.value)}</span>
+          </Tooltip>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function equivalentCrownSize(
+  width: DistributionSummary | undefined,
+  height: DistributionSummary | undefined,
+): DistributionSummary | undefined {
+  if (!hasDistribution(width) || !hasDistribution(height)) return undefined;
+  const combine = (a?: number, b?: number) =>
+    typeof a === "number" && typeof b === "number" && a >= 0 && b >= 0
+      ? Math.sqrt(a * b)
+      : undefined;
+  return {
+    n: Math.min(width.n ?? 0, height.n ?? 0),
+    min: combine(width.min, height.min),
+    max: combine(width.max, height.max),
+    mean: combine(width.mean, height.mean),
+    std: combine(width.std, height.std),
+    p25: combine(width.p25 ?? width.p10, height.p25 ?? height.p10),
+    median: combine(width.median, height.median),
+    p75: combine(width.p75 ?? width.p90, height.p75 ?? height.p90),
+  };
 }
 
 function formatMetric(value: number | undefined): string {
@@ -1695,10 +1826,6 @@ const GLASS_ICON: CSSProperties = {
 };
 const SEARCH_TRIGGER: CSSProperties = {
   ...GLASS_ICON,
-  position: "absolute",
-  top: 12,
-  left: 12,
-  zIndex: 8,
   width: 40,
   height: 40,
   borderRadius: 20,
@@ -1709,11 +1836,7 @@ const SEARCH_TRIGGER: CSSProperties = {
 };
 const SEARCH_PANEL: CSSProperties = {
   ...GLASS,
-  position: "absolute",
-  top: 12,
-  left: 12,
-  zIndex: 8,
-  width: "min(210px, calc(100% - 104px))",
+  width: "min(210px, 32vw)",
   height: 40,
   borderRadius: 20,
   display: "flex",
@@ -1722,6 +1845,34 @@ const SEARCH_PANEL: CSSProperties = {
 };
 const SEARCH_ICON: CSSProperties = { color: "var(--glass-text)", marginRight: 4, fontSize: 13 };
 const SEARCH_SELECT: CSSProperties = { flex: 1 };
+const TOP_LEFT_TOOLS: CSSProperties = {
+  position: "absolute",
+  top: 12,
+  left: 12,
+  zIndex: 8,
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  maxWidth: "calc(100% - 24px)",
+};
+const SINGLE_PHASE_BUTTON: CSSProperties = {
+  ...GLASS,
+  height: 40,
+  borderRadius: 20,
+  paddingInline: 14,
+  whiteSpace: "nowrap",
+  border: "1px solid var(--glass-border)",
+  color: "var(--glass-text)",
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: "pointer",
+};
+const SINGLE_PHASE_BUTTON_ACTIVE: CSSProperties = {
+  ...SINGLE_PHASE_BUTTON,
+  background: "rgba(16, 128, 99, 0.9)",
+  borderColor: "rgba(185, 255, 228, 0.5)",
+  color: "#ffffff",
+};
 const COMPARE_FLOAT_BUTTON: CSSProperties = {
   ...GLASS,
   position: "absolute",
@@ -1777,8 +1928,16 @@ const PROFILE_PANEL: CSSProperties = {
   maxHeight: "min(72vh, 680px)",
   overflowY: "auto",
   borderRadius: 18,
-  padding: 12,
+  padding: "12px 16px 12px 12px",
   color: "var(--glass-text)",
+};
+const PROFILE_RESIZE_HANDLE: CSSProperties = {
+  position: "absolute",
+  right: 0,
+  top: 0,
+  bottom: 0,
+  width: 8,
+  cursor: "ew-resize",
 };
 const OVERVIEW_PROFILE: CSSProperties = {
   ...GLASS,
@@ -1946,7 +2105,7 @@ const PROFILE_DIST_STACK: CSSProperties = {
 const PROFILE_DIST_ROW: CSSProperties = {
   minWidth: 0,
   display: "grid",
-  gridTemplateColumns: "52px minmax(0, 1fr)",
+  gridTemplateColumns: "55px minmax(0, 1fr)",
   alignItems: "baseline",
   gap: 6,
   padding: "5px 7px",
@@ -1960,9 +2119,41 @@ const PROFILE_DIST_VALUE: CSSProperties = {
   minWidth: 0,
   color: "var(--glass-text)",
   fontWeight: 750,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
+};
+const DIST_PILL_WRAP: CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: 2,
+  flexWrap: "wrap",
+};
+const DIST_BADGE_STATS: CSSProperties = {
+  padding: "1px 5px",
+  borderRadius: 6,
+  color: "#0f3b30",
+  background: "rgba(142, 225, 190, 0.72)",
+  fontWeight: 800,
+};
+const DIST_BADGE_QUANTILE: CSSProperties = {
+  ...DIST_BADGE_STATS,
+  color: "#42310b",
+  background: "rgba(242, 211, 130, 0.74)",
+};
+const DIST_NUMBER: CSSProperties = {
+  color: "var(--glass-text)",
+  fontWeight: 760,
+};
+const DIST_PM: CSSProperties = {
+  color: "var(--glass-muted)",
+  fontWeight: 700,
+};
+const DIST_SEPARATOR: CSSProperties = {
+  margin: "0 0px",
+  color: "var(--glass-muted)",
+};
+const DIST_QUANTILE_ITEM: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
 };
 const PROFILE_TAGS: CSSProperties = {
   display: "flex",
@@ -2035,8 +2226,7 @@ const TIFF_TREE_PANEL: CSSProperties = {
   ...GLASS,
   position: "absolute",
   right: 16,
-  top: "50%",
-  transform: "translateY(-50%)",
+  bottom: 16,
   zIndex: 8,
   maxHeight: "min(62vh, 620px)",
   overflowY: "auto",
@@ -2054,24 +2244,24 @@ const RESIZE_HANDLE: CSSProperties = {
   borderRadius: 999,
   background: "rgba(255, 255, 255, 0.16)",
 };
-const TREE_PHASE_ACTIVE: CSSProperties = {
+const TREE_LEAF_TITLE: CSSProperties = { color: "var(--glass-text)" };
+const TIFF_LIST: CSSProperties = {
   width: "100%",
-  border: 0,
-  background: "transparent",
-  color: "var(--glass-text)",
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 8,
-  padding: 0,
+  display: "grid",
+  gap: 6,
+};
+const TIFF_LIST_ROW: CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "18px minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 7,
+  padding: "7px 8px",
+  borderRadius: 10,
+  background: "rgba(255, 255, 255, 0.12)",
   cursor: "pointer",
 };
-const TREE_PHASE_MUTED: CSSProperties = {
-  ...TREE_PHASE_ACTIVE,
-  color: "var(--glass-muted)",
-  opacity: 0.48,
-};
-const TREE_LEAF_TITLE: CSSProperties = { color: "var(--glass-text)" };
-const TREE_MUTED_TITLE: CSSProperties = { color: "var(--glass-muted)", opacity: 0.46 };
 const SPECIES_GRID: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr",

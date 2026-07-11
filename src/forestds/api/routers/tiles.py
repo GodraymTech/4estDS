@@ -334,7 +334,9 @@ def _resolve_tract_image_path(tract_id: str, db_url: str | None) -> Path:
 def _resolve_tiff_image_path(phase_id: str, tiff_ref: str, db_url: str | None) -> Path:
     from ...db import reader
 
-    raw_path = reader.tiff_path(phase_id=phase_id, tiff_id=tiff_ref, file_name=tiff_ref, url=db_url)
+    raw_path = reader.tiff_path(phase_id=phase_id, tiff_id=tiff_ref, url=db_url)
+    if not raw_path:
+        raw_path = reader.tiff_path(phase_id=phase_id, file_name=tiff_ref, url=db_url)
     if not raw_path:
         raise HTTPException(status_code=404, detail="该 TIFF 没有关联可切片的原始影像")
     return _validate_image_path(raw_path)

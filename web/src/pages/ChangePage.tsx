@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Empty, Select, Space, Spin, Typography } from "antd";
+import { Checkbox, Empty, Select, Space, Spin } from "antd";
 import { useSearchParams } from "react-router-dom";
 import { useTracts, type Tract } from "../entities/tract";
+import { useObservations } from "../entities/observation";
 import { pickLatestTwo, type Phase } from "../entities/phase";
 import { ChangeMetricsPanel } from "../features/change-metrics";
 import { TemporalCompare } from "../features/temporal-wipe";
@@ -16,8 +17,6 @@ import {
 import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
 import { MapGlassPanel } from "../shared/ui/MapGlassPanel";
 import type { TemporalWipeApi } from "../shared/ui/TemporalWipe";
-
-const { Text } = Typography;
 
 interface CompareGroup {
   tract_id: string;
@@ -34,6 +33,8 @@ export function ChangePage() {
   const [basemapId, setBasemapId] = useState(env.defaultBasemapId);
   const [roadVisible, setRoadVisible] = useState(false);
   const [wipeApi, setWipeApi] = useState<TemporalWipeApi | null>(null);
+  const [showDetections, setShowDetections] = useState(true);
+  const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
 
   const active = useMemo(() => {
     if (groups.length === 0) return undefined;
@@ -45,13 +46,33 @@ export function ChangePage() {
   }, [groups, tractId, requestedTractId]);
 
   const [range, setRange] = useState<[number, number]>([0, 0]);
-  const roadOverlay = roadVisible
-    ? { ...ROAD_OVERLAY, opacity: basemapId === "satellite" ? 0.52 : 0.24 }
-    : null;
+  const beforePhase = active?.phases[range[0]];
+  const afterPhase = active?.phases[range[1]];
+  const beforeObs = useObservations(beforePhase?.id, "crown");
+  const afterObs = useObservations(afterPhase?.id, "crown");
+  const comparedSpecies = useMemo(
+    () => collectSpecies(beforeObs.data, afterObs.data),
+    [afterObs.data, beforeObs.data],
+  );
+  const roadOverlay = useMemo(
+    () => roadVisible
+      ? { ...ROAD_OVERLAY, opacity: basemapId === "satellite" ? 0.52 : 0.24 }
+      : null,
+    [basemapId, roadVisible],
+  );
+
+  const lastTractId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!active) return;
+    if (active.tract_id !== lastTractId.current) {
+      lastTractId.current = active.tract_id;
+      setRange(pickLatestTwo(active.phases));
+    }
+  }, [active]);
 
   useEffect(() => {
-    if (active) setRange(pickLatestTwo(active.phases));
-  }, [active]);
+    setSelectedSpecies(comparedSpecies);
+  }, [afterPhase?.id, beforePhase?.id, comparedSpecies]);
 
   const options = groups.map((g) => ({
     value: g.tract_id,
@@ -80,6 +101,8 @@ export function ChangePage() {
           basemap={basemapById(basemapId)}
           roadOverlay={roadOverlay}
           onWipeApi={setWipeApi}
+          showDetections={showDetections}
+          selectedSpecies={selectedSpecies}
         />
       ) : (
         <div style={CENTER}>
@@ -97,7 +120,28 @@ export function ChangePage() {
             onChange={selectTract}
             disabled={groups.length === 0}
           />
-          <Text type="secondary">{active ? active.phases.length + " 个时相" : "无时相"}</Text>
+          <div style={DETECTION_MODULE}>
+            <Checkbox checked={showDetections} onChange={(event) => setShowDetections(event.target.checked)}>
+              显示检测框
+            </Checkbox>
+            {showDetections && comparedSpecies.length > 0 ? (
+              <Checkbox.Group
+                value={selectedSpecies}
+                onChange={(values) => setSelectedSpecies(values.map(String))}
+                style={SPECIES_GRID}
+              >
+                {comparedSpecies.map((species, index) => (
+                  <Checkbox key={species} value={species} style={SPECIES_CHECK}>
+                    <span style={SPECIES_LABEL}>
+                      <i style={{ ...SPECIES_DOT, background: BEFORE_SPECIES_COLORS[index % BEFORE_SPECIES_COLORS.length] }} />
+                      <i style={{ ...SPECIES_DOT, background: AFTER_SPECIES_COLORS[index % AFTER_SPECIES_COLORS.length] }} />
+                      {species}
+                    </span>
+                  </Checkbox>
+                ))}
+              </Checkbox.Group>
+            ) : null}
+          </div>
         </Space>
       </MapGlassPanel>
 
@@ -163,6 +207,18 @@ function centerOfBounds(bounds: [LngLat, LngLat]): LngLat {
   ];
 }
 
+function collectSpecies(
+  before?: { features: Array<{ properties: Record<string, unknown> }> },
+  after?: { features: Array<{ properties: Record<string, unknown> }> },
+): string[] {
+  const species = new Set<string>();
+  for (const feature of [...(before?.features ?? []), ...(after?.features ?? [])]) {
+    const value = feature.properties.species;
+    species.add(typeof value === "string" && value.trim() ? value : "未知树种");
+  }
+  return [...species].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
 const STAGE_WRAP: CSSProperties = {
   position: "relative",
   flex: 1,
@@ -179,7 +235,40 @@ const PANEL: CSSProperties = {
   position: "absolute",
   top: 16,
   left: 16,
-  width: 300,
+  width: 200,
   zIndex: 6,
 };
 const FULL: CSSProperties = { width: "100%" };
+const BEFORE_SPECIES_COLORS = ["#f0b84f", "#e76f51", "#d1495b", "#b56576", "#9c6644", "#c77dff"];
+const AFTER_SPECIES_COLORS = ["#33b27b", "#00a6a6", "#2a9d8f", "#4cc9f0", "#3a86ff", "#43aa8b"];
+const DETECTION_MODULE: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  paddingTop: 8,
+  borderTop: "1px solid var(--glass-border)",
+};
+const SPECIES_GRID: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr)",
+  gap: 4,
+};
+const SPECIES_CHECK: CSSProperties = {
+  marginInlineStart: 0,
+  fontSize: 12,
+  overflow: "hidden",
+  whiteSpace: "nowrap",
+  textOverflow: "ellipsis",
+};
+const SPECIES_LABEL: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minWidth: 0,
+  gap: 4,
+};
+const SPECIES_DOT: CSSProperties = {
+  width: 7,
+  height: 7,
+  flex: "0 0 auto",
+  borderRadius: "50%",
+};

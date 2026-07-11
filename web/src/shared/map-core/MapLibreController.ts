@@ -32,6 +32,8 @@ export class MapLibreController implements MapController {
   private map: maplibregl.Map | null = null;
   private ready = false;
   private markers = new Map<string, maplibregl.Marker>();
+  private rasterOverlayTileKeys = new Map<string, string>();
+  private basemapTileKey = "";
   private basemapSourceId = "basemap";
 
   private rasterStyle(
@@ -54,6 +56,10 @@ export class MapLibreController implements MapController {
   init(opts: MapInitOptions): Promise<void> {
     const interactive = opts.interactive ?? true;
     this.basemapSourceId = opts.basemap.id;
+    this.basemapTileKey = JSON.stringify({
+      tiles: opts.basemap.tiles,
+      tileSize: opts.basemap.tileSize ?? 256,
+    });
     return new Promise((resolve) => {
       const map = new maplibregl.Map({
         container: opts.container,
@@ -77,6 +83,8 @@ export class MapLibreController implements MapController {
     this.map?.remove();
     this.map = null;
     this.ready = false;
+    this.basemapTileKey = "";
+    this.rasterOverlayTileKeys.clear();
   }
 
   isReady(): boolean {
@@ -101,14 +109,14 @@ export class MapLibreController implements MapController {
         source: spec.id,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 2, 16, 6],
-          "circle-color": spec.color ?? DEFAULT_POINT_COLOR,
+          "circle-color": (spec.color ?? DEFAULT_POINT_COLOR) as never,
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 0.5,
           "circle-opacity": spec.opacity ?? 0.85,
         },
       });
     } else if (spec.kind === "line") {
-      const paint: Record<string, string | number | number[]> = {
+      const paint: Record<string, unknown> = {
         "line-color": spec.color ?? DEFAULT_LINE_COLOR,
         "line-width": spec.lineWidth ?? 2.5,
         "line-opacity": spec.opacity ?? 1,
@@ -127,7 +135,7 @@ export class MapLibreController implements MapController {
         type: "fill",
         source: spec.id,
         paint: {
-          "fill-color": spec.color ?? DEFAULT_POLYGON_COLOR,
+          "fill-color": (spec.color ?? DEFAULT_POLYGON_COLOR) as never,
           "fill-opacity": spec.opacity ?? 0.3,
           "fill-outline-color": "#1a5c38",
         },
@@ -136,6 +144,7 @@ export class MapLibreController implements MapController {
   }
 
   removeLayer(id: string): void {
+    this.rasterOverlayTileKeys.delete(id);
     const map = this.map;
     if (!map) return;
     if (map.getLayer(id)) map.removeLayer(id);
@@ -245,11 +254,24 @@ export class MapLibreController implements MapController {
   setBasemap(basemap: RasterBasemap): void {
     const src = this.map?.getSource(this.basemapSourceId) as
       maplibregl.RasterTileSource | undefined;
-    if (src && typeof src.setTiles === "function") src.setTiles(basemap.tiles);
+    const tileKey = JSON.stringify({
+      tiles: basemap.tiles,
+      tileSize: basemap.tileSize ?? 256,
+    });
+    if (src && typeof src.setTiles === "function" && this.basemapTileKey !== tileKey) {
+      src.setTiles(basemap.tiles);
+      this.basemapTileKey = tileKey;
+    }
   }
 
   setRasterOverlay(id: string, overlay: RasterOverlaySpec): void {
     const map = this.requireMap();
+    const tileKey = JSON.stringify({
+      tiles: overlay.tiles,
+      tileSize: overlay.tileSize ?? 256,
+      minZoom: overlay.minZoom ?? null,
+      maxZoom: overlay.maxZoom ?? null,
+    });
     if (!map.getSource(id)) {
       const source: maplibregl.RasterSourceSpecification = {
         type: "raster",
@@ -263,9 +285,13 @@ export class MapLibreController implements MapController {
         ...source,
         maxzoom: source.maxzoom ?? env.maxZoom,
       } as maplibregl.RasterSourceSpecification);
+      this.rasterOverlayTileKeys.set(id, tileKey);
     } else {
       const src = map.getSource(id) as maplibregl.RasterTileSource;
-      if (typeof src.setTiles === "function") src.setTiles(overlay.tiles);
+      if (typeof src.setTiles === "function" && this.rasterOverlayTileKeys.get(id) !== tileKey) {
+        src.setTiles(overlay.tiles);
+        this.rasterOverlayTileKeys.set(id, tileKey);
+      }
     }
     if (!map.getLayer(id)) {
       map.addLayer({

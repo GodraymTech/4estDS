@@ -207,3 +207,25 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* 自定义毛玻璃面板的滚动条，适配亮暗主题 */
+.custom-glass-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-glass-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-glass-scroll::-webkit-scrollbar-thumb {
+  background: var(--glass-scrollbar-thumb);
+  border-radius: 99px;
+  transition: background 0.15s ease;
+}
+.custom-glass-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--glass-scrollbar-thumb-hover);
+}
+/* 支持 Firefox */
+.custom-glass-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar-thumb) transparent;
+}

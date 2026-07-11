@@ -19,8 +19,10 @@ def enqueue_inference(request: InferenceRequest) -> str:
 
     延迟 import actors，避免在未配置 Redis 的环境(如纯本地 CLI)导入时即连接 broker。
     """
+    from .control import ensure_local_worker
     from .actors import infer_actor
 
+    ensure_local_worker()
     run_id = new_run_id()
     infer_actor.send(run_id, request.model_dump(mode="json"))
     return run_id
@@ -28,8 +30,10 @@ def enqueue_inference(request: InferenceRequest) -> str:
 
 def enqueue_batch_inference(request: BatchInferenceRequest) -> str:
     """投递一个批量推理作业。返回顶层 run_id(即 job_id)。"""
+    from .control import ensure_local_worker
     from .actors import batch_actor
 
+    ensure_local_worker()
     run_id = new_run_id()
     batch_actor.send(run_id, request.model_dump(mode="json"))
     return run_id

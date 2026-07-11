@@ -4,6 +4,7 @@ import type {
   AssetInspectRequest,
   AssetInspectResult,
   AssetCogConvertResult,
+  AssetDeletePreview,
   AssetPatch,
   AssetRow,
   AssetTiffCreate,
@@ -16,6 +17,7 @@ import type {
   InferSubmit,
   CancelJobResult,
   CancelAllJobsResult,
+  WorkerStopResult,
   ArtifactExportResult,
   ArtifactTree,
   JobHistoryItem,
@@ -76,6 +78,9 @@ export const endpoints = {
   deleteAssetTiff: (phaseId: string, tiffId: string, force = false): Promise<AssetRow[]> =>
     apiDelete(`/assets/tiffs/${encodeURIComponent(phaseId)}/${encodeURIComponent(tiffId)}?force=${force ? "true" : "false"}`),
 
+  previewAssetTiffDelete: (phaseId: string, tiffId: string): Promise<AssetDeletePreview> =>
+    apiGet(`/assets/tiffs/${encodeURIComponent(phaseId)}/${encodeURIComponent(tiffId)}/delete-preview`),
+
   getObservations: (
     tractId: string,
     geometry: GeometryKind = "point",
@@ -129,6 +134,9 @@ export const endpoints = {
 
   cancelAllJobs: (): Promise<CancelAllJobsResult> =>
     apiPostJson("/jobs/cancel-all", {}),
+
+  stopWorker: (): Promise<WorkerStopResult> =>
+    apiPostJson("/jobs/stop-worker", {}),
 
   getArtifacts: (jobId: string): Promise<ArtifactTree> =>
     apiGet(`/jobs/${encodeURIComponent(jobId)}/artifacts`),

@@ -22,12 +22,5 @@ export function parsePhaseTime(time: string | undefined): number | null {
 export function phasePositions(phases: Phase[]): number[] {
   const n = phases.length;
   if (n <= 1) return phases.map(() => 0);
-  const evenly = phases.map((_, i) => i / (n - 1));
-  const times = phases.map((p) => parsePhaseTime(p.time));
-  if (times.some((t) => t === null)) return evenly;
-  const nums = times as number[];
-  const min = Math.min(...nums);
-  const max = Math.max(...nums);
-  if (max === min) return evenly;
-  return nums.map((t) => (t - min) / (max - min));
+  return phases.map((_, i) => i / (n - 1));
 }

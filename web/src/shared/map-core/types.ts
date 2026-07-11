@@ -39,13 +39,14 @@ export interface RasterOverlaySpec extends RasterBasemap {
 }
 
 export type VectorLayerKind = "point" | "polygon" | "line";
+export type MapColor = string | unknown[];
 
 export interface GeoJsonLayerSpec {
   id: string;
   kind: VectorLayerKind;
   data: GeoJson;
   /** 颜色引用设计令牌语义值(由调用方传入), 维持单一真相。 */
-  color?: string;
+  color?: MapColor;
   opacity?: number;
   lineWidth?: number;
   dashArray?: number[];

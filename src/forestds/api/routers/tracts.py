@@ -293,10 +293,21 @@ def get_observations(
 ) -> JSONResponse:
     from ...db import reader
 
-    rid = _resolve_run(tract_id, run_id, db_url)
-    if rid is None:
+    if run_id:
+        run_ids = [run_id]
+    else:
+        run_ids = reader.latest_runs_for_tract_phase(tract_id, url=db_url)
+        if not run_ids:
+            rid = _resolve_run(tract_id, None, db_url)
+            run_ids = [rid] if rid else []
+
+    if not run_ids:
         return JSONResponse({"type": "FeatureCollection", "features": []})
-    rows = reader.fetch_observations(run_id=rid, tract_id=tract_id, url=db_url)
+
+    rows = []
+    for rid in run_ids:
+        rows.extend(reader.fetch_observations(run_id=rid, tract_id=tract_id, url=db_url))
+
     tract = reader.get_tract(tract_id, url=db_url) or {}
     return JSONResponse(
         rows_to_featurecollection(
@@ -306,6 +317,7 @@ def get_observations(
             crs_wkt=tract.get("crs_wkt"),
         )
     )
+
 
 
 @router.get("/{tract_id}/report", summary="在线报告")

@@ -200,8 +200,10 @@ function syncSide(
   if (side.basemap) controller.setRasterOverlay("phase-imagery", { ...side.basemap, opacity: 0.88 });
   else controller.removeRasterOverlay("phase-imagery");
 
-  if (!side.overlay) return;
-  controller.removeLayer(side.overlay.id);
+  if (!side.overlay) {
+    controller.removeLayer(fit ? "obs-before" : "obs-after");
+    return;
+  }
   controller.setGeoJsonLayer(side.overlay);
   const b = boundsOf(side.overlay.data);
   if (fit) {
