@@ -15,7 +15,7 @@ _PROPERTY_KEYS = (
     "crown_width_geo", "crown_height_geo",
     "crown_area_geo_real", "crown_area_geo_est",
     "crown_volume_geo_real", "crown_volume_geo_est",
-    "phase_id", "tiff_id",
+    "run_id", "phase_id", "tiff_id",
 )
 
 

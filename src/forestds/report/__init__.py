@@ -60,10 +60,6 @@ def generate_report(
         raise ValueError("未找到地块：请传 --tract-id 或 tract_phase_pk")
 
     used_run = run_id
-    if not used_run:
-        used_run = reader.active_run_for_tract(rid, url=db_url)
-        if not used_run:
-            used_run = reader.latest_run_for_tract(rid, url=db_url)
     tract = reader.get_tract(rid, url=db_url)
     observations = reader.fetch_observations(run_id=used_run, tract_id=rid, url=db_url) \
         if used_run else reader.fetch_observations(tract_id=rid, url=db_url)

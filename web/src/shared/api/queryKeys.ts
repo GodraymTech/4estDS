@@ -8,7 +8,8 @@ export const queryKeys = {
   geoSearch: (q: string, city = "广东") => ["geo-search", city, q] as const,
   observations: (tractId: string, geometry: GeometryKind) =>
     ["observations", tractId, geometry] as const,
-  jobs: (taskType = "infer") => ["jobs", taskType] as const,
+  jobs: (taskType: string | null = "infer", phaseId?: string, tiffId?: string) =>
+    ["jobs", taskType ?? "all", phaseId ?? "", tiffId ?? ""] as const,
   job: (jobId: string) => ["job", jobId] as const,
   imagery: (tractId: string, phaseId?: string, tiffRef?: string) =>
     ["imagery", tractId, phaseId ?? "", tiffRef ?? ""] as const,

@@ -21,6 +21,7 @@ import type {
   ArtifactExportResult,
   ArtifactTree,
   JobHistoryItem,
+  JobHistoryQuery,
   JobLogs,
   JobRef,
   JobStatus,
@@ -92,8 +93,13 @@ export const endpoints = {
   getJob: (jobId: string): Promise<JobStatus> =>
     apiGet(`/jobs/${encodeURIComponent(jobId)}`),
 
-  listJobs: (taskType = "infer", limit = 50): Promise<JobHistoryItem[]> =>
-    apiGet(`/jobs?task_type=${encodeURIComponent(taskType)}&limit=${limit}`),
+  listJobs: ({ taskType = "infer", phaseId, tiffId, limit = 50 }: JobHistoryQuery = {}): Promise<JobHistoryItem[]> => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (taskType) query.set("task_type", taskType);
+    if (phaseId) query.set("phase_id", phaseId);
+    if (tiffId) query.set("tiff_id", tiffId);
+    return apiGet(`/jobs?${query.toString()}`);
+  },
 
   getJobLogs: (jobId: string, cursor = 0): Promise<JobLogs> =>
     apiGet(`/jobs/${encodeURIComponent(jobId)}/logs?cursor=${cursor}`),

@@ -47,13 +47,56 @@ def test_promote_switches_active_run_without_tree_join_table(tmp_path):
     )
 
     conn = sqlite3.connect(db_file)
+    tract_phase_pk = conn.execute(
+        "SELECT tract_phase_pk FROM tract_phases WHERE tract_id=? AND phase_id=?",
+        (tract_id, "20260701"),
+    ).fetchone()[0]
     conn.execute(
-        "INSERT INTO runs (run_id, status, started_at, created_at, task_type) VALUES (?, ?, ?, ?, ?)",
-        ("aaa111", "succeeded", "2026-07-02T00:00:00", "2026-07-02T00:00:00", "infer"),
+        "INSERT INTO tiffs "
+        "(tiff_id, phase_id, tract_phase_pk, file_name, path_versions, footprint_geom, "
+        "geo_area, area_unit, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, '{}', ?, ?, ?, ?, ?)",
+        (
+            "tif01",
+            "20260701",
+            tract_phase_pk,
+            "Q12.tif",
+            "POLYGON ((110 20, 111 20, 111 21, 110 21, 110 20))",
+            10000.0,
+            "m2",
+            "2026-07-01T00:00:00",
+            "2026-07-01T00:00:00",
+        ),
     )
     conn.execute(
-        "INSERT INTO runs (run_id, status, started_at, created_at, task_type) VALUES (?, ?, ?, ?, ?)",
-        ("bbb222", "succeeded", "2026-07-02T00:10:00", "2026-07-02T00:10:00", "infer"),
+        "INSERT INTO runs "
+        "(run_id, tract_phase_pk, tiff_id, phase_id, status, started_at, created_at, task_type) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "aaa111",
+            tract_phase_pk,
+            "tif01",
+            "20260701",
+            "succeeded",
+            "2026-07-02T00:00:00",
+            "2026-07-02T00:00:00",
+            "infer",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO runs "
+        "(run_id, tract_phase_pk, tiff_id, phase_id, status, started_at, created_at, task_type) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "bbb222",
+            tract_phase_pk,
+            "tif01",
+            "20260701",
+            "succeeded",
+            "2026-07-02T00:10:00",
+            "2026-07-02T00:10:00",
+            "infer",
+        ),
     )
     conn.commit()
     conn.close()

@@ -492,8 +492,8 @@ def ensure_tract(
         )
         conn.execute(
             "INSERT INTO tract_phases "
-            "(tract_phase_pk, tract_pk, region_id, tract_id, phase_id, boundary_geom, active_run_id, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "(tract_phase_pk, tract_pk, region_id, tract_id, phase_id, boundary_geom, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tract_pk, phase_id) DO UPDATE SET region_id=excluded.region_id, "
             "tract_id=excluded.tract_id, updated_at=excluded.updated_at",
             (
@@ -502,7 +502,6 @@ def ensure_tract(
                 resolved_region_id,
                 tract_id,
                 phase_id,
-                None,
                 None,
                 now,
             ),
@@ -837,34 +836,33 @@ def parse_point(wkt: str | None) -> tuple[float, float] | None:
 
 
 def promote_run(run_id: str, *, url: str | None = None) -> None:
-    """发布一个成功 run，设置对应 tract_phase.active_run_id。"""
+    """原子发布一个成功 run，设置其 TIFF 的正式结果事实源。"""
     conn = _connect(url)
     conn.row_factory = sqlite3.Row
     try:
-        run_row = conn.execute("SELECT status, tract_phase_pk FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        run_row = conn.execute(
+            "SELECT status, phase_id, tiff_id FROM runs WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
         if not run_row:
             raise ValueError(f"推理任务 {run_id} 不存在。")
         if run_row["status"] != "succeeded":
             raise ValueError(f"推理任务 {run_id} 状态为 '{run_row['status']}'，只有成功的任务才能发布。")
 
-        tract_phase_pk = run_row["tract_phase_pk"]
-        if not tract_phase_pk:
-            row = conn.execute(
-                "SELECT tract_phase_pk FROM tree_observations WHERE run_id=? LIMIT 1",
-                (run_id,),
-            ).fetchone()
-            tract_phase_pk = row["tract_phase_pk"] if row else None
-        if not tract_phase_pk:
-            raise ValueError(f"无法确定推理任务 {run_id} 关联的地块时相。")
+        phase_id = run_row["phase_id"]
+        tiff_id = run_row["tiff_id"]
+        if not phase_id or not tiff_id:
+            raise ValueError(f"无法确定推理任务 {run_id} 关联的 TIFF。")
 
         now = _now()
-        conn.execute(
-            "UPDATE tract_phases SET active_run_id=?, updated_at=? WHERE tract_phase_pk=?",
-            (run_id, now, tract_phase_pk),
+        updated = conn.execute(
+            "UPDATE tiffs SET active_run_id=?, updated_at=? WHERE phase_id=? AND tiff_id=?",
+            (run_id, now, phase_id, tiff_id),
         )
-        conn.execute("UPDATE runs SET tract_phase_pk=? WHERE run_id=?", (tract_phase_pk, run_id))
+        if updated.rowcount != 1:
+            raise ValueError(f"推理任务 {run_id} 关联的 TIFF 不存在: {phase_id}/{tiff_id}")
         conn.commit()
-        log.info("推理任务 {} 已发布为地块时相 {} 的正式版本。", run_id, tract_phase_pk)
+        log.info("推理任务 {} 已发布为 TIFF {}/{} 的正式版本。", run_id, phase_id, tiff_id)
     finally:
         conn.close()
 
@@ -986,4 +984,3 @@ def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> Non
         "UPDATE tracts SET boundary_geom=?, boundary_geom_cent=?, boundary_source='auto', updated_at=? WHERE tract_pk=?",
         (boundary_geom, boundary_geom_cent, now, tract_pk),
     )
-

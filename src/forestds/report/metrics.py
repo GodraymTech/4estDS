@@ -143,7 +143,8 @@ def compute_report(
     area_m2 = _num(tract.get("geo_area"))
     species = species_composition(observations)
     n = len(observations)
-    
+    run_ids = sorted({str(o["run_id"]) for o in observations if o.get("run_id")})
+
     # 算林冠郁闭度所需的累加
     all_crown_areas = [
         _num(o.get("crown_area_geo")) 
@@ -238,7 +239,8 @@ def compute_report(
                     "confidence": _num(o.get("confidence"))
                 }
                 for o in observations
-            ]
+            ],
+            "run_ids": run_ids,
         },
     )
     return data

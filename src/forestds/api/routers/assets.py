@@ -75,67 +75,40 @@ def _display_user_path(path: str | Path | None) -> str | None:
     return text
 
 
-def _status(row: sqlite3.Row, count: int) -> str:
-    run_status = row["run_status"]
-    if run_status == "succeeded" or row["inference_status"] == "inferred" or count > 0:
-        return "已检测"
-    if run_status == "running":
-        return "检测中"
-    if run_status == "failed":
-        return "检测失败"
-    return "未检测"
-
-
 @router.get("", response_model=list[AssetRow], summary="影像资产台账")
 def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
-    conn = _connect(db_url)
-    try:
-        rows = conn.execute(
-            "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, "
-            "tp.tract_phase_pk, tp.phase_id, tf.tiff_id, tf.file_name, tf.path_versions, "
-            "tf.tiff_type, tf.geo_area, tf.area_unit, tf.inference_status, r.run_id, r.status AS run_status, "
-            "COALESCE(r.ended_at, r.started_at) AS detected_at, "
-            "(SELECT COUNT(*) FROM tree_observations o WHERE o.run_id=r.run_id) AS observation_count "
-            "FROM tract_phases tp "
-            "JOIN tracts tr ON tr.tract_pk=tp.tract_pk "
-            "JOIN tiffs tf ON tf.tract_phase_pk=tp.tract_phase_pk "
-            "LEFT JOIN runs r ON r.rowid=("
-            "  SELECT r2.rowid FROM runs r2 "
-            "  WHERE r2.tiff_id=tf.tiff_id AND r2.phase_id=tf.phase_id "
-            "  ORDER BY r2.started_at DESC LIMIT 1"
-            ") "
-            "ORDER BY tr.city, tr.county, tr.tract_id, tp.phase_id DESC, tf.file_name"
-        ).fetchall()
-    finally:
-        conn.close()
+    from ...db import reader
 
     out: list[AssetRow] = []
-    for row in rows:
-        count = int(row["observation_count"] or 0)
-        city = row["city"]
-        county = row["county"]
-        if (not city or not county) and row["region_id"]:
+    for row in reader.list_tiffs(url=db_url):
+        city = row.get("city")
+        county = row.get("county")
+        if (not city or not county) and row.get("region_id"):
             city, county = split_region_id(row["region_id"])
         out.append(
             AssetRow(
                 city=city,
                 county=county,
-                town=row["town"],
-                region_id=row["region_id"],
-                tract_pk=row["tract_pk"],
-                tract_id=row["tract_id"],
-                tract_phase_pk=row["tract_phase_pk"],
-                phase_id=row["phase_id"],
-                tiff_id=row["tiff_id"],
-                image_name=_image_stem(row["file_name"]),
-                source_path=_latest_path(row["path_versions"]),
-                tiff_type=row["tiff_type"],
-                run_id=row["run_id"],
-                status=_status(row, count),
-                geo_area=row["geo_area"],
-                area_unit=row["area_unit"],
-                observation_count=count,
-                detected_at=row["detected_at"],
+                town=row.get("town"),
+                region_id=row.get("region_id"),
+                tract_pk=row.get("tract_pk"),
+                tract_id=row.get("tract_id"),
+                tract_phase_pk=row.get("tract_phase_pk"),
+                phase_id=row.get("phase_id"),
+                tiff_id=row.get("tiff_id"),
+                image_name=_image_stem(row.get("file_name")),
+                source_path=row.get("source_path"),
+                tiff_type=row.get("tiff_type"),
+                active_run_id=row.get("active_run_id"),
+                run_id=row.get("run_id"),
+                run_count=int(row.get("run_count") or 0),
+                run_status_counts=row.get("run_status_counts") or {},
+                active_run_status=row.get("active_run_status"),
+                status=row.get("status") or "未检测",
+                geo_area=row.get("geo_area"),
+                area_unit=row.get("area_unit"),
+                observation_count=int(row.get("observation_count") or 0),
+                detected_at=row.get("detected_at"),
             )
         )
     return out

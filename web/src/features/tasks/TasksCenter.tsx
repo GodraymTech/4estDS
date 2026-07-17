@@ -3,7 +3,7 @@ import { Alert, Button, Empty, Modal, Table, Tag, message } from "antd";
 import type { TableProps } from "antd";
 import { ExportOutlined, PoweroffOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { endpoints, queryKeys, type JobHistoryItem, type JobState, type JobStatus } from "../../shared/api";
 import { useJob } from "../../entities/run";
 import { UploadForm } from "./UploadForm";
@@ -147,15 +147,20 @@ export function TasksCenter() {
 }
 
 function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const phaseId = searchParams.get("phase_id")?.trim() || undefined;
+  const tiffId = searchParams.get("tiff_id")?.trim() || undefined;
+  const hasAssetFilter = Boolean(phaseId || tiffId);
+  const taskType = hasAssetFilter ? "infer,review" : "infer";
   const { data = [] } = useQuery({
-    queryKey: queryKeys.jobs("infer"),
-    queryFn: () => endpoints.listJobs("infer", 80),
+    queryKey: queryKeys.jobs(taskType, phaseId, tiffId),
+    queryFn: () => endpoints.listJobs({ taskType, phaseId, tiffId, limit: 80 }),
     refetchInterval: 5000,
   });
 
   const columns: TableProps<JobHistoryItem>["columns"] = [
     {
-      title: "历史作业",
+      title: "运行 ID",
       dataIndex: "run_id",
       key: "run_id",
       ellipsis: true,
@@ -164,6 +169,13 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
           {v}
         </button>
       ),
+    },
+    {
+      title: "类型",
+      dataIndex: "task_type",
+      key: "task_type",
+      width: 76,
+      render: (value: string) => (value === "review" ? "复核" : value === "infer" ? "推理" : value),
     },
     {
       title: "状态",
@@ -180,7 +192,22 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
   ];
 
   return (
-    <div className="task-scroll-window task-scroll-window--history">
+    <>
+      <div className="tasks-panel__header tasks-panel__header--split">
+        <h2>历史作业</h2>
+        {hasAssetFilter ? (
+          <Button size="small" type="link" onClick={() => setSearchParams({})}>
+            清除 TIFF 筛选
+          </Button>
+        ) : null}
+      </div>
+      {hasAssetFilter ? (
+        <div style={{ padding: "0 12px 8px" }}>
+          <Tag color="blue">时相 {phaseId ?? "全部"}</Tag>
+          <Tag color="blue">TIFF {tiffId ?? "全部"}</Tag>
+        </div>
+      ) : null}
+      <div className="task-scroll-window task-scroll-window--history">
         <Table<JobHistoryItem>
           rowKey="run_id"
           size="small"
@@ -189,7 +216,8 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
           pagination={false}
           locale={TABLE_LOCALE}
         />
-    </div>
+      </div>
+    </>
   );
 }
 

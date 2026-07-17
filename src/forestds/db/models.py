@@ -41,7 +41,6 @@ class TractPhase(Base):
     tract_id: Mapped[str] = mapped_column(String, nullable=False)
     phase_id: Mapped[str] = mapped_column(String, nullable=False)
     boundary_geom: Mapped[str | None] = mapped_column(Text)
-    active_run_id: Mapped[str | None] = mapped_column(String)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
     tract: Mapped[Tract] = relationship(back_populates="phases")
@@ -75,6 +74,7 @@ class Tiff(Base):
     dtype: Mapped[str | None] = mapped_column(String)
     nodata: Mapped[float | None] = mapped_column(Float)
     inference_status: Mapped[str] = mapped_column(String, default="pending")
+    active_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.run_id", ondelete="SET NULL"))
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 

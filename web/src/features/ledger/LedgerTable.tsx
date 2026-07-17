@@ -355,7 +355,28 @@ export function LedgerTable() {
       width: 112,
       render: (_: unknown, row) => inferenceStatusCell(row),
     },
-    { title: "运行ID", dataIndex: "run_id", key: "run_id", width: 86, render: (v?: string | null) => (v ? <Text code>{v}</Text> : "") },
+    { title: "正式运行ID", dataIndex: "run_id", key: "run_id", width: 106, render: (v?: string | null) => (v ? <Text code>{v}</Text> : "") },
+    {
+      title: "运行次数",
+      dataIndex: "run_count",
+      key: "run_count",
+      width: 92,
+      align: "right",
+      render: (value: number | undefined, row) => {
+        const count = value ?? 0;
+        if (!count || !row.phase_id || !row.tiff_id) return count;
+        return (
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0, height: "auto" }}
+            onClick={() => openRunHistory(row)}
+          >
+            {count.toLocaleString()}
+          </Button>
+        );
+      },
+    },
     {
       title: "面积",
       dataIndex: "geo_area",
@@ -428,6 +449,12 @@ export function LedgerTable() {
       encodeURIComponent(row.tract_id),
       encodeURIComponent(row.phase_id),
     ].join("/"));
+  }
+
+  function openRunHistory(row: AssetRow) {
+    if (!row.phase_id || !row.tiff_id) return;
+    const query = new URLSearchParams({ phase_id: row.phase_id, tiff_id: row.tiff_id });
+    navigate(`/tasks?${query.toString()}`);
   }
 
   function openCreate() {

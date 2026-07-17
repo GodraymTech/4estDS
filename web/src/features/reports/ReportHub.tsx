@@ -14,7 +14,7 @@ export function ReportHub() {
   const requestedRun = searchParams.get("run_id") ?? undefined;
   const { data = [] } = useQuery({
     queryKey: queryKeys.jobs("infer"),
-    queryFn: () => endpoints.listJobs("infer", 120),
+    queryFn: () => endpoints.listJobs({ taskType: "infer", limit: 120 }),
     refetchInterval: 8000,
   });
   const [q, setQ] = useState("");

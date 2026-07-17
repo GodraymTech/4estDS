@@ -71,13 +71,21 @@ def _job_status(value: str | None) -> JobStatus:
 
 @router.get("", response_model=list[JobHistoryItem], summary="列出作业历史")
 def list_jobs(
-    task_type: str | None = Query("infer"),
+    task_type: str | None = Query(None),
+    phase_id: str | None = Query(None),
+    tiff_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     db_url: str | None = Depends(get_db_url),
 ) -> list[JobHistoryItem]:
     from ...db import reader
 
-    rows = reader.list_runs(url=db_url, task_type=task_type, limit=limit)
+    rows = reader.list_runs(
+        url=db_url,
+        task_type=task_type,
+        phase_id=phase_id,
+        tiff_id=tiff_id,
+        limit=limit,
+    )
     return [
         JobHistoryItem(
             run_id=row["run_id"],
@@ -89,6 +97,8 @@ def list_jobs(
             duration_s=row.get("duration_s"),
             input_path=row.get("input_path"),
             tract_id=row.get("tract_id"),
+            phase_id=row.get("phase_id"),
+            tiff_id=row.get("tiff_id"),
             geo_area=row.get("geo_area"),
             area_unit=row.get("area_unit"),
             observation_count=int(row.get("observation_count") or 0),

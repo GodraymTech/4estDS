@@ -82,10 +82,6 @@ def export_tract_to_file(
         target_tract_id = tracts[0]["tract_id"]
 
     target_run_id = run_id
-    if not target_run_id:
-        target_run_id = reader.active_run_for_tract(target_tract_id, url=db_url)
-        if not target_run_id:
-            target_run_id = reader.latest_run_for_tract(target_tract_id, url=db_url)
 
     # 3. 确定空间参考 EPSG/WKT
     resolved_crs_epsg = crs_epsg

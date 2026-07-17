@@ -95,6 +95,8 @@ class JobHistoryItem(BaseModel):
     duration_s: Optional[float] = None
     input_path: Optional[str] = None
     tract_id: Optional[str] = None
+    phase_id: Optional[str] = None
+    tiff_id: Optional[str] = None
     geo_area: Optional[float] = None
     area_unit: Optional[str] = None
     observation_count: int = 0
@@ -187,6 +189,12 @@ class TiffOut(BaseModel):
     dtype: Optional[str] = None
     nodata: Optional[float] = None
     observation_count: int = 0
+    active_run_id: Optional[str] = None
+    run_id: Optional[str] = None
+    run_count: int = 0
+    run_status_counts: dict[str, int] = Field(default_factory=dict)
+    active_run_status: Optional[str] = None
+    detected_at: Optional[str] = None
     status: str = "未检测"
     has_detection: bool = False
 
@@ -340,6 +348,10 @@ class AssetRow(BaseModel):
     source_path: Optional[str] = None
     tiff_type: Optional[Literal["normal", "tiled", "ext_ovr", "COG", "invalid"]] = None
     run_id: Optional[str] = None
+    active_run_id: Optional[str] = None
+    run_count: int = 0
+    run_status_counts: dict[str, int] = Field(default_factory=dict)
+    active_run_status: Optional[str] = None
     status: str = "未检测"
     geo_area: Optional[float] = None
     area_unit: Optional[str] = None

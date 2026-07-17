@@ -26,14 +26,12 @@ router = APIRouter(prefix="/tracts", tags=["tracts"])
 
 
 def _resolve_run(tract_id: str, run_id: str | None, db_url: str | None) -> str | None:
-    """解析要展示的 run: 显式 run_id > active_run(已发布) > latest_run(成功)。"""
+    """解析要展示的单个 run: 显式 run_id > TIFF active_run(已发布)。"""
     from ...db import reader
 
     if run_id:
         return run_id
-    return reader.active_run_for_tract(tract_id, url=db_url) or reader.latest_run_for_tract(
-        tract_id, url=db_url
-    )
+    return reader.active_run_for_tract(tract_id, url=db_url)
 
 
 @router.get("", response_model=list[TractOut], summary="地块台账列表")
@@ -55,8 +53,8 @@ def _tract_summary(
 
     tract = reader.get_tract(tract_id, url=db_url) or {"tract_id": tract_id}
     phase_key = tract.get("tract_phase_pk") or tract_id
-    rid = run_id or _resolve_run(phase_key, None, db_url)
-    if rid is None:
+    active_run_ids = [run_id] if run_id else reader.active_runs_for_tract_phase(phase_key, url=db_url)
+    if not active_run_ids:
         return {
             "tract_id": tract.get("tract_id") or tract_id,
             "tract_phase_pk": tract.get("tract_phase_pk"),
@@ -77,8 +75,13 @@ def _tract_summary(
                 "total_crown_area": 0.0,
             },
         }
-    rows = reader.fetch_observations(run_id=rid, tract_id=phase_key, url=db_url)
-    data = compute_report(rows, tract=tract, run_id=rid).as_dict()
+    rows = reader.fetch_observations(
+        run_id=run_id,
+        tract_id=phase_key,
+        url=db_url,
+    )
+    summary_run_id = active_run_ids[0] if len(active_run_ids) == 1 else None
+    data = compute_report(rows, tract=tract, run_id=summary_run_id).as_dict()
     data["tract_phase_pk"] = tract.get("tract_phase_pk")
     data["phase_id"] = tract.get("phase_id")
     meta = data.get("meta")
@@ -287,7 +290,7 @@ def get_imagery(
 @router.get("/{tract_id}/observations", summary="观测图层 GeoJSON")
 def get_observations(
     tract_id: str,
-    run_id: str | None = Query(None, description="指定 run，缺省用已发布/最新成功 run"),
+    run_id: str | None = Query(None, description="指定历史 run；缺省使用各 TIFF 已发布 run"),
     geometry: str = Query("point", pattern="^(point|crown)$", description="point 或 crown"),
     db_url: str | None = Depends(get_db_url),
 ) -> JSONResponse:
@@ -296,7 +299,7 @@ def get_observations(
     if run_id:
         run_ids = [run_id]
     else:
-        run_ids = reader.latest_runs_for_tract_phase(tract_id, url=db_url)
+        run_ids = reader.active_runs_for_tract_phase(tract_id, url=db_url)
         if not run_ids:
             rid = _resolve_run(tract_id, None, db_url)
             run_ids = [rid] if rid else []
@@ -328,17 +331,18 @@ def get_report(
     db_url: str | None = Depends(get_db_url),
 ):
     from ... import paths
+    from ...db import reader
     from ...report import generate_report
 
-    rid = _resolve_run(tract_id, run_id, db_url)
-    if rid is None:
+    active_run_ids = reader.active_runs_for_tract_phase(tract_id, url=db_url) if run_id is None else [run_id]
+    if not active_run_ids:
         raise HTTPException(status_code=404, detail="该地块尚无可用运行，无法生成报告")
     out_dir = paths.home_dir() / "outputs" / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
         result = generate_report(
             tract_id=tract_id,
-            run_id=rid,
+            run_id=run_id,
             fmt=fmt,
             out_dir=str(out_dir),
             db_url=db_url,
@@ -372,16 +376,17 @@ def export_tract(
     from ...db import reader
     from ...export.formats import export_tract_to_file
 
-    rid = _resolve_run(tract_id, run_id, db_url)
-    if rid is None:
+    active_run_ids = reader.active_runs_for_tract_phase(tract_id, url=db_url) if run_id is None else [run_id]
+    if not active_run_ids:
         raise HTTPException(status_code=404, detail="该地块尚无可用运行，无法导出")
     tract = reader.get_tract(tract_id, url=db_url) or {}
     out_dir = paths.home_dir() / "outputs" / "exports"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{tract_id}_{rid}.{fmt if fmt != 'shp' else 'zip'}"
+    run_label = run_id or "active"
+    out_path = out_dir / f"{tract_id}_{run_label}.{fmt if fmt != 'shp' else 'zip'}"
     try:
         result = export_tract_to_file(
-            tract_id=tract_id, run_id=rid, fmt=fmt, out_path=str(out_path),
+            tract_id=tract_id, run_id=run_id, fmt=fmt, out_path=str(out_path),
             db_url=db_url, crs_epsg=tract.get("crs_epsg"), crs_wkt=tract.get("crs_wkt"),
         )
     except Exception as exc:  # noqa: BLE001

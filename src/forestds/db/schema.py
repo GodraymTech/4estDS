@@ -46,7 +46,6 @@ DDL: tuple[str, ...] = (
         phase_id        TEXT NOT NULL
             CHECK (phase_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
         boundary_geom   TEXT,
-        active_run_id   TEXT,
         updated_at      TEXT NOT NULL,
         UNIQUE (tract_pk, phase_id)
     )
@@ -80,6 +79,7 @@ DDL: tuple[str, ...] = (
         nodata                     REAL,
         inference_status           TEXT NOT NULL DEFAULT 'pending'
             CHECK (inference_status IN ('pending', 'inferred')),
+        active_run_id               TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
         created_at                 TEXT NOT NULL,
         updated_at                 TEXT NOT NULL,
         PRIMARY KEY (tiff_id, phase_id)
@@ -94,7 +94,7 @@ DDL: tuple[str, ...] = (
         tiff_id         TEXT,
         phase_id        TEXT,
         task_type       TEXT NOT NULL
-            CHECK (task_type IN ('infer', 'train', 'report', 'batch', 'export', 'postprocess', 'import', 'track')),
+            CHECK (task_type IN ('infer', 'review', 'train', 'report', 'batch', 'export', 'postprocess', 'import', 'track')),
         model_arch      TEXT,
         status          TEXT NOT NULL DEFAULT 'running'
             CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'canceled')),
@@ -133,7 +133,7 @@ DDL: tuple[str, ...] = (
         run_id                 TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
         tract_phase_pk         TEXT NOT NULL REFERENCES tract_phases(tract_phase_pk) ON DELETE CASCADE,
         tiff_id                TEXT,
-        phase_id               TEXT NOT NULL,
+        phase_id               TEXT,
         species                TEXT,
         confidence             REAL,
         center_geom            TEXT,
@@ -189,13 +189,15 @@ def _assert_new_schema(conn: sqlite3.Connection) -> None:
     required = {
         "tracts": {"tract_pk", "region_id", "tract_id", "boundary_geom_cent", "effective_geom"},
         "tract_phases": {"tract_phase_pk", "tract_pk", "phase_id"},
-        "tiffs": {"tiff_id", "phase_id", "tract_phase_pk", "center_geom", "tiff_type"},
+        "tiffs": {"tiff_id", "phase_id", "tract_phase_pk", "center_geom", "tiff_type", "active_run_id"},
         "runs": {"run_id", "tract_phase_pk", "task_type"},
         "tree_observations": {"observation_id", "run_id", "tract_phase_pk"},
     }
     for table, columns in required.items():
         if _table_exists(conn, table) and not columns.issubset(_table_columns(conn, table)):
             raise RuntimeError(f"数据库表 {table} 不符合新 schema；请使用干净数据库重新初始化。")
+    if _table_exists(conn, "tract_phases") and "active_run_id" in _table_columns(conn, "tract_phases"):
+        raise RuntimeError("数据库表 tract_phases 仍含 active_run_id；请使用干净数据库重新初始化。")
 
 
 def resolve_db_path(url: str | None = None) -> Path:

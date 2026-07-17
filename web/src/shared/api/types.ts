@@ -49,7 +49,11 @@ export interface TiffAsset {
   observation_count: number;
   status: string;
   has_detection: boolean;
+  active_run_id?: string | null;
   run_id?: string | null;
+  run_count: number;
+  run_status_counts: Partial<Record<JobState, number>>;
+  active_run_status?: JobState | null;
   detected_at?: string | null;
   [k: string]: unknown;
 }
@@ -84,11 +88,20 @@ export interface JobHistoryItem {
   duration_s?: number | null;
   input_path?: string | null;
   tract_id?: string | null;
+  phase_id?: string | null;
+  tiff_id?: string | null;
   geo_area?: number | null;
   area_unit?: string | null;
   observation_count: number;
   error?: string | null;
   metrics?: Record<string, unknown>;
+}
+
+export interface JobHistoryQuery {
+  taskType?: string | null;
+  phaseId?: string;
+  tiffId?: string;
+  limit?: number;
 }
 
 export interface CancelJobResult {
@@ -197,7 +210,11 @@ export interface AssetRow {
   image_name?: string | null;
   source_path?: string | null;
   tiff_type?: "normal" | "tiled" | "ext_ovr" | "COG" | "invalid" | null;
+  active_run_id?: string | null;
   run_id?: string | null;
+  run_count: number;
+  run_status_counts: Partial<Record<JobState, number>>;
+  active_run_status?: JobState | null;
   status: string;
   geo_area?: number | null;
   area_unit?: string | null;

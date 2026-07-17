@@ -121,7 +121,7 @@ def _base_tract_query(where: str = "") -> str:
         "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_geom_cent, "
         "tr.effective_geom, tr.boundary_source, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
-        "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tp.active_run_id, "
+        "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tf.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
         "tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
         "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, "
@@ -130,12 +130,13 @@ def _base_tract_query(where: str = "") -> str:
         "LEFT JOIN tract_phases tp ON tp.tract_phase_pk = ("
         "  SELECT tp2.tract_phase_pk FROM tract_phases tp2 "
         "  WHERE tp2.tract_pk = tr.tract_pk "
-        "  ORDER BY (tp2.active_run_id IS NOT NULL) DESC, tp2.phase_id DESC LIMIT 1"
+        "  ORDER BY EXISTS(SELECT 1 FROM tiffs tf3 WHERE tf3.tract_phase_pk=tp2.tract_phase_pk AND tf3.active_run_id IS NOT NULL) DESC, "
+        "  tp2.phase_id DESC LIMIT 1"
         ") "
         "LEFT JOIN tiffs tf ON tf.rowid = ("
         "  SELECT tf2.rowid FROM tiffs tf2 "
         "  WHERE tf2.tract_phase_pk = tp.tract_phase_pk "
-        "  ORDER BY tf2.created_at DESC LIMIT 1"
+        "  ORDER BY (tf2.active_run_id IS NOT NULL) DESC, tf2.created_at DESC LIMIT 1"
         ") "
         f"{where}"
     )
@@ -146,7 +147,7 @@ def _phase_tract_query(where: str = "") -> str:
         "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_geom_cent, "
         "tr.effective_geom, tr.boundary_source, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
-        "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tp.active_run_id, "
+        "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tf.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
         "tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
         "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, "
@@ -156,7 +157,7 @@ def _phase_tract_query(where: str = "") -> str:
         "LEFT JOIN tiffs tf ON tf.rowid = ("
         "  SELECT tf2.rowid FROM tiffs tf2 "
         "  WHERE tf2.tract_phase_pk = tp.tract_phase_pk "
-        "  ORDER BY tf2.created_at DESC LIMIT 1"
+        "  ORDER BY (tf2.active_run_id IS NOT NULL) DESC, tf2.created_at DESC LIMIT 1"
         ") "
         f"{where}"
     )
@@ -192,16 +193,13 @@ def _mean_observation_center(
     tract_key = tract.get("tract_phase_pk") or tract.get("tract_id")
     if not tract_key:
         return None
-    run_id = tract.get("active_run_id") or _latest_run_for_tract_conn(conn, tract_key)
     sql = (
         "SELECT o.center_geom FROM tree_observations o "
         "JOIN tract_phases tp ON tp.tract_phase_pk=o.tract_phase_pk "
+        "JOIN tiffs tf ON tf.active_run_id=o.run_id "
         "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) AND o.center_geom IS NOT NULL"
     )
     params: list[str] = [tract_key, tract_key]
-    if run_id:
-        sql += " AND o.run_id=?"
-        params.append(run_id)
     points = []
     for row in conn.execute(sql, params).fetchall():
         pt = _parse_wkt_point(row["center_geom"])
@@ -217,17 +215,13 @@ def _mean_observation_center(
 def _enrich_tracts(conn: sqlite3.Connection, tracts: list[dict]) -> list[dict]:
     for tract in tracts:
         tract_key = tract.get("tract_phase_pk") or tract.get("tract_id")
-        run_id = None
         if tract_key:
-            run_id = tract.get("active_run_id") or _latest_run_for_tract_conn(conn, tract_key)
-            if run_id and not tract.get("active_run_id"):
-                tract["active_run_id"] = run_id
             row_count = conn.execute(
                 "SELECT COUNT(*) AS c FROM tree_observations o "
                 "JOIN tract_phases tp ON tp.tract_phase_pk=o.tract_phase_pk "
-        "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?)"
-        + (" AND o.run_id=?" if run_id else ""),
-                (tract_key, tract_key, run_id) if run_id else (tract_key, tract_key),
+                "JOIN tiffs tf ON tf.active_run_id=o.run_id "
+                "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?)",
+                (tract_key, tract_key),
             ).fetchone()
             tract["observation_count"] = int(row_count["c"]) if row_count else 0
         if tract.get("center_lng") is not None and tract.get("center_lat") is not None:
@@ -293,6 +287,11 @@ def fetch_observations(
     if tract_id:
         clauses.append("(tp.tract_id=? OR tp.tract_phase_pk=?)")
         params.extend([tract_id, tract_id])
+        if not run_id:
+            clauses.append(
+                "o.run_id IN (SELECT tf.active_run_id FROM tiffs tf "
+                "WHERE tf.tract_phase_pk=tp.tract_phase_pk AND tf.active_run_id IS NOT NULL)"
+            )
     where = " AND ".join(clauses)
     conn = _connect(url)
     try:
@@ -322,6 +321,8 @@ def list_runs(
     *,
     url: str | None = None,
     task_type: str | None = None,
+    phase_id: str | None = None,
+    tiff_id: str | None = None,
     limit: int = 50,
 ) -> list[dict]:
     conn = _connect(url)
@@ -333,17 +334,26 @@ def list_runs(
             "tp.tract_id, tf.geo_area, tf.area_unit "
             "FROM runs r "
             "LEFT JOIN tract_phases tp ON tp.tract_phase_pk = r.tract_phase_pk "
-            "LEFT JOIN tiffs tf ON tf.rowid = ("
-            "  SELECT tf2.rowid FROM tiffs tf2 WHERE tf2.tract_phase_pk=r.tract_phase_pk ORDER BY tf2.created_at DESC LIMIT 1"
-            ") "
+            "LEFT JOIN tiffs tf ON tf.tiff_id=r.tiff_id AND tf.phase_id=r.phase_id "
         )
-        if task_type:
-            rows = conn.execute(
-                select_sql + "WHERE r.task_type=? ORDER BY r.started_at DESC LIMIT ?",
-                (task_type, bounded_limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(select_sql + "ORDER BY r.started_at DESC LIMIT ?", (bounded_limit,)).fetchall()
+        clauses: list[str] = []
+        params: list[object] = []
+        task_types = tuple(part.strip() for part in (task_type or "").split(",") if part.strip())
+        if task_types:
+            placeholders = ", ".join("?" for _ in task_types)
+            clauses.append(f"r.task_type IN ({placeholders})")
+            params.extend(task_types)
+        if phase_id:
+            clauses.append("r.phase_id=?")
+            params.append(phase_id)
+        if tiff_id:
+            clauses.append("r.tiff_id=?")
+            params.append(tiff_id)
+        where = "WHERE " + " AND ".join(clauses) + " " if clauses else ""
+        rows = conn.execute(
+            select_sql + where + "ORDER BY r.started_at DESC LIMIT ?",
+            (*params, bounded_limit),
+        ).fetchall()
     finally:
         conn.close()
     return _rows_to_dicts(rows)
@@ -386,23 +396,31 @@ def list_tiffs(*, url: str | None = None) -> list[dict]:
     conn = _connect(url)
     try:
         rows = conn.execute(
+            "WITH run_aggregate AS ("
+            " SELECT tiff_id, phase_id, COUNT(*) AS run_count, "
+            " SUM(status='queued') AS queued_count, SUM(status='running') AS running_count, "
+            " SUM(status='succeeded') AS succeeded_count, SUM(status='failed') AS failed_count, "
+            " SUM(status='canceled') AS canceled_count "
+            " FROM runs WHERE task_type IN ('infer', 'review') GROUP BY phase_id, tiff_id"
+            ") "
             "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, "
             "tr.boundary_geom, tr.boundary_geom_cent, tr.effective_geom, "
-            "tp.tract_phase_pk, tp.phase_id, tp.active_run_id, "
+            "tp.tract_phase_pk, tp.phase_id, tf.active_run_id, "
             "tf.tiff_id, tf.file_name, tf.path_versions, tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, "
             "tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
             "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, tf.dtype, tf.nodata, "
             "tf.inference_status, tf.created_at, tf.updated_at, "
-            "r.run_id, r.status AS run_status, COALESCE(r.ended_at, r.started_at) AS detected_at, "
-            "(SELECT COUNT(*) FROM tree_observations o WHERE o.run_id=r.run_id) AS observation_count "
+            "tf.active_run_id AS run_id, ar.status AS active_run_status, "
+            "COALESCE(ar.ended_at, ar.started_at) AS detected_at, "
+            "COALESCE(ra.run_count, 0) AS run_count, COALESCE(ra.queued_count, 0) AS queued_count, "
+            "COALESCE(ra.running_count, 0) AS running_count, COALESCE(ra.succeeded_count, 0) AS succeeded_count, "
+            "COALESCE(ra.failed_count, 0) AS failed_count, COALESCE(ra.canceled_count, 0) AS canceled_count, "
+            "(SELECT COUNT(*) FROM tree_observations o WHERE o.run_id=tf.active_run_id) AS observation_count "
             "FROM tiffs tf "
             "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
             "JOIN tracts tr ON tr.tract_pk=tp.tract_pk "
-            "LEFT JOIN runs r ON r.rowid=("
-            "  SELECT r2.rowid FROM runs r2 "
-            "  WHERE r2.tiff_id=tf.tiff_id AND r2.phase_id=tf.phase_id "
-            "  ORDER BY r2.started_at DESC LIMIT 1"
-            ") "
+            "LEFT JOIN runs ar ON ar.run_id=tf.active_run_id "
+            "LEFT JOIN run_aggregate ra ON ra.tiff_id=tf.tiff_id AND ra.phase_id=tf.phase_id "
             "ORDER BY tr.tract_id, tp.phase_id DESC, tf.file_name"
         ).fetchall()
     finally:
@@ -424,12 +442,15 @@ def list_tiffs(*, url: str | None = None) -> list[dict]:
         if center is None:
             center = _parse_wkt_point(item.get("boundary_geom_cent"))
         count = int(item.get("observation_count") or 0)
-        run_status = item.get("run_status")
-        inference_status = item.get("inference_status")
-        status = "已检测" if run_status == "succeeded" or inference_status == "inferred" or count > 0 else "未检测"
-        if run_status == "running":
+        status_counts = {
+            status_name: int(item.pop(f"{status_name}_count") or 0)
+            for status_name in ("queued", "running", "succeeded", "failed", "canceled")
+        }
+        item["run_status_counts"] = {key: value for key, value in status_counts.items() if value}
+        status = "已检测" if item.get("active_run_id") else "未检测"
+        if not item.get("active_run_id") and (status_counts["queued"] or status_counts["running"]):
             status = "检测中"
-        elif run_status == "failed":
+        elif not item.get("active_run_id") and status_counts["failed"]:
             status = "检测失败"
         item.update(
             {
@@ -478,9 +499,10 @@ def active_run_for_tract(tract_id: str, *, url: str | None = None) -> str | None
     conn = _connect(url)
     try:
         row = conn.execute(
-            "SELECT active_run_id FROM tract_phases "
-            "WHERE (tract_id=? OR tract_phase_pk=?) AND active_run_id IS NOT NULL "
-            "ORDER BY phase_id DESC LIMIT 1",
+            "SELECT tf.active_run_id FROM tiffs tf "
+            "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
+            "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) AND tf.active_run_id IS NOT NULL "
+            "ORDER BY tp.phase_id DESC, tf.updated_at DESC LIMIT 1",
             (tract_id, tract_id),
         ).fetchone()
     finally:
@@ -544,23 +566,17 @@ def tiff_path(
     return _latest_path(row["path_versions"]) if row else None
 
 
-def latest_runs_for_tract_phase(tract_id: str, *, url: str | None = None) -> list[str]:
-    """返回地块时相下每个 TIFF 资产的最新成功 run_id 列表。"""
+def active_runs_for_tract_phase(tract_id: str, *, url: str | None = None) -> list[str]:
+    """返回地块时相下每个 TIFF 资产已发布的 run_id 列表。"""
     conn = _connect(url)
     try:
         rows = conn.execute(
-            "SELECT r.run_id FROM runs r "
-            "JOIN ("
-            "  SELECT r2.tiff_id, MAX(r2.started_at) as max_started "
-            "  FROM runs r2 "
-            "  JOIN tract_phases tp ON tp.tract_phase_pk = r2.tract_phase_pk "
-            "  WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) AND r2.status='succeeded' "
-            "  GROUP BY r2.tiff_id"
-            ") latest ON r.tiff_id = latest.tiff_id AND r.started_at = latest.max_started "
-            "WHERE r.status='succeeded'",
+            "SELECT tf.active_run_id AS run_id FROM tiffs tf "
+            "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
+            "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) AND tf.active_run_id IS NOT NULL "
+            "ORDER BY tf.created_at",
             (tract_id, tract_id),
         ).fetchall()
         return [row["run_id"] for row in rows]
     finally:
         conn.close()
-

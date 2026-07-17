@@ -1,121 +1,169 @@
--- 4estDS PostGIS 模式 (v1.0 部署目标)
--- ------------------------------------------------------------------
--- 与 src/forestds/db/schema.py 的 SQLite 六表结构一一对应，差异仅在:
---   1) 几何列使用 PostGIS 原生 geometry 类型 (替代 WKT/GeoJSON TEXT)
---   2) 几何列建立 GiST 空间索引 (空间查询/瓦片裁剪性能)
--- SRID 采用 0 (未定 CRS)，每行几何由 ST_GeomFromText(wkt, srid) 按地块 crs_epsg 写入；
--- 如全库统一投影坐标系，可将 0 改为对应 EPSG 并加约束。
--- 该脚本幂等 (IF NOT EXISTS)，可安全重复执行。
+-- 4estDS PostGIS schema for the tract -> phase -> TIFF -> run model.
+-- New databases only: this file intentionally carries no legacy migration path.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 
--- 运行日志 (作业状态单一真相)
-CREATE TABLE IF NOT EXISTS run_logs (
-    run_id        TEXT PRIMARY KEY,
-    parent_run_id TEXT,
-    tag           TEXT,
-    task_type     TEXT NOT NULL,
-    model_arch    TEXT,
-    status        TEXT NOT NULL DEFAULT 'running',
-    started_at    TEXT NOT NULL,
-    ended_at      TEXT,
-    duration_s    DOUBLE PRECISION,
-    input_path    TEXT,
-    tiles_dir     TEXT,
-    params_json   TEXT,
-    metrics_json  TEXT,
-    error         TEXT,
-    host          TEXT
-);
-
--- 跨时相独立个体
-CREATE TABLE IF NOT EXISTS tree_individuals (
-    individual_id    TEXT PRIMARY KEY,
-    location_cluster TEXT,
-    first_seen       TEXT,
-    last_seen        TEXT,
-    status           TEXT DEFAULT 'alive'
-);
-
--- 地块
 CREATE TABLE IF NOT EXISTS tracts (
-    tract_id         TEXT PRIMARY KEY,
-    name             TEXT,
-    acquisition_time TEXT,
-    location         TEXT,
-    pixel_w          INTEGER,
-    pixel_h          INTEGER,
-    gsd              DOUBLE PRECISION,
-    geo_area         DOUBLE PRECISION,
-    area_unit        TEXT,
-    crs_epsg         INTEGER,
-    crs_wkt          TEXT,
-    footprint_geom   geometry(Polygon, 0),
-    active_run_id    TEXT REFERENCES run_logs(run_id) ON DELETE SET NULL,
-    UNIQUE (acquisition_time, location)
+    tract_pk            TEXT PRIMARY KEY,
+    region_id           TEXT NOT NULL,
+    city                TEXT,
+    county              TEXT,
+    town                TEXT,
+    tract_id            TEXT NOT NULL,
+    boundary_geom       geometry(Geometry, 0),
+    boundary_geom_cent  geometry(Point, 0),
+    effective_geom      geometry(Geometry, 0),
+    boundary_source     TEXT NOT NULL DEFAULT 'auto'
+        CHECK (boundary_source IN ('auto', 'manual')),
+    coverage_status     TEXT NOT NULL DEFAULT 'none'
+        CHECK (coverage_status IN ('none', 'partial', 'full')),
+    notes               TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    UNIQUE (region_id, tract_id)
 );
 
--- 地块数据源
-CREATE TABLE IF NOT EXISTS tract_sources (
-    source_id   TEXT PRIMARY KEY,
-    tract_id    TEXT NOT NULL REFERENCES tracts(tract_id) ON DELETE CASCADE,
-    kind        TEXT,
-    path        TEXT,
-    meta_json   TEXT
+CREATE TABLE IF NOT EXISTS tract_phases (
+    tract_phase_pk  TEXT PRIMARY KEY,
+    tract_pk        TEXT NOT NULL REFERENCES tracts(tract_pk) ON DELETE CASCADE,
+    region_id       TEXT NOT NULL,
+    tract_id        TEXT NOT NULL,
+    phase_id        TEXT NOT NULL CHECK (phase_id ~ '^[0-9]{8}$'),
+    boundary_geom   geometry(Geometry, 0),
+    updated_at      TEXT NOT NULL,
+    UNIQUE (tract_pk, phase_id)
 );
 
--- 单木观测 (每 run 一批)
+-- runs is created before tiffs so tiffs.active_run_id can be declared inline.
+-- The reverse composite runs -> tiffs foreign key is added after tiffs exists.
+CREATE TABLE IF NOT EXISTS runs (
+    run_id          TEXT PRIMARY KEY CHECK (length(run_id) = 6),
+    parent_run_id   TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
+    tag             TEXT,
+    tract_phase_pk  TEXT REFERENCES tract_phases(tract_phase_pk) ON DELETE SET NULL,
+    tiff_id         TEXT,
+    phase_id        TEXT,
+    task_type       TEXT NOT NULL
+        CHECK (task_type IN ('infer', 'review', 'train', 'report', 'batch', 'export', 'postprocess', 'import', 'track')),
+    model_arch      TEXT,
+    status          TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'canceled')),
+    slice_size      INTEGER,
+    input_path      TEXT,
+    tiles_dir       TEXT,
+    input_json      TEXT,
+    params_json     TEXT,
+    metrics_json    TEXT,
+    error           TEXT,
+    host            TEXT,
+    started_at      TEXT NOT NULL,
+    ended_at        TEXT,
+    duration_s      DOUBLE PRECISION,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tiffs (
+    tiff_id                    TEXT NOT NULL CHECK (length(tiff_id) = 5),
+    phase_id                   TEXT NOT NULL CHECK (phase_id ~ '^[0-9]{8}$'),
+    tract_phase_pk             TEXT NOT NULL REFERENCES tract_phases(tract_phase_pk) ON DELETE CASCADE,
+    file_name                  TEXT,
+    path_versions              TEXT NOT NULL DEFAULT '{}',
+    multisource_path_versions  TEXT NOT NULL DEFAULT '{}',
+    tiff_type                  TEXT NOT NULL DEFAULT 'invalid'
+        CHECK (tiff_type IN ('normal', 'tiled', 'ext_ovr', 'COG', 'invalid')),
+    footprint_geom             geometry(Geometry, 0) NOT NULL,
+    footprint_bbox             TEXT,
+    center_geom                geometry(Point, 0),
+    center_lng                 DOUBLE PRECISION,
+    center_lat                 DOUBLE PRECISION,
+    crs_epsg                   INTEGER,
+    crs_wkt                    TEXT,
+    geotransform               TEXT,
+    pixel_width                INTEGER,
+    pixel_height               INTEGER,
+    gsd                        DOUBLE PRECISION,
+    geo_area                   DOUBLE PRECISION,
+    area_unit                  TEXT,
+    band_count                 INTEGER,
+    dtype                      TEXT,
+    nodata                     DOUBLE PRECISION,
+    inference_status           TEXT NOT NULL DEFAULT 'pending'
+        CHECK (inference_status IN ('pending', 'inferred')),
+    active_run_id              TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
+    created_at                 TEXT NOT NULL,
+    updated_at                 TEXT NOT NULL,
+    PRIMARY KEY (tiff_id, phase_id)
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_runs_tiff' AND conrelid = 'runs'::regclass
+    ) THEN
+        ALTER TABLE runs
+            ADD CONSTRAINT fk_runs_tiff
+            FOREIGN KEY (tiff_id, phase_id)
+            REFERENCES tiffs(tiff_id, phase_id)
+            ON DELETE SET NULL;
+    END IF;
+END;
+$$;
+
+CREATE TABLE IF NOT EXISTS tree_individuals (
+    individual_id        TEXT PRIMARY KEY CHECK (length(individual_id) = 8),
+    first_seen_phase_id  TEXT,
+    last_seen_phase_id   TEXT,
+    global_status        TEXT NOT NULL DEFAULT 'alive'
+        CHECK (global_status IN ('alive', 'missing', 'removed', 'unknown')),
+    tracking_confidence  DOUBLE PRECISION,
+    growth_json          TEXT,
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tree_observations (
-    obs_id                TEXT PRIMARY KEY,
-    tract_id              TEXT NOT NULL REFERENCES tracts(tract_id) ON DELETE CASCADE,
-    run_id                TEXT NOT NULL REFERENCES run_logs(run_id) ON DELETE CASCADE,
-    species               TEXT,
-    confidence            DOUBLE PRECISION,
-    box_px_sub            TEXT,
-    box_px_full           TEXT,
-    box_geo               TEXT,
-    crown_w_px            DOUBLE PRECISION,
-    crown_h_px            DOUBLE PRECISION,
-    crown_w_geo           DOUBLE PRECISION,
-    crown_h_geo           DOUBLE PRECISION,
-    height                DOUBLE PRECISION,
-    height_source         TEXT,
-    center_geo            TEXT,
-    source_subimage_path  TEXT,
-    slice_size            INTEGER,
-    geom_point            geometry(Point, 0),
-    geom_crown            geometry(Polygon, 0),
-    crown_area_px_est     DOUBLE PRECISION,
-    crown_area_px_real    DOUBLE PRECISION,
-    crown_area_geo_est    DOUBLE PRECISION,
-    crown_area_geo_real   DOUBLE PRECISION,
-    crown_volume_geo_est  DOUBLE PRECISION,
-    crown_volume_geo_real DOUBLE PRECISION
+    observation_id         TEXT PRIMARY KEY,
+    individual_id          TEXT REFERENCES tree_individuals(individual_id) ON DELETE SET NULL,
+    run_id                 TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    tract_phase_pk         TEXT NOT NULL REFERENCES tract_phases(tract_phase_pk) ON DELETE CASCADE,
+    tiff_id                TEXT,
+    phase_id               TEXT,
+    species                TEXT,
+    confidence             DOUBLE PRECISION,
+    center_geom            geometry(Point, 0),
+    crown_geom             geometry(Geometry, 0),
+    box_px                 TEXT,
+    box_px_sub             TEXT,
+    box_geo                TEXT,
+    crown_width_px         DOUBLE PRECISION,
+    crown_height_px        DOUBLE PRECISION,
+    crown_width_geo        DOUBLE PRECISION,
+    crown_height_geo       DOUBLE PRECISION,
+    crown_area_px          DOUBLE PRECISION,
+    crown_area_geo_est     DOUBLE PRECISION,
+    crown_area_geo_real    DOUBLE PRECISION,
+    height                 DOUBLE PRECISION,
+    height_source          TEXT,
+    crown_volume_geo_est   DOUBLE PRECISION,
+    crown_volume_geo_real  DOUBLE PRECISION,
+    source_subimage_path   TEXT,
+    slice_size             INTEGER,
+    geom_point             geometry(Point, 0),
+    geom_crown             geometry(Geometry, 0),
+    created_at             TEXT NOT NULL,
+    FOREIGN KEY (tiff_id, phase_id)
+        REFERENCES tiffs(tiff_id, phase_id) ON DELETE SET NULL
 );
 
--- 地块规范单木 (同一时相择优)
-CREATE TABLE IF NOT EXISTS tract_trees (
-    canonical_id          TEXT PRIMARY KEY,
-    tract_id              TEXT NOT NULL REFERENCES tracts(tract_id) ON DELETE CASCADE,
-    individual_id         TEXT REFERENCES tree_individuals(individual_id) ON DELETE SET NULL,
-    species               TEXT,
-    confidence            DOUBLE PRECISION,
-    geom_point            geometry(Point, 0),
-    geom_crown            geometry(Polygon, 0),
-    height                DOUBLE PRECISION,
-    chosen_obs_id         TEXT REFERENCES tree_observations(obs_id) ON DELETE SET NULL,
-    active_run_id         TEXT REFERENCES run_logs(run_id) ON DELETE SET NULL,
-    crown_area_geo_est    DOUBLE PRECISION,
-    crown_area_geo_real   DOUBLE PRECISION,
-    crown_volume_geo_est  DOUBLE PRECISION,
-    crown_volume_geo_real DOUBLE PRECISION
-);
-
--- 常用索引 (与 SQLite 对齐 + 空间 GiST)
-CREATE INDEX IF NOT EXISTS idx_obs_tract      ON tree_observations(tract_id);
-CREATE INDEX IF NOT EXISTS idx_obs_run        ON tree_observations(run_id);
-CREATE INDEX IF NOT EXISTS idx_canon_tract    ON tract_trees(tract_id);
-CREATE INDEX IF NOT EXISTS idx_obs_geom       ON tree_observations USING GIST (geom_point);
-CREATE INDEX IF NOT EXISTS idx_obs_crown_geom ON tree_observations USING GIST (geom_crown);
-CREATE INDEX IF NOT EXISTS idx_canon_geom     ON tract_trees USING GIST (geom_point);
-CREATE INDEX IF NOT EXISTS idx_tract_foot     ON tracts USING GIST (footprint_geom);
+CREATE INDEX IF NOT EXISTS idx_tracts_region ON tracts(region_id);
+CREATE INDEX IF NOT EXISTS idx_tract_phases_tract ON tract_phases(tract_pk, phase_id);
+CREATE INDEX IF NOT EXISTS idx_tiffs_tract_phase ON tiffs(tract_phase_pk);
+CREATE INDEX IF NOT EXISTS idx_runs_tract_phase ON runs(tract_phase_pk, status);
+CREATE INDEX IF NOT EXISTS idx_obs_run ON tree_observations(run_id);
+CREATE INDEX IF NOT EXISTS idx_obs_tract_phase ON tree_observations(tract_phase_pk);
+CREATE INDEX IF NOT EXISTS idx_obs_individual ON tree_observations(individual_id);
+CREATE INDEX IF NOT EXISTS idx_tracts_boundary_geom ON tracts USING GIST (boundary_geom);
+CREATE INDEX IF NOT EXISTS idx_tiffs_footprint_geom ON tiffs USING GIST (footprint_geom);
+CREATE INDEX IF NOT EXISTS idx_obs_geom_point ON tree_observations USING GIST (geom_point);
+CREATE INDEX IF NOT EXISTS idx_obs_geom_crown ON tree_observations USING GIST (geom_crown);
