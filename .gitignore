@@ -46,3 +46,4 @@ web/src-tauri/target/
 web/src-tauri/gen/
 .tokensave/
 logs/
+.worktrees/
