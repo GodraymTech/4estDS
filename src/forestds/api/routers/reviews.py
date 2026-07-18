@@ -20,6 +20,7 @@ from ..schemas import (
     ReviewAttemptExpand,
     ReviewAttemptOut,
     ReviewCreate,
+    ReviewMaskOperation,
     ReviewOperationBatch,
     ReviewPatchOut,
     ReviewPublishOut,
@@ -235,6 +236,25 @@ def apply_review_operations(
     try:
         patch = ReviewSessionService(db_url).apply_operations(
             session_id, body.revision, body.operation_id, body.operations
+        )
+        return ReviewPatchOut(**asdict(patch))
+    except ReviewError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/{session_id}/operations/mask", response_model=ReviewPatchOut, summary="编辑实例 mask")
+def apply_review_mask_operation(
+    session_id: str,
+    body: ReviewMaskOperation,
+    db_url: str | None = Depends(get_db_url),
+) -> ReviewPatchOut:
+    try:
+        patch = ReviewSessionService(db_url).apply_mask_operation(
+            session_id,
+            body.revision,
+            body.operation_id,
+            body.item_id,
+            [stroke.model_dump() for stroke in body.strokes],
         )
         return ReviewPatchOut(**asdict(patch))
     except ReviewError as exc:

@@ -423,7 +423,7 @@ rtk git commit -m "feat(review): add YOLOE prompt attempts and GPU scheduling"
 - Produces: mask 可见性、选中实例画笔增减、撤销重做；保存同步 `crown_geom/geom_crown` 和 mask 外接框。
 - Does not produce: YOLOE 正负点、SAM adapter、复杂 Mask 精标或独立 mask 关系表。
 
-- [ ] **Step 1: 写入坐标、轮廓和发布失败测试**
+- [x] **Step 1: 写入坐标、轮廓和发布失败测试**
 
 ```python
 def test_window_mask_maps_to_tiff_and_geo(mask, window, transform):
@@ -437,17 +437,17 @@ def test_mask_edit_updates_crown_and_box(session_service, item):
     assert updated.box_px == bounds(updated.crown_geom)
 ```
 
-- [ ] **Step 2: 运行测试确认 mask 编辑模块缺失**
+- [x] **Step 2: 运行测试确认 mask 编辑模块缺失**
 
 Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/bin/pytest tests/test_review_masks.py -q`
 
 Expected: FAIL。
 
-- [ ] **Step 3: 实现 mask 规范化、地理转换和发布**
+- [x] **Step 3: 实现 mask 规范化、地理转换和发布**
 
 YOLOE 归一化输出保留实例 mask、来源 window 和坐标元数据；轮廓简化后必须仍为合法 Polygon/MultiPolygon，空轮廓拒绝；发布写 `crown_geom` 与 `geom_crown`，检测框同步外接矩形。
 
-- [ ] **Step 4: 实现前端 Mask 图层和画笔编辑器**
+- [x] **Step 4: 实现前端 Mask 图层和画笔编辑器**
 
 提供 mask 显示开关、透明度、当前实例智能分割、画笔增加/擦除、局部撤销重做与确认；输入焦点时禁用快捷键。状态维度使用线型/图标，不与树种颜色混用。
 
@@ -455,7 +455,7 @@ Run: `rtk proxy mise exec -- pnpm run typecheck`（目录 `web`）
 
 Run: `rtk proxy mise exec -- pnpm run build`（目录 `web`）
 
-- [ ] **Step 5: 运行阶段 E 回归并提交**
+- [x] **Step 5: 运行阶段 E 回归并提交**
 
 Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/bin/pytest tests/test_review_masks.py tests/test_review_publish.py -q`
 

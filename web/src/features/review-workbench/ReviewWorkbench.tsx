@@ -7,9 +7,11 @@ import {
   InputNumber,
   Modal,
   Select,
+  Slider,
   Space,
   Spin,
   Statistic,
+  Switch,
   Tag,
   Tooltip,
   message,
@@ -18,6 +20,7 @@ import {
   CheckOutlined,
   CloseOutlined,
   DeleteOutlined,
+  EditOutlined,
   PlusOutlined,
   RedoOutlined,
   SaveOutlined,
@@ -26,11 +29,12 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { operationId, useReview, useReviewCommand, useReviewWorkspace } from "../../entities/review";
-import type { ReviewAttempt, ReviewCategory, ReviewItem } from "../../entities/review";
+import type { ReviewAttempt, ReviewCategory, ReviewItem, ReviewMaskStroke } from "../../entities/review";
 import { endpoints, queryKeys } from "../../shared/api";
 import { useReviewWorkbenchStore } from "./store";
 import { PromptPanel } from "./PromptPanel";
 import { AttemptPanel } from "./AttemptPanel";
+import { MaskEditor } from "./MaskEditor";
 import "./ReviewWorkbench.css";
 
 export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
@@ -44,6 +48,9 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
   const [filter, setFilter] = useState<string>("all");
   const [newCategory, setNewCategory] = useState("");
   const [attempts, setAttempts] = useState<ReviewAttempt[]>([]);
+  const [masksVisible, setMasksVisible] = useState(true);
+  const [maskOpacity, setMaskOpacity] = useState(0.32);
+  const [editingMask, setEditingMask] = useState<ReviewItem | null>(null);
 
   const dimensions = useMemo(() => {
     const tiff = tiffs.data?.find((item) => item.phase_id === session.data?.phase_id && item.tiff_id === session.data?.tiff_id);
@@ -98,6 +105,24 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
       navigate("/review", { replace: true });
     },
     onError: (error) => message.error(error instanceof Error ? error.message : "发布失败"),
+  });
+
+  const saveMask = useMutation({
+    mutationFn: ({ itemId, strokes }: { itemId: string; strokes: ReviewMaskStroke[] }) => endpoints.applyReviewMask(sessionId, {
+      revision: store.revision,
+      operation_id: operationId("mask"),
+      item_id: itemId,
+      strokes,
+    }),
+    onSuccess: (patch) => {
+      store.replaceItems(patch.revision, patch.items);
+      client.setQueryData(queryKeys.reviewWorkspace(sessionId), (current: unknown) => ({
+        ...(current as Record<string, unknown> ?? {}), revision: patch.revision, items: patch.items,
+      }));
+      setEditingMask(null);
+      message.success("实例 Mask 已写入草稿");
+    },
+    onError: (error) => message.error(error instanceof Error ? error.message : "Mask 保存失败"),
   });
 
   useEffect(() => {
@@ -203,6 +228,9 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
       <main className="review-workbench__stage">
         <div className="review-workbench__image-wrap">
           <img src={endpoints.reviewPreviewUrl(sessionId)} alt="当前复核 TIFF 降采样预览" draggable={false} />
+          {masksVisible ? (
+            <MaskOverlayLayer items={visible} dimensions={dimensions} opacity={maskOpacity} categories={categories} />
+          ) : null}
           <div className="review-workbench__boxes">
             {visible.filter((item) => item.status !== "rejected").map((item) => (
               <BoxOverlay
@@ -216,6 +244,10 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
               />
             ))}
           </div>
+        </div>
+        <div className="review-workbench__mask-controls">
+          <Switch size="small" checked={masksVisible} checkedChildren="Mask" unCheckedChildren="Mask" onChange={setMasksVisible} />
+          <Slider min={0.1} max={0.8} step={0.05} value={maskOpacity} disabled={!masksVisible} onChange={setMaskOpacity} />
         </div>
         <Button
           className="review-workbench__add"
@@ -272,6 +304,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
               busy={command.isPending}
               onUpdate={(patch) => apply([{ type: "update", item_id: active.id, patch }], "item")}
               onDelete={() => apply([{ type: "delete", item_id: active.id }], "delete")}
+              onEditMask={active.mask_rle ? () => setEditingMask(active) : undefined}
             />
           ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个框" />}
         </section>
@@ -282,8 +315,58 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
         <span>工作集 {items.length}</span><span>显示 {visible.length}</span><span>选择 {store.selectedIds.length}</span>
         <span>{command.isPending ? "正在写入服务端草稿…" : "草稿已恢复并同步"}</span>
       </footer>
+      <MaskEditor
+        open={Boolean(editingMask)}
+        item={editingMask}
+        saving={saveMask.isPending}
+        onCancel={() => setEditingMask(null)}
+        onSave={async (strokes) => {
+          if (editingMask) await saveMask.mutateAsync({ itemId: editingMask.id, strokes });
+        }}
+      />
     </div>
   );
+}
+
+function MaskOverlayLayer({ items, dimensions, opacity, categories }: {
+  items: ReviewItem[];
+  dimensions: { width: number; height: number };
+  opacity: number;
+  categories: ReviewCategory[];
+}) {
+  return (
+    <svg
+      className="review-workbench__masks"
+      viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
+      preserveAspectRatio="none"
+      aria-label="实例 mask 图层"
+    >
+      {items.filter((item) => item.status !== "rejected" && item.mask_geometry_px).map((item) => (
+        <path
+          key={item.id}
+          d={maskGeometryPath(item)}
+          fill={categoryColor(categories, item.species)}
+          fillOpacity={opacity}
+          fillRule="evenodd"
+          stroke="#f4fff9"
+          strokeWidth={item.status === "pending" ? 1.5 : 0.75}
+          strokeDasharray={item.status === "pending" ? "5 3" : undefined}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+    </svg>
+  );
+}
+
+function maskGeometryPath(item: ReviewItem): string {
+  const geometry = item.mask_geometry_px;
+  if (!geometry) return "";
+  const polygons = geometry.type === "Polygon"
+    ? [geometry.coordinates as number[][][]]
+    : geometry.coordinates as number[][][][];
+  return polygons.flatMap((polygon) => polygon.map((ring) => ring.map(([x, y], index) => (
+    `${index === 0 ? "M" : "L"}${x} ${y}`
+  )).join(" ") + " Z")).join(" ");
 }
 
 function BoxOverlay({ item, width, height, selected, color, onClick }: {
@@ -302,10 +385,11 @@ function BoxOverlay({ item, width, height, selected, color, onClick }: {
   );
 }
 
-function ItemInspector({ item, categories, busy, onUpdate, onDelete }: {
+function ItemInspector({ item, categories, busy, onUpdate, onDelete, onEditMask }: {
   item: ReviewItem; categories: ReviewCategory[]; busy: boolean;
   onUpdate: (patch: Record<string, unknown>) => Promise<void>;
   onDelete: () => Promise<void>;
+  onEditMask?: () => void;
 }) {
   const [box, setBox] = useState(item.box_px);
   const [note, setNote] = useState(item.note ?? "");
@@ -319,6 +403,7 @@ function ItemInspector({ item, categories, busy, onUpdate, onDelete }: {
       <Button disabled={busy || box.join(",") === item.box_px.join(",")} onClick={() => onUpdate({ box_px: box })}>应用框坐标</Button>
       <Input.TextArea value={note} placeholder="复核备注" autoSize={{ minRows: 2, maxRows: 5 }} onChange={(event) => setNote(event.target.value)} onBlur={() => { if (note !== (item.note ?? "")) void onUpdate({ note }); }} />
       <Select value={item.status} options={[{ value: "accepted", label: "接受" }, { value: "pending", label: "待确认" }, { value: "rejected", label: "拒绝" }]} onChange={(status) => onUpdate({ status })} />
+      {onEditMask ? <Button icon={<EditOutlined />} onClick={onEditMask}>编辑实例 Mask</Button> : null}
       <Button danger icon={<DeleteOutlined />} onClick={onDelete}>删除对象</Button>
     </div>
   );

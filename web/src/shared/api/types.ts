@@ -422,6 +422,24 @@ export interface EffectiveAreaImportResponse {
 export type ReviewMode = "based_on_active" | "from_scratch";
 export type ReviewItemStatus = "accepted" | "rejected" | "pending";
 
+export interface ReviewMaskRle {
+  height: number;
+  width: number;
+  counts: number[];
+}
+
+export interface ReviewMaskGeometry {
+  type: "Polygon" | "MultiPolygon";
+  coordinates: number[][][] | number[][][][];
+}
+
+export interface ReviewMaskStroke {
+  mode: "add" | "erase";
+  x: number;
+  y: number;
+  radius: number;
+}
+
 export interface ReviewItem {
   id: string;
   parent_observation_id?: string | null;
@@ -433,6 +451,9 @@ export interface ReviewItem {
   center_geom?: string | null;
   crown_geom?: string | null;
   geom_crown?: string | null;
+  mask_rle?: ReviewMaskRle;
+  source_window?: number[];
+  mask_geometry_px?: ReviewMaskGeometry;
   source: "parent" | "human" | "ai";
   confirmed: boolean;
   status: ReviewItemStatus;

@@ -308,6 +308,50 @@ class ReviewSessionService:
             conn.close()
         return self.get(session_id)
 
+    def apply_mask_operation(
+        self,
+        session_id: str,
+        revision: int,
+        operation_id: str,
+        item_id: str,
+        strokes: Sequence[Mapping[str, Any]],
+    ) -> WorkspacePatch:
+        if not strokes:
+            raise ReviewValidationError("mask 画笔不能为空。", code="mask_strokes_required")
+        session = self.get(session_id)
+        self._assert_writable(session)
+        workspace = self.drafts.load(session_id)
+        if operation_id in workspace.applied_operations:
+            return self._existing_patch(session_id, workspace)
+        self._check_revision(session, workspace, revision)
+        item = next((value for value in workspace.items if value.get("id") == item_id), None)
+        if item is None:
+            raise ReviewValidationError("复核对象不存在。", code="item_not_found", details={"item_id": item_id})
+        if not item.get("mask_rle") or not item.get("source_window"):
+            raise ReviewValidationError("当前对象没有可编辑的实例 mask。", code="mask_not_available")
+        conn = _connect(self.db_url)
+        try:
+            row = conn.execute(
+                "SELECT geotransform FROM tiffs WHERE phase_id=? AND tiff_id=?",
+                (session.phase_id, session.tiff_id),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None or not row["geotransform"]:
+            raise ReviewValidationError("TIFF 缺少 geotransform，无法保存 mask。", code="missing_geotransform")
+        from affine import Affine
+        from .masks import apply_brush, mask_item_fields
+
+        transform = Affine(*json.loads(row["geotransform"]))
+        mask = apply_brush(item["mask_rle"], item["source_window"], strokes)
+        fields = mask_item_fields(mask, item["source_window"], transform)
+        return self.apply_operations(
+            session_id,
+            revision,
+            operation_id,
+            [{"type": "update", "item_id": item_id, "patch": fields}],
+        )
+
     @staticmethod
     def _apply(workspace: ReviewWorkspace, operation: Mapping[str, Any]) -> None:
         kind = str(operation.get("type") or "")

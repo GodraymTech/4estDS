@@ -42,6 +42,7 @@ import type {
   ReviewSession,
   ReviewWorkspace,
   ReviewAttempt,
+  ReviewMaskStroke,
 } from "./types";
 
 // 端点定义集中一处(DRY)。承接 v1.0 api.ts 的契约, 重构为 FSD shared 层。
@@ -123,6 +124,11 @@ export const endpoints = {
     sessionId: string,
     body: { revision: number; operation_id: string; operations: Array<Record<string, unknown>> },
   ): Promise<ReviewPatch> => apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/operations`, body),
+
+  applyReviewMask: (
+    sessionId: string,
+    body: { revision: number; operation_id: string; item_id: string; strokes: ReviewMaskStroke[] },
+  ): Promise<ReviewPatch> => apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/operations/mask`, body),
 
   undoReview: (sessionId: string, revision: number, operationId: string): Promise<ReviewPatch> =>
     apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/undo`, { revision, operation_id: operationId }),

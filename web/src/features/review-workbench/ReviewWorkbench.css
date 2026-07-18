@@ -22,11 +22,14 @@
 .review-workbench__stage { position: relative; display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; background: radial-gradient(circle at center, #1b2b27, #07110f 72%); }
 .review-workbench__image-wrap { position: relative; max-width: calc(100% - 40px); max-height: calc(100% - 40px); line-height: 0; box-shadow: 0 12px 40px #0009; }
 .review-workbench__image-wrap > img { display: block; max-width: 100%; max-height: calc(100vh - 145px); object-fit: contain; user-select: none; }
+.review-workbench__masks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .review-workbench__boxes { position: absolute; inset: 0; }
 .review-box { position: absolute; padding: 0; border: 2px solid; background: transparent; cursor: pointer; }
 .review-box.is-selected { border-width: 3px; box-shadow: 0 0 0 2px #fff; }
 .review-box span { position: absolute; top: -19px; left: -2px; min-width: max-content; padding: 2px 5px; color: #07110f; font: 11px/15px monospace; }
 .review-workbench__add { position: absolute; right: 18px; bottom: 16px; }
+.review-workbench__mask-controls { position: absolute; left: 18px; bottom: 16px; display: grid; grid-template-columns: auto 110px; align-items: center; gap: 9px; padding: 6px 10px; border: 1px solid #31594d; border-radius: 8px; background: #0b1916e6; }
+.review-workbench__mask-controls .ant-slider { margin: 5px 0; }
 .review-workbench__right section { display: grid; gap: 9px; margin-bottom: 14px; padding: 11px; border: 1px solid #23443a; border-radius: 9px; }
 .review-workbench__right h3 { margin: 0; font-size: 14px; }
 .review-workbench__categories { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -34,3 +37,7 @@
 .review-workbench__coords { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
 .review-workbench__status { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 18px; align-items: center; padding: 0 12px; color: #8eb4a7; font: 11px monospace; background: #07110f; }
 .review-loading { display: grid; flex: 1; place-content: center; gap: 12px; background: #07110f; }
+.mask-editor__toolbar { display: grid; grid-template-columns: auto auto minmax(100px, 1fr) auto; align-items: center; gap: 12px; margin-bottom: 14px; }
+.mask-editor__toolbar .ant-slider { margin: 5px 0; }
+.mask-editor__canvas { display: block; width: 100%; max-height: 58vh; border: 1px solid #31594d; border-radius: 8px; background: #0a1916; image-rendering: pixelated; touch-action: none; cursor: crosshair; }
+.mask-editor__hint { margin: 10px 0 0; color: #78998e; font-size: 12px; }

@@ -17,6 +17,7 @@ from .domain import ReviewConflict, ReviewNotFound, ReviewValidationError
 from .merge_service import ReviewMergeService, weighted_box_fusion
 from .models import MockReviewAdapter, RasterWindow, ReviewModelAdapter
 from .models.yoloe import YOLOEReviewAdapter
+from .masks import mask_item_fields
 from .session_service import ReviewSessionService
 
 
@@ -187,17 +188,20 @@ class ReviewInferenceService:
                     for prediction in predictions:
                         if prediction.score < float(attempt["threshold"]):
                             continue
+                        mask_fields: dict[str, Any] = {}
+                        if prediction.mask is not None and prediction.source_window:
+                            mask_fields = mask_item_fields(prediction.mask, prediction.source_window, source.transform)
                         candidates.append({
                             "id": f"ai_{uuid.uuid4().hex[:12]}",
                             "species": prediction.category_id,
                             "confidence": prediction.score,
-                            "box_px": prediction.box_px,
+                            "box_px": mask_fields.get("box_px", prediction.box_px),
                             "source": "ai",
                             "confirmed": False,
                             "status": "pending",
                             "conflict": False,
                             "source_window": list(prediction.source_window or ()),
-                            "mask": prediction.mask.tolist() if hasattr(prediction.mask, "tolist") else prediction.mask,
+                            **mask_fields,
                         })
                     index += len(batch_specs)
                     attempt = self._update_attempt(session_id, {

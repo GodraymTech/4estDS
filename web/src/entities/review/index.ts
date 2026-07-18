@@ -8,4 +8,7 @@ export type {
   ReviewSession,
   ReviewWorkspace,
   ReviewAttempt,
+  ReviewMaskRle,
+  ReviewMaskGeometry,
+  ReviewMaskStroke,
 } from "../../shared/api";
