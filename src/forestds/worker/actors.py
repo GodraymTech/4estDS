@@ -20,6 +20,7 @@ from ..service import InferenceError, run_batch_inference_job, run_inference_job
 
 # GPU 专用队列名；worker 以 --processes 1 --threads 1 消费该队列以实现 concurrency=1。
 GPU_QUEUE = os.environ.get("forestds_GPU_QUEUE", "gpu")
+REVIEW_GPU_QUEUE = os.environ.get("forestds_REVIEW_GPU_QUEUE", "review_gpu")
 # 单作业时限(毫秒)，默认 24h，应对超大 TIFF 的长耗时推理。
 _INFER_TIME_LIMIT_MS = int(os.environ.get("forestds_INFER_TIME_LIMIT_MS", str(24 * 60 * 60 * 1000)))
 
@@ -110,3 +111,36 @@ def batch_actor(run_id: str, request_dict: dict) -> None:
         )
     except InferenceError:
         log.warning("批量作业失败已记录: run_id={}", run_id)
+
+
+def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) -> None:
+    settings = _get_settings()
+    from ..review.inference_service import ReviewInferenceService, build_review_adapter
+
+    service = ReviewInferenceService(
+        db_url,
+        tile_size=int(settings.get("review.tile_size", 1024)),
+        batch_size=int(settings.get("review.batch_size", 4)),
+    )
+    try:
+        result = service.run_attempt(session_id, attempt_id, adapter=build_review_adapter(settings))
+        log.info(
+            "复核 attempt 完成: session={} attempt={} candidates={}",
+            session_id,
+            attempt_id,
+            result.get("candidate_count"),
+        )
+    except Exception as exc:  # noqa: BLE001 - 状态已由服务写入草稿，actor 不重试
+        log.warning("复核 attempt 失败: session={} attempt={} error={}", session_id, attempt_id, exc)
+
+
+@dramatiq.actor(queue_name=REVIEW_GPU_QUEUE, priority=0, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
+def review_viewport_actor(session_id: str, attempt_id: str, db_url: str | None = None) -> None:
+    """短视口任务优先进入 review_gpu。"""
+    _run_review_attempt(session_id, attempt_id, db_url)
+
+
+@dramatiq.actor(queue_name=REVIEW_GPU_QUEUE, priority=10, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
+def review_full_actor(session_id: str, attempt_id: str, db_url: str | None = None) -> None:
+    """整图任务低优先级，仍保持单 GPU 串行。"""
+    _run_review_attempt(session_id, attempt_id, db_url)

@@ -343,7 +343,7 @@ rtk git commit -m "feat(review): add recoverable single-TIFF review sessions"
 - Produces: attempts create/get/cancel/apply/expand API；范围为 `viewport|full`，合并为 `append|replace_ai_in_scope`。
 - Produces: `review_gpu` 队列，视口短任务优先；OOM 降 batch 一次，取消在分块边界生效。
 
-- [ ] **Step 1: 写入 adapter、视口与合并失败测试**
+- [x] **Step 1: 写入 adapter、视口与合并失败测试**
 
 ```python
 def test_visual_prompt_reuses_embedding_without_projecting_boxes(adapter, windows):
@@ -361,13 +361,13 @@ def test_replace_only_removes_unconfirmed_ai_in_scope(merge_service):
 
 覆盖文本 display_name/model_prompt 映射、embedding 单次编码、多 exemplar 同类聚合、viewport WGS84→TIFF pixel window、整图规范化、NMS/WBF/去重/冲突、expand 参数复用。
 
-- [ ] **Step 2: 运行测试确认 attempt 和 adapter 缺失**
+- [x] **Step 2: 运行测试确认 attempt 和 adapter 缺失**
 
 Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/bin/pytest tests/test_review_attempts.py tests/test_review_yoloe_adapter.py tests/test_review_viewport.py -q`
 
 Expected: FAIL。
 
-- [ ] **Step 3: 实现 adapter、范围调度和候选规范化**
+- [x] **Step 3: 实现 adapter、范围调度和候选规范化**
 
 ```python
 class ReviewModelAdapter(Protocol):
@@ -379,11 +379,11 @@ class ReviewModelAdapter(Protocol):
 
 当前视口与 TIFF footprint 求交后精确换算 pixel window；与有效区域共用 window provider。模型路径只来自配置，找不到权重时返回可操作错误，mock_review 始终可用于无 GPU 测试。
 
-- [ ] **Step 4: 实现 Dramatiq 队列、取消、OOM 与 API**
+- [x] **Step 4: 实现 Dramatiq 队列、取消、OOM 与 API**
 
 attempt 状态和必要明细写草稿，不写 runs。视口任务使用高优先级 actor，整图任务低优先；OOM 仅降低 batch 重试当前批次一次，保留已完成分块和明确失败摘要。
 
-- [ ] **Step 5: 实现 Prompt/Attempt 前端并回归**
+- [x] **Step 5: 实现 Prompt/Attempt 前端并回归**
 
 文本与视觉工作流并列；执行前预览类别/范围/阈值；候选到达后必须明确选择追加或替换；显示基线、上轮累计、本轮变化、预计结果、日志、进度、取消和“扩散到全图”。
 
@@ -391,7 +391,7 @@ Run: `rtk proxy mise exec -- pnpm run typecheck`（目录 `web`）
 
 Run: `rtk proxy mise exec -- pnpm run build`（目录 `web`）
 
-- [ ] **Step 6: 运行阶段 D 回归并提交**
+- [x] **Step 6: 运行阶段 D 回归并提交**
 
 Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/bin/pytest tests/test_review_attempts.py tests/test_review_yoloe_adapter.py tests/test_review_viewport.py -q`
 

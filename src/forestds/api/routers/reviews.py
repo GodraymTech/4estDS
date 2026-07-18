@@ -15,6 +15,10 @@ from ...review import (
 from ..deps import get_db_url
 from ..schemas import (
     ReviewCancelCommand,
+    ReviewAttemptApply,
+    ReviewAttemptCreate,
+    ReviewAttemptExpand,
+    ReviewAttemptOut,
     ReviewCreate,
     ReviewOperationBatch,
     ReviewPatchOut,
@@ -60,6 +64,15 @@ def create_review(body: ReviewCreate, db_url: str | None = Depends(get_db_url)) 
         raise _http_error(exc) from exc
 
 
+@router.get("/capabilities", summary="复核模型能力")
+def review_capabilities() -> dict:
+    from ...config import load_settings
+    from ...review.inference_service import build_review_adapter
+
+    settings = load_settings()
+    return build_review_adapter(settings).capabilities()
+
+
 @router.get("/{session_id}", response_model=ReviewSessionOut, summary="复核会话详情")
 def get_review(session_id: str, db_url: str | None = Depends(get_db_url)) -> ReviewSessionOut:
     try:
@@ -75,6 +88,102 @@ def get_review_workspace(session_id: str, db_url: str | None = Depends(get_db_ur
         return ReviewWorkspaceOut(**value.as_dict())
     except ReviewError as exc:
         raise _http_error(exc) from exc
+
+
+@router.post("/{session_id}/attempts", response_model=ReviewAttemptOut, summary="创建并排队交互式 attempt")
+def create_review_attempt(
+    session_id: str,
+    body: ReviewAttemptCreate,
+    db_url: str | None = Depends(get_db_url),
+) -> ReviewAttemptOut:
+    from ...review.inference_service import ReviewInferenceService
+
+    try:
+        attempt = ReviewInferenceService(db_url).create_attempt(
+            session_id,
+            revision=body.revision,
+            prompt_type=body.prompt_type,
+            prompts=body.prompts,
+            visual_exemplars=body.visual_exemplars,
+            scope=body.scope,
+            merge_mode=body.merge_mode,
+            threshold=body.threshold,
+        )
+        from ...worker.actors import review_full_actor, review_viewport_actor
+
+        actor = review_viewport_actor if body.scope.get("type") == "viewport" else review_full_actor
+        actor.send(session_id, attempt["attempt_id"], db_url)
+        return ReviewAttemptOut(**attempt)
+    except ReviewError as exc:
+        raise _http_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "review_queue_unavailable", "message": str(exc)}) from exc
+
+
+@router.get("/{session_id}/attempts/{attempt_id}", response_model=ReviewAttemptOut, summary="attempt 状态")
+def get_review_attempt(
+    session_id: str,
+    attempt_id: str,
+    db_url: str | None = Depends(get_db_url),
+) -> ReviewAttemptOut:
+    from ...review.inference_service import ReviewInferenceService
+
+    try:
+        return ReviewAttemptOut(**ReviewInferenceService(db_url).get_attempt(session_id, attempt_id))
+    except ReviewError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/{session_id}/attempts/{attempt_id}/cancel", response_model=ReviewAttemptOut, summary="取消 attempt")
+def cancel_review_attempt(
+    session_id: str,
+    attempt_id: str,
+    db_url: str | None = Depends(get_db_url),
+) -> ReviewAttemptOut:
+    from ...review.inference_service import ReviewInferenceService
+
+    try:
+        return ReviewAttemptOut(**ReviewInferenceService(db_url).cancel_attempt(session_id, attempt_id))
+    except ReviewError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/{session_id}/attempts/{attempt_id}/apply", summary="应用 attempt 候选")
+def apply_review_attempt(
+    session_id: str,
+    attempt_id: str,
+    body: ReviewAttemptApply,
+    db_url: str | None = Depends(get_db_url),
+) -> dict:
+    from ...review.inference_service import ReviewInferenceService
+
+    try:
+        return ReviewInferenceService(db_url).apply_attempt(
+            session_id, attempt_id, revision=body.revision, merge_mode=body.merge_mode
+        )
+    except ReviewError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/{session_id}/attempts/{attempt_id}/expand", response_model=ReviewAttemptOut, summary="复用参数扩散到全图")
+def expand_review_attempt(
+    session_id: str,
+    attempt_id: str,
+    body: ReviewAttemptExpand,
+    db_url: str | None = Depends(get_db_url),
+) -> ReviewAttemptOut:
+    from ...review.inference_service import ReviewInferenceService
+
+    try:
+        attempt = ReviewInferenceService(db_url).expand_attempt(session_id, attempt_id, revision=body.revision)
+        from ...worker.actors import review_full_actor
+
+        review_full_actor.send(session_id, attempt["attempt_id"], db_url)
+        return ReviewAttemptOut(**attempt)
+    except ReviewError as exc:
+        raise _http_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "review_queue_unavailable", "message": str(exc)}) from exc
 
 
 @router.get("/{session_id}/preview", summary="复核 TIFF 低分辨率预览")

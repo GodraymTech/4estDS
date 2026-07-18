@@ -41,6 +41,7 @@ import type {
   ReviewPublishResult,
   ReviewSession,
   ReviewWorkspace,
+  ReviewAttempt,
 } from "./types";
 
 // 端点定义集中一处(DRY)。承接 v1.0 api.ts 的契约, 重构为 FSD shared 层。
@@ -80,6 +81,43 @@ export const endpoints = {
 
   reviewPreviewUrl: (sessionId: string): string =>
     apiUrl(`/reviews/${encodeURIComponent(sessionId)}/preview`),
+
+  getReviewCapabilities: (): Promise<Record<string, unknown>> => apiGet("/reviews/capabilities"),
+
+  createReviewAttempt: (
+    sessionId: string,
+    body: {
+      revision: number;
+      prompt_type: "text" | "visual";
+      prompts: Array<Record<string, unknown>>;
+      visual_exemplars: Array<Record<string, unknown>>;
+      scope: { type: "viewport" | "full"; bounds?: number[] };
+      merge_mode: "append" | "replace_ai_in_scope";
+      threshold: number;
+    },
+  ): Promise<ReviewAttempt> => apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/attempts`, body),
+
+  getReviewAttempt: (sessionId: string, attemptId: string): Promise<ReviewAttempt> =>
+    apiGet(`/reviews/${encodeURIComponent(sessionId)}/attempts/${encodeURIComponent(attemptId)}`),
+
+  cancelReviewAttempt: (sessionId: string, attemptId: string): Promise<ReviewAttempt> =>
+    apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/attempts/${encodeURIComponent(attemptId)}/cancel`, {}),
+
+  applyReviewAttempt: (
+    sessionId: string,
+    attemptId: string,
+    revision: number,
+    mergeMode: "append" | "replace_ai_in_scope",
+  ): Promise<ReviewPatch> => apiPostJson(
+    `/reviews/${encodeURIComponent(sessionId)}/attempts/${encodeURIComponent(attemptId)}/apply`,
+    { revision, merge_mode: mergeMode },
+  ),
+
+  expandReviewAttempt: (sessionId: string, attemptId: string, revision: number): Promise<ReviewAttempt> =>
+    apiPostJson(
+      `/reviews/${encodeURIComponent(sessionId)}/attempts/${encodeURIComponent(attemptId)}/expand`,
+      { revision },
+    ),
 
   applyReviewOperations: (
     sessionId: string,

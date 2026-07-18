@@ -19,6 +19,22 @@ db:
 effective_area:
   mask_cache_size: 32     # 地块有效区域转换为 TIFF 像素几何后的 LRU 缓存项数
 
+review:
+  adapter: yoloe          # yoloe | mock_review；生产使用 YOLOE，离线测试可显式选择 mock_review
+  model_variant: 26x      # 26x | 26l；决定下面使用哪组本地权重
+  models:
+    26x:
+      weights: ".4estDS/models/multimodal/yoloe-26x-seg.pt"
+    26l:
+      weights: ".4estDS/models/multimodal/yoloe-26l-seg.pt"
+  mobileclip_weights: ".4estDS/models/multimodal/mobileclip2_b.ts"
+  device: null            # null 继承 detect.device；也可设置 cuda:0 / cpu
+  model_input: 1024       # YOLOE 模型输入边长（像素）
+  conf_threshold: 0.25    # attempt 候选最低置信度
+  tile_size: 1024         # 视口/整图 attempt 的动态读取窗口边长（像素）
+  batch_size: 4           # review_gpu 初始批大小；OOM 时仅减半重试一次
+  queue: review_gpu       # GPU 串行队列；viewport actor 优先级高于 full actor
+
 preprocess:
   # 预处理行为: dynamic (动态切片：不落盘，内存推理) | static (静态切片：先落盘后推理)
   action: "dynamic"

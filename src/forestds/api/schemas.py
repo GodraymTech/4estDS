@@ -260,6 +260,42 @@ class ReviewPublishOut(BaseModel):
     status: str
 
 
+class ReviewAttemptCreate(BaseModel):
+    revision: int = Field(..., ge=0)
+    prompt_type: Literal["text", "visual"]
+    prompts: list[dict[str, Any]] = Field(default_factory=list)
+    visual_exemplars: list[dict[str, Any]] = Field(default_factory=list)
+    scope: dict[str, Any]
+    merge_mode: Literal["append", "replace_ai_in_scope"] = "append"
+    threshold: float = Field(0.25, ge=0, le=1)
+
+
+class ReviewAttemptApply(BaseModel):
+    revision: int = Field(..., ge=0)
+    merge_mode: Optional[Literal["append", "replace_ai_in_scope"]] = None
+
+
+class ReviewAttemptExpand(BaseModel):
+    revision: int = Field(..., ge=0)
+
+
+class ReviewAttemptOut(BaseModel):
+    model_config = {"extra": "allow"}
+
+    attempt_id: str
+    status: str
+    prompt_type: str
+    scope: dict[str, Any]
+    merge_mode: str
+    threshold: float
+    progress: int = 0
+    completed_windows: int = 0
+    total_windows: int = 0
+    candidate_count: int = 0
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
 class TiffOut(BaseModel):
     """TIFF 影像资产行(地图标注与看板聚合的影像维度事实源)。"""
     model_config = {"extra": "allow"}

@@ -252,9 +252,11 @@ class ReviewSessionService:
             )
         if not operations:
             raise ReviewValidationError("operations 不能为空。", code="operations_required")
-        workspace.undo_stack.append(_editable_snapshot(workspace))
-        workspace.undo_stack = workspace.undo_stack[-100:]
-        workspace.redo_stack.clear()
+        record_history = any(str(operation.get("type") or "") not in {"upsert_attempt"} for operation in operations)
+        if record_history:
+            workspace.undo_stack.append(_editable_snapshot(workspace))
+            workspace.undo_stack = workspace.undo_stack[-100:]
+            workspace.redo_stack.clear()
         for operation in operations:
             self._apply(workspace, operation)
         return self._persist(session, workspace, operation_id)
@@ -352,6 +354,25 @@ class ReviewSessionService:
             known = [str(item.get("id")) for item in workspace.category_catalog if item.get("id")]
             workspace.visible_categories = known
             workspace.active_category = str(operation.get("active_category") or (known[0] if known else "")) or None
+            return
+        if kind == "upsert_attempt":
+            attempt = dict(operation.get("attempt") or {})
+            attempt_id = str(attempt.get("attempt_id") or "")
+            if not attempt_id:
+                raise ReviewValidationError("attempt_id 不能为空。", code="attempt_id_required")
+            index = next((i for i, value in enumerate(workspace.attempts) if value.get("attempt_id") == attempt_id), None)
+            if index is None:
+                workspace.attempts.append(attempt)
+            else:
+                workspace.attempts[index] = {**workspace.attempts[index], **attempt}
+            return
+        if kind == "apply_attempt":
+            attempt_id = str(operation.get("attempt_id") or "")
+            workspace.items = list(operation.get("items") or [])
+            for index, attempt in enumerate(workspace.attempts):
+                if attempt.get("attempt_id") == attempt_id:
+                    workspace.attempts[index] = {**attempt, "status": "applied"}
+                    break
             return
         raise ReviewValidationError("不支持的复核操作。", code="unsupported_operation", details={"type": kind})
 

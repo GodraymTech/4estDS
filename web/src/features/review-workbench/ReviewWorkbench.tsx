@@ -26,9 +26,11 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { operationId, useReview, useReviewCommand, useReviewWorkspace } from "../../entities/review";
-import type { ReviewCategory, ReviewItem } from "../../entities/review";
+import type { ReviewAttempt, ReviewCategory, ReviewItem } from "../../entities/review";
 import { endpoints, queryKeys } from "../../shared/api";
 import { useReviewWorkbenchStore } from "./store";
+import { PromptPanel } from "./PromptPanel";
+import { AttemptPanel } from "./AttemptPanel";
 import "./ReviewWorkbench.css";
 
 export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
@@ -41,6 +43,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
   const store = useReviewWorkbenchStore();
   const [filter, setFilter] = useState<string>("all");
   const [newCategory, setNewCategory] = useState("");
+  const [attempts, setAttempts] = useState<ReviewAttempt[]>([]);
 
   const dimensions = useMemo(() => {
     const tiff = tiffs.data?.find((item) => item.phase_id === session.data?.phase_id && item.tiff_id === session.data?.tiff_id);
@@ -48,7 +51,10 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
   }, [session.data, tiffs.data]);
 
   useEffect(() => {
-    if (workspace.data) store.hydrate(workspace.data);
+    if (workspace.data) {
+      store.hydrate(workspace.data);
+      setAttempts(workspace.data.attempts);
+    }
   }, [workspace.data?.revision]);
 
   const items = useMemo(
@@ -226,6 +232,20 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
       </main>
 
       <aside className="review-workbench__right">
+        <PromptPanel
+          sessionId={sessionId}
+          revision={store.revision}
+          categories={categories}
+          items={items}
+          onCreated={(attempt) => setAttempts((current) => [...current.filter((item) => item.attempt_id !== attempt.attempt_id), attempt])}
+        />
+        <AttemptPanel
+          sessionId={sessionId}
+          revision={store.revision}
+          attempts={attempts}
+          onChanged={(attempt) => setAttempts((current) => [...current.filter((item) => item.attempt_id !== attempt.attempt_id), attempt])}
+          onApplied={(revision, nextItems) => store.replaceItems(revision, nextItems)}
+        />
         <section>
           <h3>类别目录</h3>
           <Space.Compact block>

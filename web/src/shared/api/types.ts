@@ -470,7 +470,7 @@ export interface ReviewWorkspace {
   active_category?: string | null;
   text_prompts: Array<Record<string, unknown>>;
   visual_exemplars: Array<Record<string, unknown>>;
-  attempts: Array<Record<string, unknown>>;
+  attempts: ReviewAttempt[];
 }
 
 export interface ReviewPatch {
@@ -485,6 +485,24 @@ export interface ReviewPublishResult {
   run_id: string;
   observation_count: number;
   status: string;
+}
+
+export interface ReviewAttempt {
+  attempt_id: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "applied";
+  prompt_type: "text" | "visual";
+  prompts?: Array<Record<string, unknown>>;
+  visual_exemplars?: Array<Record<string, unknown>>;
+  scope: { type: "viewport" | "full"; bounds?: number[] };
+  merge_mode: "append" | "replace_ai_in_scope";
+  threshold: number;
+  progress: number;
+  completed_windows: number;
+  total_windows: number;
+  candidate_count: number;
+  candidates: ReviewItem[];
+  parent_attempt_id?: string | null;
+  error?: string | null;
 }
 
 // 地块多时相真影像瓦片(对应 schemas.TractImageryOut)。

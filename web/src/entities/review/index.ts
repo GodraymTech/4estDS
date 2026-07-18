@@ -7,4 +7,5 @@ export type {
   ReviewPublishResult,
   ReviewSession,
   ReviewWorkspace,
+  ReviewAttempt,
 } from "../../shared/api";
