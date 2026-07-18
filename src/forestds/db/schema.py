@@ -27,6 +27,7 @@ DDL: tuple[str, ...] = (
         boundary_geom   TEXT,
         boundary_geom_cent TEXT,
         effective_geom  TEXT,
+        effective_area_hm2 REAL,
         boundary_source TEXT NOT NULL DEFAULT 'auto'
             CHECK (boundary_source IN ('auto', 'manual')),
         coverage_status TEXT NOT NULL DEFAULT 'none'
@@ -187,7 +188,14 @@ def _assert_new_schema(conn: sqlite3.Connection) -> None:
     if _table_exists(conn, "run_logs") or _table_exists(conn, "tract_sources") or _table_exists(conn, "tract_trees"):
         raise RuntimeError("检测到旧版数据库表；请先备份并创建新的 4estDS 数据库。")
     required = {
-        "tracts": {"tract_pk", "region_id", "tract_id", "boundary_geom_cent", "effective_geom"},
+        "tracts": {
+            "tract_pk",
+            "region_id",
+            "tract_id",
+            "boundary_geom_cent",
+            "effective_geom",
+            "effective_area_hm2",
+        },
         "tract_phases": {"tract_phase_pk", "tract_pk", "phase_id"},
         "tiffs": {"tiff_id", "phase_id", "tract_phase_pk", "center_geom", "tiff_type", "active_run_id"},
         "runs": {"run_id", "tract_phase_pk", "task_type"},

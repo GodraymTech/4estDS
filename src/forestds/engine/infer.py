@@ -72,6 +72,7 @@ def run_inference(
     detector: BaseDetector,
     config: InferenceConfig,
     run_id: str | None = None,
+    window_filter=None,
 ) -> InferenceResult:
     """对一幅影像执行切片->推理->去重全流程（引擎核心）。
 
@@ -99,11 +100,12 @@ def run_inference(
         coords = generate_slice_windows(width, height, config.root_size, config.overlap_rate)
         log.info("【切片网格】已生成动态切片窗口清单，共包含 {} 个瓦片", len(coords))
 
-    detector.ensure_loaded()
     read = getattr(image_source, "read_window", None)
     global_items: list[Detection] = []
     processed = 0
+    skipped_outside = 0
     bs = max(1, config.batch_size)
+    detector_loaded = False
     
     total_raw_predicts = 0
     from ..utils.progress import track_progress
@@ -115,7 +117,17 @@ def run_inference(
         check_cancelled(run_id)
         windows = []
         for (x, y, w, h) in chunk:
+            if window_filter is not None and window_filter.classify((x, y, w, h)) == "outside":
+                skipped_outside += 1
+                continue
             pixels = read(x, y, w, h) if callable(read) else None
+            if pixels is not None and window_filter is not None:
+                local_mask = window_filter.local_mask((x, y, w, h))
+                if local_mask is not None:
+                    import numpy as np
+
+                    pixels = np.asarray(pixels).copy()
+                    pixels[~local_mask] = 0
             win = Window(x=x, y=y, w=w, h=h, pixels=pixels)
             # 记录瓦片的源文件路径（主要针对物理瓦片，方便溯源）
             if hasattr(image_source, "_coord_to_file"):
@@ -126,6 +138,11 @@ def run_inference(
                 win.source_subimage_path = f"Window_{x}_{y}_{w}_{h}"
             windows.append(win)
 
+        if not windows:
+            continue
+        if not detector_loaded:
+            detector.ensure_loaded()
+            detector_loaded = True
         for win, dets in zip(windows, detector.predict_batch(windows)):
             total_raw_predicts += len(dets)
             filtered_dets = dets.filter_score(config.conf_thr).items
@@ -139,6 +156,8 @@ def run_inference(
                     or (d.y2 >= win.h - 1.0 and win.y + win.h < height)
                 )
                 gd = d.offset(win.x, win.y)
+                if window_filter is not None and not window_filter.keep_detection(gd.center):
+                    continue
                 gd.extra = {
                     **gd.extra,
                     "truncated": bool(trunc),
@@ -163,13 +182,14 @@ def run_inference(
             pass
 
     import gc
+    import sys
+
     gc.collect()
-    try:
-        import torch
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except ImportError:
-        pass
+    # 只有实际检测器已加载 PyTorch 时才清 CUDA 缓存；纯 CPU/mock 路径不应仅为
+    # 清缓存而加载庞大的原生运行时，也避免测试/受限环境触发 CUDA 初始化。
+    torch = sys.modules.get("torch")
+    if torch is not None and torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     # 3. 加权框去重融合 (WBF)
     log.info("【WBF去重融合】开始对 {} 个置信度过滤后的检测框执行加权框融合去重...", raw_count)
@@ -186,8 +206,7 @@ def run_inference(
         iou_thr=config.iou_thr, conf_type=config.conf_type,
         center_merge_frac=config.center_merge_frac,
     )
-    fused = Detections(
-        [
+    fused_items = [
             Detection(
                 x1=f.box[0], y1=f.box[1], x2=f.box[2], y2=f.box[3],
                 score=f.score, label=f.label,
@@ -197,7 +216,11 @@ def run_inference(
                 },
             )
             for f in fused_boxes
-        ],
+        ]
+    if window_filter is not None:
+        fused_items = [item for item in fused_items if window_filter.keep_detection(item.center)]
+    fused = Detections(
+        fused_items,
         {"backend": getattr(detector, "name", "?"), "fusion": "wbf"},
     )
     elapsed = time.perf_counter() - t0
@@ -217,7 +240,7 @@ def run_inference(
         detections=fused,
         tiles_total=len(coords),
         tiles_processed=processed,
-        tiles_skipped_empty=0,
+        tiles_skipped_empty=skipped_outside,
         raw_count=raw_count,
         fused_count=len(fused),
         meta={"width": width, "height": height, "tile_size": config.root_size},

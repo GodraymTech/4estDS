@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiGetText, apiPatchJson, apiPostJson, apiUpload, apiUrl } from "./client";
+import { apiDelete, apiGet, apiGetText, apiPatchJson, apiPostForm, apiPostJson, apiPutJson, apiUpload, apiUrl } from "./client";
 import type {
   FeatureCollection,
   AssetInspectRequest,
@@ -32,6 +32,10 @@ import type {
   TilePreheatRequest,
   TilePreheatResult,
   UploadResponse,
+  EffectiveAreaImportResponse,
+  EffectiveAreaImportSource,
+  EffectiveAreaPutRequest,
+  EffectiveAreaResponse,
 } from "./types";
 
 // 端点定义集中一处(DRY)。承接 v1.0 api.ts 的契约, 重构为 FSD shared 层。
@@ -39,6 +43,23 @@ export const endpoints = {
   listTracts: (): Promise<Tract[]> => apiGet("/tracts"),
 
   listTiffs: (): Promise<TiffAsset[]> => apiGet("/tracts/tiffs"),
+
+  getEffectiveArea: (tractPk: string): Promise<EffectiveAreaResponse> =>
+    apiGet(`/tracts/${encodeURIComponent(tractPk)}/effective-area`),
+
+  putEffectiveArea: (tractPk: string, body: EffectiveAreaPutRequest): Promise<EffectiveAreaResponse> =>
+    apiPutJson(`/tracts/${encodeURIComponent(tractPk)}/effective-area`, body),
+
+  inspectEffectiveAreaImport: (
+    tractPk: string,
+    source: EffectiveAreaImportSource,
+  ): Promise<EffectiveAreaImportResponse> => {
+    const body = new FormData();
+    for (const file of source.files ?? []) body.append("files", file);
+    if (source.localPath) body.append("local_path", source.localPath);
+    if (source.layer) body.append("layer", source.layer);
+    return apiPostForm(`/tracts/${encodeURIComponent(tractPk)}/effective-area/imports/inspect`, body);
+  },
 
   listAssets: (): Promise<AssetRow[]> => apiGet("/assets"),
 

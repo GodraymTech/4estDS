@@ -16,6 +16,9 @@ db:
   url: null               # 为空则使用 <home>/db/4estds.sqlite
   echo: false
 
+effective_area:
+  mask_cache_size: 32     # 地块有效区域转换为 TIFF 像素几何后的 LRU 缓存项数
+
 preprocess:
   # 预处理行为: dynamic (动态切片：不落盘，内存推理) | static (静态切片：先落盘后推理)
   action: "dynamic"

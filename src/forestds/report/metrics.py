@@ -140,7 +140,13 @@ def compute_report(
             o["crown_volume_geo"] = o.get("crown_volume_geo_real")
 
     tract = tract or {}
-    area_m2 = _num(tract.get("geo_area"))
+    effective_area_hm2 = _num(tract.get("effective_area_hm2"))
+    if effective_area_hm2 is not None and effective_area_hm2 > 0:
+        area_m2 = effective_area_hm2 * 10_000.0
+        area_source = "effective_area"
+    else:
+        area_m2 = _num(tract.get("geo_area"))
+        area_source = "tiff_area" if area_m2 is not None else None
     species = species_composition(observations)
     n = len(observations)
     run_ids = sorted({str(o["run_id"]) for o in observations if o.get("run_id")})
@@ -224,6 +230,7 @@ def compute_report(
         meta={
             "phase_id": tract.get("phase_id"),
             "area_m2": area_m2,
+            "area_source": area_source,
             "pixel_width": tract.get("pixel_width"),
             "pixel_height": tract.get("pixel_height"),
             "species_richness": len(species),

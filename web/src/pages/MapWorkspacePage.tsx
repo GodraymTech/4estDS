@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import {
   Button,
@@ -22,7 +22,7 @@ import {
   SearchOutlined,
   SwapOutlined,
 } from "@ant-design/icons";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
 import { MapStage } from "../shared/ui/MapStage";
 import {
@@ -45,6 +45,7 @@ import { env } from "../shared/config/env";
 import { formatAreaValue } from "../shared/lib/format";
 import type { GeoFeature } from "../shared/api";
 import { useObservations, type FeatureCollection } from "../entities/observation";
+import { buildInvalidAreaMask, useEffectiveArea } from "../entities/effective-area";
 import {
   useTractImagery,
   useTractSummary,
@@ -76,6 +77,11 @@ const BOUNDARY_LAYER = "overview-boundary";
 const MEASURE_PTS = "measure-pts";
 const MEASURE_LINE = "measure-line";
 const MEASURE_FILL = "measure-fill";
+const EFFECTIVE_MASK = "effective-area-mask";
+const EFFECTIVE_LINE = "effective-area-line";
+const LazyEffectiveAreaEditor = lazy(() =>
+  import("../features/effective-area-editor/EffectiveAreaEditor").then((module) => ({ default: module.EffectiveAreaEditor })),
+);
 const EMPTY_TRACTS: Tract[] = [];
 const OVERVIEW_FIT = {
   padding: { top: 84, right: 44, bottom: 96, left: 44 },
@@ -123,6 +129,7 @@ export function MapWorkspacePage() {
     tiffName,
   } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: tracts, error: tractsError, isError: tractsFailed, isLoading } = useTracts();
   const tiffsQuery = useTiffs();
   const [map, setMap] = useState<MapController | null>(null);
@@ -132,6 +139,7 @@ export function MapWorkspacePage() {
   const [basemapId, setBasemapId] = useState(env.defaultBasemapId);
   const [roadVisible, setRoadVisible] = useState(false);
   const [showDetections, setShowDetections] = useState(true);
+  const [showEffectiveMask, setShowEffectiveMask] = useState(true);
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
   const [zoom, setZoom] = useState(env.overviewZoom);
   const [metersPerPixel, setMetersPerPixel] = useState(0);
@@ -227,6 +235,10 @@ export function MapWorkspacePage() {
     const checked = new Set(checkedTiffKeys);
     return phaseTiffs.filter((t) => checked.has(tiffKey(t)));
   }, [checkedTiffKeys, isSingleImageView, phaseTiffs, requestedTiff]);
+  const editorImageryTiles = useMemo(
+    () => phaseTiffs.filter((tiff) => tiff.file_name).map(tiffTileUrl),
+    [phaseTiffs],
+  );
 
   const observations = useObservations(activeTractId, "crown");
   const visibleObservations = useMemo(() => {
@@ -253,6 +265,8 @@ export function MapWorkspacePage() {
     tiffName: requestedTiff?.file_name ?? requestedTiffName,
   });
   const summary = useTractSummary(activeTractId);
+  const effectiveArea = useEffectiveArea(activeTract?.tract_pk);
+  const editingEffectiveArea = searchParams.get("effective-area");
   const speciesList = useMemo(
     () => extractSpecies(visibleObservations),
     [visibleObservations],
@@ -514,6 +528,28 @@ export function MapWorkspacePage() {
       detectionLayerIds.current.push(layer.id);
     }
   }, [map, ready, selectedSpecies, showDetections, speciesColors, speciesList.length, visibleObservations]);
+
+  useEffect(() => {
+    if (!map || !ready) return;
+    map.removeLayer(EFFECTIVE_MASK);
+    map.removeLayer(EFFECTIVE_LINE);
+    if (!showEffectiveMask || !effectiveArea.data) return;
+    map.setGeoJsonLayer({
+      id: EFFECTIVE_MASK,
+      kind: "polygon",
+      data: buildInvalidAreaMask(effectiveArea.data.boundary_geometry, effectiveArea.data.geometry),
+      color: "#24171a",
+      opacity: 0.55,
+    });
+    map.setGeoJsonLayer({
+      id: EFFECTIVE_LINE,
+      kind: "line",
+      data: { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: effectiveArea.data.geometry }] },
+      color: "#75efbb",
+      opacity: 0.95,
+      lineWidth: 2.2,
+    });
+  }, [effectiveArea.data, map, ready, showEffectiveMask]);
 
   useEffect(() => {
     if (!map || !ready || !activeTract || !visibleObservations) return;
@@ -821,6 +857,12 @@ export function MapWorkspacePage() {
           tiffName={requestedTiffName}
           width={profileWidth}
           onWidthChange={setProfileWidth}
+          onEditEffectiveArea={() => {
+            if (!activeTract.tract_pk) return;
+            const next = new URLSearchParams(searchParams);
+            next.set("effective-area", activeTract.tract_pk);
+            setSearchParams(next);
+          }}
         />
       ) : null}
 
@@ -848,6 +890,14 @@ export function MapWorkspacePage() {
                 onClick={() => setShowDetections((v) => !v)}
               >
                 显示检测框
+              </Button>
+              <Button
+                size="small"
+                type={showEffectiveMask ? "primary" : "default"}
+                icon={showEffectiveMask ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                onClick={() => setShowEffectiveMask((value) => !value)}
+              >
+                遮罩无效区
               </Button>
             </Space>
             {showDetections && speciesList.length > 0 ? (
@@ -896,6 +946,21 @@ export function MapWorkspacePage() {
 
       {!chromeHidden && missingImageCoords > 0 ? (
         <div style={STATUS_CHIP}>{missingImageCoords} 个有效影像缺少 footprint 中心点</div>
+      ) : null}
+
+      {editingEffectiveArea && activeTract?.tract_pk === editingEffectiveArea ? (
+        <Suspense fallback={<div style={LOADING}><Spin tip="加载 GIS 编辑器" /></div>}>
+          <LazyEffectiveAreaEditor
+            tractPk={editingEffectiveArea}
+            tractLabel={activeTract.tract_id}
+            imageryTiles={editorImageryTiles}
+            onClose={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("effective-area");
+              setSearchParams(next, { replace: true });
+            }}
+          />
+        </Suspense>
       ) : null}
     </div>
   );
@@ -1443,6 +1508,7 @@ function ProfilePanel({
   tiffName,
   width,
   onWidthChange,
+  onEditEffectiveArea,
 }: {
   tract: Tract;
   group: TractGroup;
@@ -1455,6 +1521,7 @@ function ProfilePanel({
   tiffName?: string;
   width: number;
   onWidthChange: (width: number) => void;
+  onEditEffectiveArea: () => void;
 }) {
   const metricSections = buildProfileMetricSections(summary, tract, speciesColors);
   const detectedTiffs = (phaseTiffs ?? []).filter((t) => t.has_detection || t.observation_count > 0);
@@ -1510,6 +1577,9 @@ function ProfilePanel({
               时相选择
             </Button>
           </Popover>
+          <Button size="small" type="primary" onClick={onEditEffectiveArea}>
+            编辑有效区域
+          </Button>
           {loading ? <Spin size="small" /> : null}
         </Space>
       </div>

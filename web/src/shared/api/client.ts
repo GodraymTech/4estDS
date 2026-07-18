@@ -9,6 +9,8 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code?: string,
+    public readonly details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -18,13 +20,23 @@ export class ApiError extends Error {
 async function parse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText;
+    let code: string | undefined;
+    let details: Record<string, unknown> = {};
     try {
-      const body = (await res.json()) as { detail?: string };
-      if (body?.detail) detail = body.detail;
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+      else if (body.detail && typeof body.detail === "object") {
+        const structured = body.detail as Record<string, unknown>;
+        if (typeof structured.message === "string") detail = structured.message;
+        if (typeof structured.code === "string") code = structured.code;
+        if (structured.details && typeof structured.details === "object") {
+          details = structured.details as Record<string, unknown>;
+        }
+      }
     } catch {
       /* 非 JSON 错误体, 保留 statusText */
     }
-    throw new ApiError(res.status, `请求失败 (${res.status}): ${detail}`);
+    throw new ApiError(res.status, `请求失败 (${res.status}): ${detail}`, code, details);
   }
   return (await res.json()) as T;
 }
@@ -57,6 +69,26 @@ export async function apiPatchJson<T>(path: string, body: unknown): Promise<T> {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function apiPutJson<T>(path: string, body: unknown): Promise<T> {
+  return parse<T>(
+    await fetch(`${env.apiBase}${path}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function apiPostForm<T>(path: string, body: FormData): Promise<T> {
+  return parse<T>(
+    await fetch(`${env.apiBase}${path}`, {
+      method: "POST",
+      headers: authHeaders(),
+      body,
     }),
   );
 }

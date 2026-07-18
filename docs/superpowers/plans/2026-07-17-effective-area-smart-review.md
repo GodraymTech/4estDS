@@ -139,7 +139,7 @@ rtk git commit -m "feat(db): make TIFF active runs authoritative"
 - Produces: `GET/PUT /tracts/{tract_pk}/effective-area` 与 `POST /tracts/{tract_pk}/effective-area/imports/inspect`。
 - Produces: `GeometryEditorAdapter` 只暴露 `setTool/getDraft/replaceDraft/undo/redo/destroy/onChange`，第三方类型不泄漏到业务层。
 
-- [ ] **Step 1: 写入有效区域失败测试**
+- [x] **Step 1: 写入有效区域失败测试**
 
 ```python
 def test_effective_area_defaults_to_boundary(service, tract):
@@ -156,13 +156,13 @@ def test_save_rejects_stale_or_outside_geometry(service, tract):
 
 再覆盖 Polygon/MultiPolygon、洞、多岛、空几何、自相交、重复点、CRS、越界裁剪确认与精确 hm²。
 
-- [ ] **Step 2: 运行测试确认服务和字段尚不存在**
+- [x] **Step 2: 运行测试确认服务和字段尚不存在**
 
 Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/bin/pytest tests/test_effective_area.py tests/test_effective_area_imports.py -q`
 
 Expected: FAIL，原因是模块/API/`effective_area_hm2` 缺失。
 
-- [ ] **Step 3: 实现服务、API 与 GIS 导入**
+- [x] **Step 3: 实现服务、API 与 GIS 导入**
 
 ```python
 @dataclass(frozen=True)
@@ -180,7 +180,7 @@ class EffectiveAreaResult:
 
 Shapely 负责最终规范化与验证；pyogrio 读取 GeoJSON/JSON、Shapefile sibling/zip、GPKG、KML、FGB，并返回可选图层和明确缺件/CRS错误。PUT 使用 `updated_at` 乐观并发，409 与 422 错误分离。
 
-- [ ] **Step 4: 先写 window 调度失败测试，再接入 infer**
+- [x] **Step 4: 先写 window 调度失败测试，再接入 infer**
 
 ```python
 def test_windows_skip_outside_and_mask_only_boundary(filter):
@@ -195,7 +195,7 @@ Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/
 
 Expected: RED 后实现，GREEN 时证明完全外部 window 不读像素、边界 window 只建局部 mask、中心点规则过滤结果。
 
-- [ ] **Step 5: 实现懒加载 GIS 编辑器与台账/任务入口**
+- [x] **Step 5: 实现懒加载 GIS 编辑器与台账/任务入口**
 
 Terra Draw + MapLibre adapter 承担绘制和顶点编辑；Turf 只做预览级面积/布尔辅助；支持选择、绘面、增加、挖洞、分割、合并、删除、100 步撤销重做、离开保护、导航自动收起与恢复。台账显示 `面积/有效面积(hm²)`，编辑弹窗提供入口；`/tasks` 只显示面积和跳转。
 
@@ -205,13 +205,13 @@ Run: `rtk proxy mise exec -- pnpm run build`（目录 `web`）
 
 Expected: 普通首包不包含编辑器 chunk；编辑器单独产出 lazy chunk。
 
-- [ ] **Step 6: 扩展统计、地图过滤与既有导出后回归**
+- [x] **Step 6: 扩展统计、地图过滤与既有导出后回归**
 
 Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/bin/pytest tests/test_effective_area.py tests/test_effective_area_windows.py tests/test_effective_area_imports.py -q`
 
 Expected: PASS；密度读取 `effective_area_hm2`，旧 active run 地图按当前中心点过滤，导出按需带 effective-area 图层和溯源字段。
 
-- [ ] **Step 7: 提交阶段 B**
+- [x] **Step 7: 提交阶段 B**
 
 ```bash
 rtk git add src/forestds deploy/postgis configs/default.yaml web/package.json web/pnpm-lock.yaml web/src tests/test_effective_area.py tests/test_effective_area_windows.py tests/test_effective_area_imports.py

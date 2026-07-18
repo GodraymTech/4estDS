@@ -1,0 +1,94 @@
+.effective-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  grid-template: 58px minmax(0, 1fr) 30px / 92px minmax(0, 1fr) 292px;
+  color: #eafff7;
+  background: #07110f;
+}
+
+.effective-editor__topbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(167, 239, 213, 0.2);
+  background: #0d201b;
+}
+
+.effective-editor__topbar > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.effective-editor__topbar strong { font-size: 16px; }
+.effective-editor__topbar span { color: #9ec8ba; }
+
+.effective-editor__tools {
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 8px;
+  overflow-y: auto;
+  border-right: 1px solid rgba(167, 239, 213, 0.18);
+  background: #0b1916;
+}
+
+.effective-editor__tools .ant-btn { justify-content: flex-start; }
+.effective-editor__tools .ant-divider { margin: 6px 0; border-color: rgba(167, 239, 213, 0.18); }
+.effective-editor__map { position: relative; min-width: 0; min-height: 0; }
+
+.effective-editor__inspector {
+  z-index: 2;
+  padding: 12px;
+  overflow-y: auto;
+  border-left: 1px solid rgba(167, 239, 213, 0.18);
+  background: #0b1916;
+}
+
+.effective-editor__inspector section {
+  display: grid;
+  gap: 9px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid rgba(167, 239, 213, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.effective-editor__inspector h3 { margin: 0 0 2px; color: #eafff7; font-size: 14px; }
+.effective-editor__metric { display: flex; justify-content: space-between; gap: 8px; color: #a7cbbf; }
+.effective-editor__metric strong { color: #fff; font-variant-numeric: tabular-nums; }
+.effective-editor__or { text-align: center; color: #6f9588; font-size: 11px; }
+
+.effective-editor__statusbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  padding: 0 14px;
+  color: #9fc4b8;
+  background: #07110f;
+  font: 11px var(--font-mono, monospace);
+}
+
+.effective-editor-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-content: center;
+  gap: 14px;
+  background: #07110f;
+}
+
+@media (max-width: 900px) {
+  .effective-editor { grid-template-columns: 76px minmax(0, 1fr); }
+  .effective-editor__inspector { display: none; }
+  .effective-editor__statusbar { gap: 8px; justify-content: space-between; }
+}

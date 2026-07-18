@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS tracts (
     tract_id            TEXT NOT NULL,
     boundary_geom       geometry(Geometry, 0),
     boundary_geom_cent  geometry(Point, 0),
-    effective_geom      geometry(Geometry, 0),
+    effective_geom      geometry(MultiPolygon, 4326),
+    effective_area_hm2 DOUBLE PRECISION,
     boundary_source     TEXT NOT NULL DEFAULT 'auto'
         CHECK (boundary_source IN ('auto', 'manual')),
     coverage_status     TEXT NOT NULL DEFAULT 'none'
@@ -164,6 +165,7 @@ CREATE INDEX IF NOT EXISTS idx_obs_run ON tree_observations(run_id);
 CREATE INDEX IF NOT EXISTS idx_obs_tract_phase ON tree_observations(tract_phase_pk);
 CREATE INDEX IF NOT EXISTS idx_obs_individual ON tree_observations(individual_id);
 CREATE INDEX IF NOT EXISTS idx_tracts_boundary_geom ON tracts USING GIST (boundary_geom);
+CREATE INDEX IF NOT EXISTS idx_tracts_effective_geom ON tracts USING GIST (effective_geom);
 CREATE INDEX IF NOT EXISTS idx_tiffs_footprint_geom ON tiffs USING GIST (footprint_geom);
 CREATE INDEX IF NOT EXISTS idx_obs_geom_point ON tree_observations USING GIST (geom_point);
 CREATE INDEX IF NOT EXISTS idx_obs_geom_crown ON tree_observations USING GIST (geom_crown);

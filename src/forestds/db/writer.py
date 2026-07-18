@@ -434,6 +434,15 @@ def ensure_tract(
     now = _now()
     boundary_center = _centroid_from_wkt_polygon(boundary_geom)
     boundary_geom_cent = _wkt_point(*boundary_center) if boundary_center else None
+    boundary_area_hm2 = None
+    if boundary_geom:
+        try:
+            from shapely.wkt import loads as load_wkt
+            from ..effective_area.service import geodesic_area_hm2
+
+            boundary_area_hm2 = geodesic_area_hm2(load_wkt(boundary_geom))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("地块边界面积计算失败，暂不写 effective_area_hm2: {}", exc)
 
     conn = _connect(url)
     try:
@@ -469,11 +478,16 @@ def ensure_tract(
         tract_phase_pk = _safe_pk("phase", tract_pk, phase_id)
         conn.execute(
             "INSERT INTO tracts "
-            "(tract_pk, region_id, city, county, town, tract_id, boundary_geom, boundary_geom_cent, effective_geom, boundary_source, coverage_status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "(tract_pk, region_id, city, county, town, tract_id, boundary_geom, boundary_geom_cent, "
+            "effective_geom, effective_area_hm2, boundary_source, coverage_status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tract_pk) DO UPDATE SET region_id=excluded.region_id, city=excluded.city, county=excluded.county, "
             "town=excluded.town, boundary_geom=COALESCE(excluded.boundary_geom, tracts.boundary_geom), "
-            "boundary_geom_cent=COALESCE(excluded.boundary_geom_cent, tracts.boundary_geom_cent), updated_at=excluded.updated_at",
+            "boundary_geom_cent=COALESCE(excluded.boundary_geom_cent, tracts.boundary_geom_cent), "
+            "effective_area_hm2=CASE "
+            "WHEN tracts.effective_geom IS NULL AND excluded.boundary_geom IS NOT NULL "
+            "THEN excluded.effective_area_hm2 ELSE tracts.effective_area_hm2 END, "
+            "updated_at=excluded.updated_at",
             (
                 tract_pk,
                 resolved_region_id,
@@ -484,6 +498,7 @@ def ensure_tract(
                 boundary_geom,
                 boundary_geom_cent,
                 None,
+                boundary_area_hm2,
                 "manual" if boundary_geom else "auto",
                 "none",
                 now,
@@ -936,7 +951,9 @@ def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> Non
     if not bbox_rows:
         # 无 TIFF 资产，重置边界为空，但保持 auto 来源状态
         conn.execute(
-            "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, updated_at=? WHERE tract_pk=?",
+            "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, "
+            "effective_area_hm2=CASE WHEN effective_geom IS NULL THEN NULL ELSE effective_area_hm2 END, "
+            "updated_at=? WHERE tract_pk=?",
             (now, tract_pk),
         )
         return
@@ -963,7 +980,9 @@ def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> Non
 
     if not valid_bbox_found:
         conn.execute(
-            "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, updated_at=? WHERE tract_pk=?",
+            "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, "
+            "effective_area_hm2=CASE WHEN effective_geom IS NULL THEN NULL ELSE effective_area_hm2 END, "
+            "updated_at=? WHERE tract_pk=?",
             (now, tract_pk),
         )
         return
@@ -979,8 +998,18 @@ def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> Non
     boundary_geom = _wkt_polygon(coords)
     center = ((min_lng + max_lng) / 2.0, (min_lat + max_lat) / 2.0)
     boundary_geom_cent = _wkt_point(*center)
+    boundary_area_hm2 = None
+    try:
+        from shapely.wkt import loads as load_wkt
+        from ..effective_area.service import geodesic_area_hm2
+
+        boundary_area_hm2 = geodesic_area_hm2(load_wkt(boundary_geom))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("自动地块边界面积计算失败: {}", exc)
 
     conn.execute(
-        "UPDATE tracts SET boundary_geom=?, boundary_geom_cent=?, boundary_source='auto', updated_at=? WHERE tract_pk=?",
-        (boundary_geom, boundary_geom_cent, now, tract_pk),
+        "UPDATE tracts SET boundary_geom=?, boundary_geom_cent=?, boundary_source='auto', "
+        "effective_area_hm2=CASE WHEN effective_geom IS NULL THEN ? ELSE effective_area_hm2 END, "
+        "updated_at=? WHERE tract_pk=?",
+        (boundary_geom, boundary_geom_cent, boundary_area_hm2, now, tract_pk),
     )

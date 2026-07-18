@@ -163,6 +163,41 @@ class TractOut(BaseModel):
     status: Optional[str] = None
 
 
+class EffectiveAreaPut(BaseModel):
+    """保存当前地块唯一有效区域；updated_at 用于乐观并发。"""
+
+    geometry: dict[str, Any]
+    updated_at: str = Field(..., min_length=1)
+    clip_to_boundary: bool = False
+
+
+class EffectiveAreaOut(BaseModel):
+    tract_pk: str
+    boundary_geometry: dict[str, Any]
+    geometry: dict[str, Any]
+    tract_area_hm2: float
+    effective_area_hm2: float
+    effective_ratio: float
+    updated_at: str
+    warnings: tuple[str, ...] = ()
+    is_default: bool
+
+
+class EffectiveAreaImportOut(BaseModel):
+    tract_pk: str
+    geometry: dict[str, Any]
+    source_crs: str
+    target_crs: str
+    feature_count: int
+    polygon_count: int
+    layer: Optional[str] = None
+    layers: tuple[str, ...] = ()
+    effective_area_hm2: float
+    effective_ratio: float
+    requires_clip: bool
+    warnings: tuple[str, ...] = ()
+
+
 class TiffOut(BaseModel):
     """TIFF 影像资产行(地图标注与看板聚合的影像维度事实源)。"""
     model_config = {"extra": "allow"}

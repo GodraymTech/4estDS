@@ -119,7 +119,7 @@ def _to_wgs84(x: float, y: float, tract: dict) -> tuple[float, float] | None:
 def _base_tract_query(where: str = "") -> str:
     return (
         "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_geom_cent, "
-        "tr.effective_geom, tr.boundary_source, "
+        "tr.effective_geom, tr.effective_area_hm2, tr.boundary_source, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
         "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tf.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
@@ -145,7 +145,7 @@ def _base_tract_query(where: str = "") -> str:
 def _phase_tract_query(where: str = "") -> str:
     return (
         "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_geom_cent, "
-        "tr.effective_geom, tr.boundary_source, "
+        "tr.effective_geom, tr.effective_area_hm2, tr.boundary_source, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
         "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tf.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
@@ -171,6 +171,25 @@ def _tract_row(row: dict) -> dict:
         center = _parse_wkt_polygon_centroid(out.get("boundary_geom")) or _parse_wkt_point(out.get("boundary_geom_cent"))
         if center:
             out["center_lng"], out["center_lat"] = center
+    try:
+        from shapely.wkt import loads as load_wkt
+        from ..effective_area.service import geodesic_area_hm2
+
+        boundary_area = (
+            geodesic_area_hm2(load_wkt(out["boundary_geom"]))
+            if out.get("boundary_geom")
+            else None
+        )
+    except Exception:  # noqa: BLE001 - 元数据读取不能因坏几何中断台账
+        boundary_area = None
+    if out.get("effective_area_hm2") is None:
+        out["effective_area_hm2"] = boundary_area
+    out["tract_area_hm2"] = boundary_area
+    out["effective_area_m2"] = (
+        float(out["effective_area_hm2"]) * 10_000.0
+        if out.get("effective_area_hm2") is not None
+        else None
+    )
     return out
 
 
@@ -271,6 +290,73 @@ def _observation_row(row: dict) -> dict:
     return out
 
 
+def _filter_effective_observations(observations: list[dict]) -> list[dict]:
+    """按当前地块有效区域执行中心点过滤；缺少可靠地理点时保守保留。"""
+    if not observations:
+        return observations
+    from shapely.geometry import Point
+    from shapely.prepared import prep
+    from shapely.wkt import loads as load_wkt
+
+    geometries: dict[str, object] = {}
+    # None 表示源 CRS 已是 WGS84；False 表示 CRS 无法解析，必须保守保留记录。
+    transformers: dict[tuple[object, object], object | None | bool] = {}
+    kept: list[dict] = []
+    for item in observations:
+        raw_geometry = item.get("_effective_geom") or item.get("_boundary_geom")
+        center = _parse_wkt_point(item.get("center_geom"))
+        if not raw_geometry or center is None:
+            for key in ("_effective_geom", "_boundary_geom", "_crs_epsg", "_crs_wkt"):
+                item.pop(key, None)
+            kept.append(item)
+            continue
+        prepared = geometries.get(raw_geometry)
+        if prepared is None:
+            try:
+                geometry = load_wkt(raw_geometry)
+                if geometry.is_empty:
+                    raise ValueError("empty geometry")
+                prepared = prep(geometry)
+                geometries[raw_geometry] = prepared
+            except Exception:  # noqa: BLE001
+                for key in ("_effective_geom", "_boundary_geom", "_crs_epsg", "_crs_wkt"):
+                    item.pop(key, None)
+                kept.append(item)
+                continue
+        epsg = item.get("_crs_epsg")
+        crs_wkt = item.get("_crs_wkt")
+        if not epsg and not crs_wkt:
+            center = None
+        elif (epsg and int(epsg) != 4326) or (not epsg and crs_wkt):
+            transformer_key = (epsg, crs_wkt)
+            if transformer_key not in transformers:
+                try:
+                    from pyproj import CRS, Transformer
+
+                    source = CRS.from_epsg(int(epsg)) if epsg else CRS.from_wkt(str(crs_wkt))
+                    transformers[transformer_key] = (
+                        None
+                        if source.to_epsg() == 4326
+                        else Transformer.from_crs(source, 4326, always_xy=True)
+                    )
+                except Exception:  # noqa: BLE001
+                    transformers[transformer_key] = False
+            transformer = transformers[transformer_key]
+            if transformer is False:
+                center = None
+            elif transformer is not None:
+                try:
+                    center = transformer.transform(*center)
+                except Exception:  # noqa: BLE001
+                    center = None
+        keep = center is None or bool(prepared.covers(Point(*center)))
+        for key in ("_effective_geom", "_boundary_geom", "_crs_epsg", "_crs_wkt"):
+            item.pop(key, None)
+        if keep:
+            kept.append(item)
+    return kept
+
+
 def fetch_observations(
     *,
     run_id: str | None = None,
@@ -285,8 +371,8 @@ def fetch_observations(
         clauses.append("o.run_id=?")
         params.append(run_id)
     if tract_id:
-        clauses.append("(tp.tract_id=? OR tp.tract_phase_pk=?)")
-        params.extend([tract_id, tract_id])
+        clauses.append("(tp.tract_id=? OR tp.tract_phase_pk=? OR tp.tract_pk=?)")
+        params.extend([tract_id, tract_id, tract_id])
         if not run_id:
             clauses.append(
                 "o.run_id IN (SELECT tf.active_run_id FROM tiffs tf "
@@ -296,14 +382,21 @@ def fetch_observations(
     conn = _connect(url)
     try:
         rows = conn.execute(
-            "SELECT o.*, tp.tract_id, tp.region_id FROM tree_observations o "
+            "SELECT o.*, tp.tract_id, tp.region_id, tr.boundary_geom AS _boundary_geom, "
+            "tr.effective_geom AS _effective_geom, tf.crs_epsg AS _crs_epsg, tf.crs_wkt AS _crs_wkt, "
+            "r.task_type, r.parent_run_id "
+            "FROM tree_observations o "
             "JOIN tract_phases tp ON tp.tract_phase_pk=o.tract_phase_pk "
+            "JOIN tracts tr ON tr.tract_pk=tp.tract_pk "
+            "JOIN runs r ON r.run_id=o.run_id "
+            "LEFT JOIN tiffs tf ON tf.tiff_id=o.tiff_id AND tf.phase_id=o.phase_id "
             f"WHERE {where}",
             params,
         ).fetchall()
     finally:
         conn.close()
     obs = [_observation_row(dict(row)) for row in rows]
+    obs = _filter_effective_observations(obs)
     log.debug("fetch_observations: {} 条 (run_id={} tract_id={})", len(obs), run_id, tract_id)
     return obs
 
@@ -404,7 +497,7 @@ def list_tiffs(*, url: str | None = None) -> list[dict]:
             " FROM runs WHERE task_type IN ('infer', 'review') GROUP BY phase_id, tiff_id"
             ") "
             "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, "
-            "tr.boundary_geom, tr.boundary_geom_cent, tr.effective_geom, "
+            "tr.boundary_geom, tr.boundary_geom_cent, tr.effective_geom, tr.effective_area_hm2, "
             "tp.tract_phase_pk, tp.phase_id, tf.active_run_id, "
             "tf.tiff_id, tf.file_name, tf.path_versions, tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, "
             "tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
@@ -501,9 +594,9 @@ def active_run_for_tract(tract_id: str, *, url: str | None = None) -> str | None
         row = conn.execute(
             "SELECT tf.active_run_id FROM tiffs tf "
             "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
-            "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) AND tf.active_run_id IS NOT NULL "
+            "WHERE (tp.tract_id=? OR tp.tract_phase_pk=? OR tp.tract_pk=?) AND tf.active_run_id IS NOT NULL "
             "ORDER BY tp.phase_id DESC, tf.updated_at DESC LIMIT 1",
-            (tract_id, tract_id),
+            (tract_id, tract_id, tract_id),
         ).fetchone()
     finally:
         conn.close()
@@ -516,8 +609,9 @@ def latest_tiff_path_for_tract(tract_id: str, *, url: str | None = None) -> str 
         row = conn.execute(
             "SELECT tf.path_versions FROM tiffs tf "
             "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
-            "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) ORDER BY tp.phase_id DESC, tf.updated_at DESC LIMIT 1",
-            (tract_id, tract_id),
+            "WHERE (tp.tract_id=? OR tp.tract_phase_pk=? OR tp.tract_pk=?) "
+            "ORDER BY tp.phase_id DESC, tf.updated_at DESC LIMIT 1",
+            (tract_id, tract_id, tract_id),
         ).fetchone()
     finally:
         conn.close()
@@ -573,9 +667,9 @@ def active_runs_for_tract_phase(tract_id: str, *, url: str | None = None) -> lis
         rows = conn.execute(
             "SELECT tf.active_run_id AS run_id FROM tiffs tf "
             "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
-            "WHERE (tp.tract_id=? OR tp.tract_phase_pk=?) AND tf.active_run_id IS NOT NULL "
+            "WHERE (tp.tract_id=? OR tp.tract_phase_pk=? OR tp.tract_pk=?) AND tf.active_run_id IS NOT NULL "
             "ORDER BY tf.created_at",
-            (tract_id, tract_id),
+            (tract_id, tract_id, tract_id),
         ).fetchall()
         return [row["run_id"] for row in rows]
     finally:

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { Layout } from "antd";
 import { Outlet, useLocation } from "react-router-dom";
@@ -23,7 +23,9 @@ function titleForPath(pathname: string): string {
 // 应用外壳: 左侧固定 rail + 顶栏 + 内容区(路由出口)。
 // 页脚由具体非地图页自行引入(地图页全屏, 不放 footer)。
 export function AppShell() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  const editorMode = pathname.startsWith("/map") && new URLSearchParams(search).has("effective-area");
+  const [railPreview, setRailPreview] = useState(false);
 
   // 每页同步文档标题: 屏读朗读与浏览器标签页可辨识。
   useEffect(() => {
@@ -31,18 +33,39 @@ export function AppShell() {
     document.title = label ? `${label} · 4estDS` : "4estDS 红树林生态监测";
   }, [pathname]);
 
+  useEffect(() => {
+    if (!editorMode) setRailPreview(false);
+  }, [editorMode]);
+
   return (
     <Layout style={SHELL}>
       <a className="skip-link" href="#main-content">
         跳到主内容
       </a>
-      <Sider width={72} collapsedWidth={72} style={SIDER} theme="dark">
+      {editorMode && !railPreview ? (
+        <div
+          aria-label="悬停展开导航"
+          style={RAIL_TRIGGER}
+          onMouseEnter={() => setRailPreview(true)}
+        />
+      ) : null}
+      <Sider
+        width={editorMode && !railPreview ? 0 : 72}
+        collapsedWidth={0}
+        style={{ ...SIDER, overflow: "hidden", transition: "width 160ms ease" }}
+        theme="dark"
+        onMouseLeave={() => {
+          if (editorMode) setRailPreview(false);
+        }}
+      >
         <NavRail />
       </Sider>
       <Layout>
-        <Header style={HEADER}>
-          <HeaderBar />
-        </Header>
+        {!editorMode ? (
+          <Header style={HEADER}>
+            <HeaderBar />
+          </Header>
+        ) : null}
         <Content id="main-content" role="main" style={CONTENT}>
           <Outlet />
         </Content>
@@ -59,4 +82,11 @@ const CONTENT: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   minHeight: 0,
+};
+const RAIL_TRIGGER: CSSProperties = {
+  position: "fixed",
+  inset: "0 auto 0 0",
+  width: 8,
+  zIndex: 1000,
+  background: "transparent",
 };

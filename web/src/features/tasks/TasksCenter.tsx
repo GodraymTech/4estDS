@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { endpoints, queryKeys, type JobHistoryItem, type JobState, type JobStatus } from "../../shared/api";
 import { useJob } from "../../entities/run";
+import { formatHm2 } from "../../entities/effective-area";
 import { UploadForm } from "./UploadForm";
 import { JobStatusCell } from "./JobStatusCell";
 import { useJobsStore, type SubmittedJob } from "./jobsStore";
@@ -148,6 +149,7 @@ export function TasksCenter() {
 
 function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const phaseId = searchParams.get("phase_id")?.trim() || undefined;
   const tiffId = searchParams.get("tiff_id")?.trim() || undefined;
   const hasAssetFilter = Boolean(phaseId || tiffId);
@@ -156,6 +158,10 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
     queryKey: queryKeys.jobs(taskType, phaseId, tiffId),
     queryFn: () => endpoints.listJobs({ taskType, phaseId, tiffId, limit: 80 }),
     refetchInterval: 5000,
+  });
+  const { data: assets = [] } = useQuery({
+    queryKey: queryKeys.assets,
+    queryFn: endpoints.listAssets,
   });
 
   const columns: TableProps<JobHistoryItem>["columns"] = [
@@ -188,6 +194,38 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
       dataIndex: "started_at",
       key: "started_at",
       render: (v: string | null | undefined) => (v ? new Date(v).toLocaleString() : "-"),
+    },
+    {
+      title: "有效面积(hm²)",
+      key: "effective_area_hm2",
+      width: 148,
+      render: (_: unknown, row) => {
+        const asset = assets.find((item) =>
+          item.tract_id === row.tract_id && (!row.phase_id || item.phase_id === row.phase_id),
+        );
+        const value = row.effective_area_hm2 ?? asset?.effective_area_hm2;
+        const canOpen = Boolean(asset?.tract_pk && asset.city && asset.county && asset.tract_id && asset.phase_id);
+        return (
+          <span>
+            {formatHm2(value)}
+            {canOpen && asset ? (
+              <Button
+                type="link"
+                size="small"
+                onClick={() => navigate([
+                  "/map",
+                  encodeURIComponent(asset.city as string),
+                  encodeURIComponent(asset.county as string),
+                  encodeURIComponent(asset.tract_id as string),
+                  encodeURIComponent(asset.phase_id as string),
+                ].join("/") + `?effective-area=${encodeURIComponent(asset.tract_pk as string)}`)}
+              >
+                地图编辑
+              </Button>
+            ) : null}
+          </span>
+        );
+      },
     },
   ];
 

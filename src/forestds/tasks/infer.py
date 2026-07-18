@@ -119,6 +119,12 @@ def run_infer_pipeline(
     tiles_dir = prep["tiles_dir"]
     image_path = prep["image_path"]
 
+    from ..utils.input_inspect import extract_image_phase_id
+
+    default_phase_id, _ = extract_image_phase_id(image_path)
+    final_phase_id = phase_id or default_phase_id or "00000000"
+    final_tract_id = tract_id or Path(image_path).stem
+
     # 2.2 构造显式 InferenceConfig 超参数配置，注入自标定（SCOPE）的最优参数
     config = InferenceConfig.from_settings(
         settings,
@@ -139,8 +145,40 @@ def run_infer_pipeline(
             pixels = np.asarray(img.convert("RGB"))
         source = InMemorySource(pixels)
 
+    transform_obj = getattr(source, "transform", None)
+    crs_obj = getattr(source, "crs", None)
+    if (transform_obj is None or crs_obj is None) and image_path.lower().endswith((".tif", ".tiff")):
+        try:
+            import rasterio
+
+            with rasterio.open(image_path) as raster:
+                transform_obj = raster.transform
+                crs_obj = raster.crs
+        except Exception:
+            pass
+
     try:
-        result = run_inference(source, detector, config, run_id=run_id)
+        window_filter = None
+        if transform_obj is not None and crs_obj is not None:
+            from ..effective_area.windows import load_effective_window_filter
+
+            window_filter = load_effective_window_filter(
+                db_url=db_url,
+                tract_ref=final_tract_id,
+                phase_id=final_phase_id,
+                tiff_id=None,
+                image_path=image_path,
+                raster_crs=crs_obj,
+                geotransform=transform_obj,
+                cache_size=int(settings.get("effective_area.mask_cache_size", 32)),
+            )
+        result = run_inference(
+            source,
+            detector,
+            config,
+            run_id=run_id,
+            window_filter=window_filter,
+        )
     finally:
         source.close()
 
@@ -156,21 +194,6 @@ def run_infer_pipeline(
 
     # ── 3. GIS 投影 & 地块登记 ─────────────────────────────────────────────────
     from ..geo import compute_tract_geometry
-    transform_obj = crs_obj = None
-    default_phase_id = None
-    if image_path.lower().endswith((".tif", ".tiff")):
-        try:
-            import rasterio
-            with rasterio.open(image_path) as src:
-                transform_obj = src.transform
-                crs_obj = src.crs
-        except Exception:
-            pass
-
-    from ..utils.input_inspect import extract_image_phase_id
-
-    default_phase_id, _ = extract_image_phase_id(image_path)
-
     geo = compute_tract_geometry(
         image_path, result.meta.get("width"), result.meta.get("height"),
         transform=transform_obj, crs=crs_obj,
@@ -179,9 +202,6 @@ def run_infer_pipeline(
         log.warning(
             "输入图像未包含地理空间元数据，地理面积/林木密度等指标在报告和 DB 中将缺失。"
         )
-
-    final_phase_id = phase_id or default_phase_id or "00000000"
-    final_tract_id = tract_id or Path(image_path).stem
 
     tract_id = writer.ensure_tract(
         phase_id=final_phase_id,
@@ -297,6 +317,9 @@ def run_infer_pipeline(
         "tract_id": tract_id,
         "phase_id": final_phase_id,
     }
+    if window_filter is not None:
+        metrics["effective_area_hm2"] = window_filter.effective_area_hm2
+        metrics["effective_area_cache_key"] = list(window_filter.cache_key or ())
     if prep.get("cog_conversion"):
         metrics["cog_conversion"] = prep["cog_conversion"]
     writer.finish_run_log(run_id, "succeeded", metrics=metrics, duration_s=dur)

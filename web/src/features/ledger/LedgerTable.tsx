@@ -38,7 +38,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys, type ArtifactNode, type AssetRow } from "../../shared/api";
 import { env } from "../../shared/config/env";
-import { formatAreaValue } from "../../shared/lib/format";
+import { formatAreaLedgerValue } from "../../entities/effective-area";
 
 const { Text } = Typography;
 
@@ -378,12 +378,15 @@ export function LedgerTable() {
       },
     },
     {
-      title: "面积",
+      title: "面积/有效面积(hm²)",
       dataIndex: "geo_area",
       key: "geo_area",
       width: 112,
       align: "right",
-      render: (v?: number | null) => formatAreaValue(v),
+      render: (v: number | null | undefined, row) => formatAreaLedgerValue(
+        row.tract_area_hm2 ?? (typeof v === "number" ? v / 10_000 : null),
+        row.effective_area_hm2,
+      ),
     },
     {
       title: "株数",
@@ -455,6 +458,20 @@ export function LedgerTable() {
     if (!row.phase_id || !row.tiff_id) return;
     const query = new URLSearchParams({ phase_id: row.phase_id, tiff_id: row.tiff_id });
     navigate(`/tasks?${query.toString()}`);
+  }
+
+  function openEffectiveArea(row: AssetRow) {
+    if (!row.tract_pk || !row.city || !row.county || !row.tract_id || !row.phase_id) return;
+    setModalMode(null);
+    setEditing(null);
+    const path = [
+      "/map",
+      encodeURIComponent(row.city),
+      encodeURIComponent(row.county),
+      encodeURIComponent(row.tract_id),
+      encodeURIComponent(row.phase_id),
+    ].join("/");
+    navigate(`${path}?effective-area=${encodeURIComponent(row.tract_pk)}`);
   }
 
   function openCreate() {
@@ -633,6 +650,12 @@ export function LedgerTable() {
         destroyOnHidden
       >
         <Form form={form} layout="vertical">
+          {modalMode === "edit" && editing?.tract_pk ? (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <Text type="secondary">有效区域绑定完整地块，不受当前 TIFF 范围限制。</Text>
+              <Button type="link" onClick={() => openEffectiveArea(editing)}>编辑有效区域</Button>
+            </div>
+          ) : null}
           {modalMode === "create" ? (
             <>
               <Form.Item name="input_path" label="TIFF 路径" rules={[{ required: true, message: "请输入 TIFF 路径" }]}>

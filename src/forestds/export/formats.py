@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import csv
 import json
+import tempfile
+import zipfile
 from pathlib import Path
 from loguru import logger as log
 from ..db import reader
@@ -57,6 +59,7 @@ def export_tract_to_file(
     db_url: str | None = None,
     crs_epsg: int | None = None,
     crs_wkt: str | None = None,
+    include_effective_area: bool = True,
 ) -> dict:
     """从数据库读取并导出单木空间观测记录。
 
@@ -86,6 +89,7 @@ def export_tract_to_file(
     # 3. 确定空间参考 EPSG/WKT
     resolved_crs_epsg = crs_epsg
     resolved_crs_wkt = crs_wkt
+    tract_info = None
     if not resolved_crs_epsg or not resolved_crs_wkt:
         try:
             tract_info = reader.get_tract(target_tract_id, url=db_url)
@@ -130,6 +134,16 @@ def export_tract_to_file(
     ))
     if not observations:
         log.warning(f"地块 {target_tract_id} (run_id={target_run_id}) 暂无观测树木记录。将导出空数据集。")
+    effective_area = None
+    if include_effective_area:
+        try:
+            from ..effective_area import EffectiveAreaService
+
+            tract_pk = (tract_info or reader.get_tract(target_tract_id, url=db_url) or {}).get("tract_pk")
+            if tract_pk:
+                effective_area = EffectiveAreaService(db_url).get(tract_pk)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("有效区域图层读取失败，将仅导出观测: {}", exc)
 
     # 4. 确定最终输出文件的具体物理路径
     out_dir = Path(out_path) if out_path else paths.outputs_postprocess_dir()
@@ -153,37 +167,20 @@ def export_tract_to_file(
 
     # 5. 执行具体格式的序列化工作
     if fmt == "csv":
+        columns = [
+            "observation_id", "species", "confidence",
+            "crown_width_geo", "crown_height_geo",
+            "crown_area_px", "crown_area_geo_est", "crown_area_geo_real",
+            "crown_volume_geo_est", "crown_volume_geo_real",
+            "height", "height_source", "geom_crown", "geom_point",
+            "box_px_sub", "source_subimage_path", "run_id",
+            "task_type", "parent_run_id", "tiff_id", "phase_id", "tract_id",
+        ]
         with open(final_path, "w", newline="", encoding="utf-8") as csvfile:
             writer_csv = csv.writer(csvfile)
-            writer_csv.writerow([
-                "observation_id", "species", "confidence",
-                "crown_width_geo", "crown_height_geo",
-                "crown_area_px",
-                "crown_area_geo_est", "crown_area_geo_real",
-                "crown_volume_geo_est", "crown_volume_geo_real",
-                "height", "height_source", "geom_crown", "geom_point",
-                "box_px_sub", "source_subimage_path", "run_id"
-            ])
+            writer_csv.writerow(columns)
             for obs in observations:
-                writer_csv.writerow([
-                    obs.get("observation_id"),
-                    obs.get("species"),
-                    obs.get("confidence"),
-                    obs.get("crown_width_geo"),
-                    obs.get("crown_height_geo"),
-                    obs.get("crown_area_px"),
-                    obs.get("crown_area_geo_est"),
-                    obs.get("crown_area_geo_real"),
-                    obs.get("crown_volume_geo_est"),
-                    obs.get("crown_volume_geo_real"),
-                    obs.get("height"),
-                    obs.get("height_source"),
-                    obs.get("geom_crown"),
-                    obs.get("geom_point"),
-                    obs.get("box_px_sub"),
-                    obs.get("source_subimage_path"),
-                    obs.get("run_id"),
-                ])
+                writer_csv.writerow([obs.get(column) for column in columns])
                 
     elif fmt == "geojson":
         features = []
@@ -195,6 +192,7 @@ def export_tract_to_file(
                 geom = parse_wkt_point(obs["geom_point"])
                 
             properties = {
+                "layer": "observations",
                 "observation_id": obs.get("observation_id"),
                 "species": obs.get("species"),
                 "confidence": obs.get("confidence"),
@@ -208,6 +206,10 @@ def export_tract_to_file(
                 "height": obs.get("height"),
                 "height_source": obs.get("height_source"),
                 "run_id": obs.get("run_id"),
+                "task_type": obs.get("task_type"),
+                "parent_run_id": obs.get("parent_run_id"),
+                "tiff_id": obs.get("tiff_id"),
+                "phase_id": obs.get("phase_id"),
                 "tract_id": obs.get("tract_id"),
             }
             features.append({
@@ -215,6 +217,21 @@ def export_tract_to_file(
                 "geometry": geom,
                 "properties": properties
             })
+        if effective_area is not None:
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": effective_area.geometry,
+                    "properties": {
+                        "layer": "effective_area",
+                        "tract_pk": effective_area.tract_pk,
+                        "effective_area_hm2": effective_area.effective_area_hm2,
+                        "effective_ratio": effective_area.effective_ratio,
+                        "is_default": effective_area.is_default,
+                        "updated_at": effective_area.updated_at,
+                    },
+                }
+            )
         geojson_data = {
             "type": "FeatureCollection",
             "features": features
@@ -253,6 +270,7 @@ def export_tract_to_file(
                 db_url=db_url,
                 crs_epsg=resolved_crs_epsg,
                 crs_wkt=resolved_crs_wkt,
+                include_effective_area=include_effective_area,
             )
             
         # 使用 geopandas 导出
@@ -285,6 +303,10 @@ def export_tract_to_file(
                 "height": obs.get("height"),
                 "height_src": obs.get("height_source"),
                 "run_id": obs.get("run_id"),
+                "task_type": obs.get("task_type"),
+                "parent_run_id": obs.get("parent_run_id"),
+                "tiff_id": obs.get("tiff_id"),
+                "phase_id": obs.get("phase_id"),
                 "tract_id": obs.get("tract_id"),
             })
             
@@ -296,7 +318,9 @@ def export_tract_to_file(
                 "area_px": None,
                 "area_geo_est": None, "area_geo_real": None,
                 "volume_est": None, "volume_real": None,
-                "height": None, "height_src": None, "run_id": None, "tract_id": None
+                "height": None, "height_src": None, "run_id": None,
+                "task_type": None, "parent_run_id": None, "tiff_id": None,
+                "phase_id": None, "tract_id": None,
             }]
             
         gdf = gpd.GeoDataFrame(data_list)
@@ -304,8 +328,38 @@ def export_tract_to_file(
             gdf.crs = resolved_crs_wkt
         elif resolved_crs_epsg:
             gdf.crs = f"EPSG:{resolved_crs_epsg}"
-        driver = "ESRI Shapefile" if fmt == "shp" else "GPKG"
-        gdf.to_file(final_path, driver=driver)
+        effective_gdf = None
+        if effective_area is not None:
+            from shapely.geometry import shape as shapely_shape
+
+            effective_gdf = gpd.GeoDataFrame(
+                [{
+                    "geometry": shapely_shape(effective_area.geometry),
+                    "tract_pk": effective_area.tract_pk,
+                    "area_hm2": effective_area.effective_area_hm2,
+                    "ratio": effective_area.effective_ratio,
+                    "is_default": effective_area.is_default,
+                    "updated_at": effective_area.updated_at,
+                }],
+                crs="EPSG:4326",
+            )
+
+        if fmt == "gpkg":
+            gdf.to_file(final_path, layer="observations", driver="GPKG", mode="w")
+            if effective_gdf is not None:
+                effective_gdf.to_file(final_path, layer="effective_area", driver="GPKG", mode="a")
+        else:
+            archive_path = final_path if final_path.suffix.lower() == ".zip" else final_path.with_suffix(".zip")
+            with tempfile.TemporaryDirectory(prefix="forestds-shp-", dir=archive_path.parent) as temp_dir:
+                layer_dir = Path(temp_dir)
+                gdf.to_file(layer_dir / "observations.shp", driver="ESRI Shapefile")
+                if effective_gdf is not None:
+                    effective_gdf.to_file(layer_dir / "effective_area.shp", driver="ESRI Shapefile")
+                with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                    for sibling in sorted(layer_dir.iterdir()):
+                        archive.write(sibling, sibling.name)
+            final_path = archive_path
+            result_info["out_path"] = str(final_path)
 
     log.info(f"空间图层成功导出[{result_info['format']}]，检测数={result_info['count']} -> {result_info['out_path']}")
     return result_info

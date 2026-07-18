@@ -1,5 +1,6 @@
 // 后端契约的前端镜像类型(与 Python contracts/schemas 对应)。单一真相集中在此。
 export interface Tract {
+  tract_pk?: string;
   tract_phase_pk?: string;
   phase_id?: string;
   region_id?: string;
@@ -8,6 +9,8 @@ export interface Tract {
   town?: string | null;
   tract_id: string;
   geo_area?: number;
+  tract_area_hm2?: number | null;
+  effective_area_hm2?: number | null;
   area_unit?: string;
   crs_epsg?: number;
   active_run_id?: string;
@@ -42,6 +45,7 @@ export interface TiffAsset {
   pixel_height?: number | null;
   gsd?: number | null;
   geo_area?: number | null;
+  tract_area_hm2?: number | null;
   area_unit?: string | null;
   band_count?: number | null;
   dtype?: string | null;
@@ -91,6 +95,7 @@ export interface JobHistoryItem {
   phase_id?: string | null;
   tiff_id?: string | null;
   geo_area?: number | null;
+  effective_area_hm2?: number | null;
   area_unit?: string | null;
   observation_count: number;
   error?: string | null;
@@ -217,6 +222,8 @@ export interface AssetRow {
   active_run_status?: JobState | null;
   status: string;
   geo_area?: number | null;
+  tract_area_hm2?: number | null;
+  effective_area_hm2?: number | null;
   area_unit?: string | null;
   observation_count: number;
   detected_at?: string | null;
@@ -356,6 +363,60 @@ export interface GeoFeature {
 export interface FeatureCollection {
   type: "FeatureCollection";
   features: GeoFeature[];
+}
+
+export type EffectiveAreaPosition = number[];
+export type EffectiveAreaRing = EffectiveAreaPosition[];
+
+export interface EffectiveAreaPolygon {
+  type: "Polygon";
+  coordinates: EffectiveAreaRing[];
+}
+
+export interface EffectiveAreaMultiPolygon {
+  type: "MultiPolygon";
+  coordinates: EffectiveAreaRing[][];
+}
+
+export type EffectiveAreaGeometry = EffectiveAreaPolygon | EffectiveAreaMultiPolygon;
+
+export interface EffectiveAreaResponse {
+  tract_pk: string;
+  boundary_geometry: EffectiveAreaGeometry;
+  geometry: EffectiveAreaGeometry;
+  tract_area_hm2: number;
+  effective_area_hm2: number;
+  effective_ratio: number;
+  updated_at: string;
+  warnings: string[];
+  is_default: boolean;
+}
+
+export interface EffectiveAreaPutRequest {
+  geometry: EffectiveAreaGeometry;
+  updated_at: string;
+  clip_to_boundary?: boolean;
+}
+
+export interface EffectiveAreaImportSource {
+  files?: File[];
+  localPath?: string;
+  layer?: string;
+}
+
+export interface EffectiveAreaImportResponse {
+  tract_pk: string;
+  geometry: EffectiveAreaGeometry;
+  source_crs: string;
+  target_crs: string;
+  feature_count: number;
+  polygon_count: number;
+  layer: string | null;
+  layers: string[];
+  effective_area_hm2: number;
+  effective_ratio: number;
+  requires_clip: boolean;
+  warnings: string[];
 }
 
 // 地块多时相真影像瓦片(对应 schemas.TractImageryOut)。

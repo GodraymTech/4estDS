@@ -15,4 +15,5 @@ export const queryKeys = {
     ["imagery", tractId, phaseId ?? "", tiffRef ?? ""] as const,
   tractSummary: (tractId: string) => ["tract-summary", tractId] as const,
   tractSummaries: ["tract-summaries"] as const,
+  effectiveArea: (tractPk: string) => ["effective-area", tractPk] as const,
 };

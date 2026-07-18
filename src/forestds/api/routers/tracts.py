@@ -15,12 +15,21 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from ..deps import get_db_url
 from ..geojson import rows_to_featurecollection
-from ..schemas import ChangeCompareOut, TiffOut, TractImageryOut, TractOut, TractSummaryOut
+from ..schemas import (
+    ChangeCompareOut,
+    EffectiveAreaImportOut,
+    EffectiveAreaOut,
+    EffectiveAreaPut,
+    TiffOut,
+    TractImageryOut,
+    TractOut,
+    TractSummaryOut,
+)
 
 router = APIRouter(prefix="/tracts", tags=["tracts"])
 
@@ -55,6 +64,13 @@ def _tract_summary(
     phase_key = tract.get("tract_phase_pk") or tract_id
     active_run_ids = [run_id] if run_id else reader.active_runs_for_tract_phase(phase_key, url=db_url)
     if not active_run_ids:
+        effective_area_hm2 = tract.get("effective_area_hm2")
+        if isinstance(effective_area_hm2, (int, float)) and effective_area_hm2 > 0:
+            area_m2 = float(effective_area_hm2) * 10_000.0
+            area_source = "effective_area"
+        else:
+            area_m2 = tract.get("geo_area")
+            area_source = "tiff_area" if area_m2 is not None else None
         return {
             "tract_id": tract.get("tract_id") or tract_id,
             "tract_phase_pk": tract.get("tract_phase_pk"),
@@ -68,7 +84,8 @@ def _tract_summary(
             "crown_area_geo": {},
             "meta": {
                 "phase_id": tract.get("phase_id"),
-                "area_m2": tract.get("geo_area"),
+                "area_m2": area_m2,
+                "area_source": area_source,
                 "species_richness": 0,
                 "species_analysis": {},
                 "canopy_cover_rate": None,
@@ -129,6 +146,100 @@ def get_tract(tract_id: str, db_url: str | None = Depends(get_db_url)) -> TractO
     if tract is None:
         raise HTTPException(status_code=404, detail=f"地块不存在: {tract_id}")
     return TractOut(**tract)
+
+
+def _effective_area_http_error(exc: Exception) -> HTTPException:
+    from ...effective_area import (
+        EffectiveAreaConflict,
+        EffectiveAreaError,
+        EffectiveAreaNotFound,
+    )
+
+    if isinstance(exc, EffectiveAreaConflict):
+        status = 409
+    elif isinstance(exc, EffectiveAreaNotFound):
+        status = 404
+    elif isinstance(exc, EffectiveAreaError):
+        status = 422
+    else:  # pragma: no cover - 仅供类型收窄，未知异常不应被吞掉
+        raise exc
+    return HTTPException(status_code=status, detail=exc.as_detail())
+
+
+@router.get(
+    "/{tract_pk}/effective-area",
+    response_model=EffectiveAreaOut,
+    summary="读取地块当前有效区域",
+)
+def get_effective_area(
+    tract_pk: str,
+    db_url: str | None = Depends(get_db_url),
+) -> EffectiveAreaOut:
+    from ...effective_area import EffectiveAreaError, EffectiveAreaService
+
+    try:
+        return EffectiveAreaOut(**EffectiveAreaService(db_url).get(tract_pk).__dict__)
+    except EffectiveAreaError as exc:
+        raise _effective_area_http_error(exc) from exc
+
+
+@router.put(
+    "/{tract_pk}/effective-area",
+    response_model=EffectiveAreaOut,
+    summary="保存地块当前有效区域",
+)
+def put_effective_area(
+    tract_pk: str,
+    body: EffectiveAreaPut,
+    db_url: str | None = Depends(get_db_url),
+) -> EffectiveAreaOut:
+    from ...effective_area import EffectiveAreaError, EffectiveAreaService
+
+    try:
+        result = EffectiveAreaService(db_url).save(
+            tract_pk,
+            body.geometry,
+            body.updated_at,
+            clip_to_boundary=body.clip_to_boundary,
+        )
+        return EffectiveAreaOut(**result.__dict__)
+    except EffectiveAreaError as exc:
+        raise _effective_area_http_error(exc) from exc
+
+
+@router.post(
+    "/{tract_pk}/effective-area/imports/inspect",
+    response_model=EffectiveAreaImportOut,
+    summary="预检有效区域 GIS 文件",
+)
+async def inspect_effective_area_import(
+    tract_pk: str,
+    files: list[UploadFile] | None = File(default=None),
+    local_path: str | None = Form(default=None),
+    layer: str | None = Form(default=None),
+    db_url: str | None = Depends(get_db_url),
+) -> EffectiveAreaImportOut:
+    from ...effective_area import EffectiveAreaError, EffectiveAreaService, ImportFile
+
+    if bool(files) == bool(local_path):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_import_source",
+                "message": "必须且只能提供 local_path 或 files。",
+                "details": {},
+            },
+        )
+    source = (
+        [ImportFile(file.filename or "upload", await file.read()) for file in files or []]
+        if files
+        else str(local_path)
+    )
+    try:
+        result = EffectiveAreaService(db_url).inspect_import(tract_pk, source, layer=layer)
+        return EffectiveAreaImportOut(**result.__dict__)
+    except EffectiveAreaError as exc:
+        raise _effective_area_http_error(exc) from exc
 
 
 def _derive_imagery(tract: dict) -> dict:
