@@ -43,6 +43,7 @@ import type {
   ReviewWorkspace,
   ReviewAttempt,
   ReviewMaskStroke,
+  ReviewCapabilities,
 } from "./types";
 
 // 端点定义集中一处(DRY)。承接 v1.0 api.ts 的契约, 重构为 FSD shared 层。
@@ -83,7 +84,7 @@ export const endpoints = {
   reviewPreviewUrl: (sessionId: string): string =>
     apiUrl(`/reviews/${encodeURIComponent(sessionId)}/preview`),
 
-  getReviewCapabilities: (): Promise<Record<string, unknown>> => apiGet("/reviews/capabilities"),
+  getReviewCapabilities: (): Promise<ReviewCapabilities> => apiGet("/reviews/capabilities"),
 
   createReviewAttempt: (
     sessionId: string,

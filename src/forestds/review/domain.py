@@ -1,7 +1,7 @@
 """单 TIFF 复核领域对象与错误。"""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
 ReviewMode = Literal["based_on_active", "from_scratch"]
@@ -61,7 +61,7 @@ class ReviewWorkspace:
     applied_operations: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {name: getattr(self, name) for name in self.__dataclass_fields__}
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "ReviewWorkspace":
@@ -75,6 +75,9 @@ class WorkspacePatch:
     revision: int
     items: tuple[dict[str, Any], ...]
     summary: dict[str, int]
+    changed_items: tuple[dict[str, Any], ...] = ()
+    deleted_item_ids: tuple[str, ...] = ()
+    replace_all: bool = False
 
 
 def workspace_summary(items: list[dict[str, Any]]) -> dict[str, int]:

@@ -18,7 +18,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from ..deps import get_db_url
+from ..deps import get_db_url, get_settings
 from ..geojson import rows_to_featurecollection
 from ..schemas import (
     ChangeCompareOut,
@@ -196,7 +196,11 @@ def put_effective_area(
     from ...effective_area import EffectiveAreaError, EffectiveAreaService
 
     try:
-        result = EffectiveAreaService(db_url).save(
+        settings = get_settings()
+        result = EffectiveAreaService(
+            db_url,
+            boundary_epsilon_m=float(settings.get("effective_area.boundary_epsilon_m", 0.05)),
+        ).save(
             tract_pk,
             body.geometry,
             body.updated_at,

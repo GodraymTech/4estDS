@@ -66,22 +66,103 @@ def _item_from_observation(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+_EDITABLE_METADATA = (
+    "category_catalog",
+    "visible_categories",
+    "active_category",
+    "text_prompts",
+    "visual_exemplars",
+    "attempts",
+)
+
+
+def _copy(value: Any) -> Any:
+    return json.loads(json.dumps(value))
+
+
 def _editable_snapshot(workspace: ReviewWorkspace) -> dict[str, Any]:
     return {
-        "items": json.loads(json.dumps(workspace.items)),
-        "category_catalog": json.loads(json.dumps(workspace.category_catalog)),
+        "items": _copy(workspace.items),
+        "category_catalog": _copy(workspace.category_catalog),
         "visible_categories": list(workspace.visible_categories),
         "active_category": workspace.active_category,
-        "text_prompts": json.loads(json.dumps(workspace.text_prompts)),
-        "visual_exemplars": json.loads(json.dumps(workspace.visual_exemplars)),
-        "attempts": json.loads(json.dumps(workspace.attempts)),
+        "text_prompts": _copy(workspace.text_prompts),
+        "visual_exemplars": _copy(workspace.visual_exemplars),
+        "attempts": _copy(workspace.attempts),
     }
 
 
+def _history_scope(operations: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    item_ids: set[str] = set()
+    metadata: set[str] = set()
+    for operation in operations:
+        kind = str(operation.get("type") or "")
+        if kind == "apply_attempt":
+            return {"kind": "full"}
+        if kind in {"add", "delete", "update", "set_category", "set_note", "set_status"}:
+            item = operation.get("item") if kind == "add" else None
+            item_id = (item or {}).get("id") if isinstance(item, Mapping) else operation.get("item_id")
+            if item_id:
+                item_ids.add(str(item_id))
+        elif kind == "bulk_status":
+            item_ids.update(str(value) for value in operation.get("item_ids") or [])
+        elif kind == "set_catalog":
+            metadata.update({"category_catalog", "visible_categories", "active_category"})
+        elif kind != "upsert_attempt":
+            return {"kind": "full"}
+    return {"kind": "delta", "item_ids": sorted(item_ids), "metadata": sorted(metadata)}
+
+
+def _scoped_snapshot(workspace: ReviewWorkspace, scope: Mapping[str, Any]) -> dict[str, Any]:
+    if scope.get("kind") == "full":
+        return _editable_snapshot(workspace)
+    requested = {str(value) for value in scope.get("item_ids") or []}
+    items: dict[str, Any] = {item_id: None for item_id in requested}
+    for index, item in enumerate(workspace.items):
+        item_id = str(item.get("id"))
+        if item_id in requested:
+            items[item_id] = {"index": index, "value": _copy(item)}
+    metadata = {
+        key: _copy(getattr(workspace, key))
+        for key in scope.get("metadata") or []
+        if key in _EDITABLE_METADATA
+    }
+    return {
+        "_kind": "delta",
+        "item_ids": sorted(requested),
+        "items": items,
+        "metadata": metadata,
+    }
+
+
+def _snapshot_for_entry(workspace: ReviewWorkspace, entry: Mapping[str, Any]) -> dict[str, Any]:
+    if entry.get("_kind") != "delta":
+        return _editable_snapshot(workspace)
+    return _scoped_snapshot(
+        workspace,
+        {
+            "kind": "delta",
+            "item_ids": entry.get("item_ids") or [],
+            "metadata": list((entry.get("metadata") or {}).keys()),
+        },
+    )
+
+
 def _restore(workspace: ReviewWorkspace, snapshot: Mapping[str, Any]) -> None:
-    for key in ("items", "category_catalog", "visible_categories", "active_category", "text_prompts", "visual_exemplars", "attempts"):
+    if snapshot.get("_kind") == "delta":
+        item_ids = {str(value) for value in snapshot.get("item_ids") or []}
+        workspace.items = [item for item in workspace.items if str(item.get("id")) not in item_ids]
+        previous = [value for value in (snapshot.get("items") or {}).values() if value is not None]
+        for value in sorted(previous, key=lambda item: int(item["index"])):
+            index = min(max(0, int(value["index"])), len(workspace.items))
+            workspace.items.insert(index, _copy(value["value"]))
+        for key, value in (snapshot.get("metadata") or {}).items():
+            if key in _EDITABLE_METADATA:
+                setattr(workspace, key, _copy(value))
+        return
+    for key in ("items", *_EDITABLE_METADATA):
         if key in snapshot:
-            setattr(workspace, key, json.loads(json.dumps(snapshot[key])))
+            setattr(workspace, key, _copy(snapshot[key]))
 
 
 class ReviewSessionService:
@@ -197,7 +278,16 @@ class ReviewSessionService:
         if session.status != "active":
             raise ReviewConflict("复核会话已结束，不能继续修改。", code="session_not_active")
 
-    def _persist(self, session: ReviewSession, workspace: ReviewWorkspace, operation_id: str) -> WorkspacePatch:
+    def _persist(
+        self,
+        session: ReviewSession,
+        workspace: ReviewWorkspace,
+        operation_id: str,
+        *,
+        changed_item_ids: Sequence[str] = (),
+        deleted_item_ids: Sequence[str] = (),
+        replace_all: bool = False,
+    ) -> WorkspacePatch:
         workspace.revision += 1
         workspace.applied_operations[operation_id] = workspace.revision
         if len(workspace.applied_operations) > 2000:
@@ -225,7 +315,17 @@ class ReviewSessionService:
             raise
         finally:
             conn.close()
-        return WorkspacePatch(session.session_id, workspace.revision, tuple(workspace.items), summary)
+        changed = {str(value) for value in changed_item_ids}
+        changed_items = tuple(item for item in workspace.items if str(item.get("id")) in changed)
+        return WorkspacePatch(
+            session.session_id,
+            workspace.revision,
+            tuple(workspace.items),
+            summary,
+            changed_items,
+            tuple(str(value) for value in deleted_item_ids),
+            replace_all,
+        )
 
     def _existing_patch(self, session_id: str, workspace: ReviewWorkspace) -> WorkspacePatch:
         return WorkspacePatch(session_id, workspace.revision, tuple(workspace.items), workspace_summary(workspace.items))
@@ -252,14 +352,30 @@ class ReviewSessionService:
             )
         if not operations:
             raise ReviewValidationError("operations 不能为空。", code="operations_required")
-        record_history = any(str(operation.get("type") or "") not in {"upsert_attempt"} for operation in operations)
+        normalized = [dict(operation) for operation in operations]
+        for operation in normalized:
+            if str(operation.get("type") or "") == "add":
+                item = dict(operation.get("item") or {})
+                item.setdefault("id", f"item_{uuid.uuid4().hex[:12]}")
+                operation["item"] = item
+        record_history = any(str(operation.get("type") or "") not in {"upsert_attempt"} for operation in normalized)
+        scope = _history_scope(normalized)
         if record_history:
-            workspace.undo_stack.append(_editable_snapshot(workspace))
+            workspace.undo_stack.append(_scoped_snapshot(workspace, scope))
             workspace.undo_stack = workspace.undo_stack[-100:]
             workspace.redo_stack.clear()
-        for operation in operations:
+        for operation in normalized:
             self._apply(workspace, operation)
-        return self._persist(session, workspace, operation_id)
+        item_ids = {str(value) for value in scope.get("item_ids") or []}
+        current_ids = {str(item.get("id")) for item in workspace.items}
+        return self._persist(
+            session,
+            workspace,
+            operation_id,
+            changed_item_ids=sorted(item_ids & current_ids),
+            deleted_item_ids=sorted(item_ids - current_ids),
+            replace_all=scope.get("kind") == "full",
+        )
 
     def undo(self, session_id: str, revision: int, operation_id: str) -> WorkspacePatch:
         session = self.get(session_id)
@@ -270,9 +386,10 @@ class ReviewSessionService:
         self._check_revision(session, workspace, revision)
         if not workspace.undo_stack:
             raise ReviewValidationError("没有可撤销的操作。", code="nothing_to_undo")
-        workspace.redo_stack.append(_editable_snapshot(workspace))
-        _restore(workspace, workspace.undo_stack.pop())
-        return self._persist(session, workspace, operation_id)
+        target = workspace.undo_stack.pop()
+        workspace.redo_stack.append(_snapshot_for_entry(workspace, target))
+        _restore(workspace, target)
+        return self._persist(session, workspace, operation_id, replace_all=True)
 
     def redo(self, session_id: str, revision: int, operation_id: str) -> WorkspacePatch:
         session = self.get(session_id)
@@ -283,9 +400,10 @@ class ReviewSessionService:
         self._check_revision(session, workspace, revision)
         if not workspace.redo_stack:
             raise ReviewValidationError("没有可重做的操作。", code="nothing_to_redo")
-        workspace.undo_stack.append(_editable_snapshot(workspace))
-        _restore(workspace, workspace.redo_stack.pop())
-        return self._persist(session, workspace, operation_id)
+        target = workspace.redo_stack.pop()
+        workspace.undo_stack.append(_snapshot_for_entry(workspace, target))
+        _restore(workspace, target)
+        return self._persist(session, workspace, operation_id, replace_all=True)
 
     @staticmethod
     def _check_revision(session: ReviewSession, workspace: ReviewWorkspace, revision: int) -> None:

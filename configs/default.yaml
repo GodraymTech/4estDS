@@ -17,7 +17,10 @@ db:
   echo: false
 
 effective_area:
-  mask_cache_size: 32     # 地块有效区域转换为 TIFF 像素几何后的 LRU 缓存项数
+  area_refresh_ms: 120       # 前端拖动时面积预览节流(毫秒，>=16)；仅影响交互，无需重启后端
+  simplify_tolerance_px: 0.5 # 前端显示建议容差(屏幕像素，>=0)；不改变保存几何，无需重启后端
+  boundary_epsilon_m: 0.05   # 保存边界浮点容差(米，>=0)；越大越宽松，修改后需重启 API
+  mask_cache_size: 32        # TIFF 像素几何 LRU 项数(>=1)；增大会占用内存，修改后需重启 Worker
 
 review:
   adapter: yoloe          # yoloe | mock_review；生产使用 YOLOE，离线测试可显式选择 mock_review
@@ -31,8 +34,13 @@ review:
   device: null            # null 继承 detect.device；也可设置 cuda:0 / cpu
   model_input: 1024       # YOLOE 模型输入边长（像素）
   conf_threshold: 0.25    # attempt 候选最低置信度
+  default_scope: viewport # viewport | full；前端新 attempt 默认范围，无需重启前端
+  default_merge_mode: append # append | replace_ai_in_scope；前端默认合并方式
   tile_size: 1024         # 视口/整图 attempt 的动态读取窗口边长（像素）
   batch_size: 4           # review_gpu 初始批大小；OOM 时仅减半重试一次
+  viewport_max_windows: 256 # 单个视口 attempt 最大窗口数(>=1)；限制交互任务时延
+  max_candidates_per_attempt: 50000 # 单 attempt 候选硬上限(>=1)；限制草稿内存与响应体
+  bbox_page_size: 5000    # 前端/接口建议的框分页大小(>=100)；当前万级基线无需 MVT
   queue: review_gpu       # GPU 串行队列；viewport actor 优先级高于 full actor
 
 preprocess:

@@ -258,6 +258,9 @@ class ReviewWorkspaceOut(BaseModel):
     text_prompts: list[dict[str, Any]] = Field(default_factory=list)
     visual_exemplars: list[dict[str, Any]] = Field(default_factory=list)
     attempts: list[dict[str, Any]] = Field(default_factory=list)
+    total_items: int = 0
+    page_offset: int = 0
+    page_limit: Optional[int] = None
 
 
 class ReviewPatchOut(BaseModel):
@@ -265,6 +268,9 @@ class ReviewPatchOut(BaseModel):
     revision: int
     items: list[dict[str, Any]] = Field(default_factory=list)
     summary: dict[str, int] = Field(default_factory=dict)
+    changed_items: list[dict[str, Any]] = Field(default_factory=list)
+    deleted_item_ids: list[str] = Field(default_factory=list)
+    replace_all: bool = False
 
 
 class ReviewPublishOut(BaseModel):

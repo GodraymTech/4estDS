@@ -101,6 +101,31 @@ def test_revision_conflict_and_undo_redo(review_db: tuple[str, Path]) -> None:
     assert redone.items[0]["species"] == "木榄"
 
 
+def test_delta_history_restores_added_and_deleted_items(review_db: tuple[str, Path]) -> None:
+    url, drafts = review_db
+    service = ReviewSessionService(url, draft_root=drafts)
+    session = service.create(PHASE, TIFF, "from_scratch")
+    added = service.apply_operations(
+        session.session_id,
+        0,
+        "add-delta",
+        [{"type": "add", "item": {"id": "manual-1", "box_px": [1, 1, 3, 3], "species": "红树"}}],
+    )
+    assert [item["id"] for item in added.changed_items] == ["manual-1"]
+    assert service.undo(session.session_id, added.revision, "undo-add").items == ()
+    restored = service.redo(session.session_id, 2, "redo-add")
+    assert [item["id"] for item in restored.items] == ["manual-1"]
+
+    deleted = service.apply_operations(
+        session.session_id,
+        restored.revision,
+        "delete-delta",
+        [{"type": "delete", "item_id": "manual-1"}],
+    )
+    assert deleted.deleted_item_ids == ("manual-1",)
+    assert [item["id"] for item in service.undo(session.session_id, deleted.revision, "undo-delete").items] == ["manual-1"]
+
+
 def test_cancel_prevents_further_writes(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     service = ReviewSessionService(url, draft_root=drafts)

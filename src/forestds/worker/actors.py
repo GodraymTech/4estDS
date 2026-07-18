@@ -121,6 +121,8 @@ def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) ->
         db_url,
         tile_size=int(settings.get("review.tile_size", 1024)),
         batch_size=int(settings.get("review.batch_size", 4)),
+        viewport_max_windows=int(settings.get("review.viewport_max_windows", 256)),
+        max_candidates=int(settings.get("review.max_candidates_per_attempt", 50_000)),
     )
     try:
         result = service.run_attempt(session_id, attempt_id, adapter=build_review_adapter(settings))

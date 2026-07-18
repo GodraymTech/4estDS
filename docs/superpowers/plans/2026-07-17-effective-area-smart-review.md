@@ -485,7 +485,7 @@ rtk git commit -m "feat(review): edit and publish instance masks"
 - Produces: 可重复的窗口吞吐、候选合并、万级 bbox 首屏与增量 patch 基线；实测结论决定是否需要 MVT。
 - Produces: Playwright 覆盖有效区域保存、单图初始化、多轮追加/替换、扩散全图和发布。
 
-- [ ] **Step 1: 写并运行 HTTP/E2E 失败测试**
+- [x] **Step 1: 写并运行 HTTP/E2E 失败测试**
 
 ```python
 def test_effective_area_to_review_publish_http(client, seeded_tiff):
@@ -500,15 +500,15 @@ Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/
 
 Expected: 若集成缺口存在则 FAIL；只修复真实缺口。
 
-- [ ] **Step 2: 固化性能基线与 MVT 决策**
+- [x] **Step 2: 固化性能基线与 MVT 决策**
 
 真实 `data/for_test` TIFF 上记录窗口数、跳过率、吞吐和峰值内存；mock_review 上记录 1 万/5 万候选 merge 与 bbox page；前端记录普通首包、review lazy chunk 和万级增量操作。只有 GeoJSON/bbox 实测不达标才实现 MVT，否则在文档中明确“不需要”。
 
-- [ ] **Step 3: 完成配置约束与用户文档**
+- [x] **Step 3: 完成配置约束与用户文档**
 
 为每个 effective_area/review 配置记录单位、合法边界、性能影响和是否需要重启；说明恢复、冲突、发布、模型缺失/OOM/取消、Shapefile 缺件和从地图/台账/任务进入的路径。
 
-- [ ] **Step 4: 执行完整验证**
+- [x] **Step 4: 执行完整验证**
 
 Run: `rtk proxy mise exec -- pnpm run typecheck`（目录 `web`）
 
@@ -520,7 +520,7 @@ Run: `rtk proxy mise exec -- pnpm exec playwright test`（目录 `web`，使用�
 
 Expected: 新增测试、类型检查、构建和 E2E 全部通过；基线既有 `tests/test_tools.py::test_prepare_inference_image_routing` 若仍失败，明确列为本任务前已存在且未被本功能扩大。
 
-- [ ] **Step 5: 自审方案逐条覆盖并提交阶段 F**
+- [x] **Step 5: 自审方案逐条覆盖并提交阶段 F**
 
 检查：无 `TBD/TODO/compat` 分支；普通页面不加载 review/editor；无全分辨率掩膜；attempt 不在 runs；所有 active 读取从 TIFF；草稿与发布故障路径有测试。
 

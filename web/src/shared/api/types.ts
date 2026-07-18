@@ -492,6 +492,9 @@ export interface ReviewWorkspace {
   text_prompts: Array<Record<string, unknown>>;
   visual_exemplars: Array<Record<string, unknown>>;
   attempts: ReviewAttempt[];
+  total_items?: number;
+  page_offset?: number;
+  page_limit?: number | null;
 }
 
 export interface ReviewPatch {
@@ -499,6 +502,9 @@ export interface ReviewPatch {
   revision: number;
   items: ReviewItem[];
   summary: Record<string, number>;
+  changed_items: ReviewItem[];
+  deleted_item_ids: string[];
+  replace_all: boolean;
 }
 
 export interface ReviewPublishResult {
@@ -524,6 +530,23 @@ export interface ReviewAttempt {
   candidates: ReviewItem[];
   parent_attempt_id?: string | null;
   error?: string | null;
+}
+
+export interface ReviewCapabilities {
+  name: string;
+  available?: boolean;
+  segmentation?: boolean;
+  defaults: {
+    scope: "viewport" | "full";
+    merge_mode: "append" | "replace_ai_in_scope";
+    threshold: number;
+  };
+  limits: {
+    viewport_max_windows: number;
+    max_candidates_per_attempt: number;
+    bbox_page_size: number;
+  };
+  [key: string]: unknown;
 }
 
 // 地块多时相真影像瓦片(对应 schemas.TractImageryOut)。

@@ -77,7 +77,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
 
   const apply = useCallback(async (operations: Array<Record<string, unknown>>, prefix = "edit") => {
     const patch = await command.mutateAsync({ revision: store.revision, operation_id: operationId(prefix), operations });
-    store.replaceItems(patch.revision, patch.items);
+    store.applyPatch(patch);
   }, [command, sessionId, store.revision]);
 
   const history = useMutation({
@@ -88,7 +88,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
         : endpoints.redoReview(sessionId, store.revision, id);
     },
     onSuccess: (patch) => {
-      store.replaceItems(patch.revision, patch.items);
+      store.applyPatch(patch);
       client.setQueryData(queryKeys.reviewWorkspace(sessionId), (current: unknown) => ({
         ...(current as Record<string, unknown> ?? {}), revision: patch.revision, items: patch.items,
       }));
@@ -115,7 +115,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
       strokes,
     }),
     onSuccess: (patch) => {
-      store.replaceItems(patch.revision, patch.items);
+      store.applyPatch(patch);
       client.setQueryData(queryKeys.reviewWorkspace(sessionId), (current: unknown) => ({
         ...(current as Record<string, unknown> ?? {}), revision: patch.revision, items: patch.items,
       }));

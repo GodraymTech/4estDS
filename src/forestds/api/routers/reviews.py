@@ -11,6 +11,7 @@ from ...review import (
     ReviewNotFound,
     ReviewPublishService,
     ReviewSessionService,
+    ReviewValidationError,
 )
 from ..deps import get_db_url
 from ..schemas import (
@@ -71,7 +72,20 @@ def review_capabilities() -> dict:
     from ...review.inference_service import build_review_adapter
 
     settings = load_settings()
-    return build_review_adapter(settings).capabilities()
+    capabilities = dict(build_review_adapter(settings).capabilities())
+    scope = str(settings.get("review.default_scope", "viewport"))
+    merge_mode = str(settings.get("review.default_merge_mode", "append"))
+    capabilities["defaults"] = {
+        "scope": scope if scope in {"viewport", "full"} else "viewport",
+        "merge_mode": merge_mode if merge_mode in {"append", "replace_ai_in_scope"} else "append",
+        "threshold": max(0.0, min(1.0, float(settings.get("review.conf_threshold", 0.25)))),
+    }
+    capabilities["limits"] = {
+        "viewport_max_windows": max(1, int(settings.get("review.viewport_max_windows", 256))),
+        "max_candidates_per_attempt": max(1, int(settings.get("review.max_candidates_per_attempt", 50_000))),
+        "bbox_page_size": max(100, int(settings.get("review.bbox_page_size", 5_000))),
+    }
+    return capabilities
 
 
 @router.get("/{session_id}", response_model=ReviewSessionOut, summary="复核会话详情")
@@ -83,10 +97,40 @@ def get_review(session_id: str, db_url: str | None = Depends(get_db_url)) -> Rev
 
 
 @router.get("/{session_id}/workspace", response_model=ReviewWorkspaceOut, summary="恢复复核工作集")
-def get_review_workspace(session_id: str, db_url: str | None = Depends(get_db_url)) -> ReviewWorkspaceOut:
+def get_review_workspace(
+    session_id: str,
+    bbox: str | None = Query(None, description="可选 TIFF 像素 bbox: x1,y1,x2,y2"),
+    offset: int = Query(0, ge=0),
+    limit: int | None = Query(None, ge=1, le=50_000),
+    db_url: str | None = Depends(get_db_url),
+) -> ReviewWorkspaceOut:
     try:
         value = ReviewSessionService(db_url).workspace(session_id)
-        return ReviewWorkspaceOut(**value.as_dict())
+        data = value.as_dict()
+        items = list(value.items)
+        total_items = len(items)
+        if bbox:
+            try:
+                bounds = [float(part) for part in bbox.split(",")]
+            except ValueError as exc:
+                raise ReviewValidationError("bbox 必须是 4 个数字。", code="invalid_bbox") from exc
+            if len(bounds) != 4 or bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+                raise ReviewValidationError("bbox 必须是有效的 x1,y1,x2,y2。", code="invalid_bbox")
+            items = [
+                item for item in items
+                if len(item.get("box_px") or []) == 4
+                and bounds[0] <= (float(item["box_px"][0]) + float(item["box_px"][2])) / 2 <= bounds[2]
+                and bounds[1] <= (float(item["box_px"][1]) + float(item["box_px"][3])) / 2 <= bounds[3]
+            ]
+            if limit is None:
+                from ...config import load_settings
+
+                limit = max(100, int(load_settings().get("review.bbox_page_size", 5_000)))
+        data["items"] = items[offset:offset + limit] if limit is not None else items[offset:]
+        data["total_items"] = total_items
+        data["page_offset"] = offset
+        data["page_limit"] = limit
+        return ReviewWorkspaceOut(**data)
     except ReviewError as exc:
         raise _http_error(exc) from exc
 

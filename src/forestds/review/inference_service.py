@@ -61,12 +61,16 @@ class ReviewInferenceService:
         adapter_factory: Callable[[dict[str, Any]], ReviewModelAdapter] | None = None,
         tile_size: int = 1024,
         batch_size: int = 4,
+        viewport_max_windows: int = 256,
+        max_candidates: int = 50_000,
     ):
         self.db_url = db_url
         self.sessions = session_service or ReviewSessionService(db_url)
         self.adapter_factory = adapter_factory
         self.tile_size = max(128, int(tile_size))
         self.batch_size = max(1, int(batch_size))
+        self.viewport_max_windows = max(1, int(viewport_max_windows))
+        self.max_candidates = max(1, int(max_candidates))
 
     def create_attempt(
         self,
@@ -162,12 +166,19 @@ class ReviewInferenceService:
             with rasterio.open(image_path) as source:
                 scope_window = self._scope_window(attempt["scope"], source)
                 windows = list(_iter_windows(scope_window, self.tile_size))
+                if attempt["scope"].get("type") == "viewport" and len(windows) > self.viewport_max_windows:
+                    raise ReviewValidationError(
+                        "当前视口需要处理的窗口过多，请缩小视口后重试。",
+                        code="viewport_window_limit",
+                        details={"windows": len(windows), "limit": self.viewport_max_windows},
+                    )
                 attempt = self._update_attempt(session_id, {**attempt, "total_windows": len(windows), "updated_at": _now()})
                 context = self._prompt_context(adapter, attempt, source)
                 candidates: list[dict[str, Any]] = []
                 batch_size = self.batch_size
                 index = 0
                 retried_oom = False
+                candidates_truncated = False
                 while index < len(windows):
                     current = self.get_attempt(session_id, attempt_id)
                     if current["status"] == "canceled":
@@ -203,6 +214,9 @@ class ReviewInferenceService:
                             "source_window": list(prediction.source_window or ()),
                             **mask_fields,
                         })
+                        if len(candidates) >= self.max_candidates:
+                            candidates_truncated = True
+                            break
                     index += len(batch_specs)
                     attempt = self._update_attempt(session_id, {
                         **attempt,
@@ -211,6 +225,8 @@ class ReviewInferenceService:
                         "candidate_count": len(candidates),
                         "updated_at": _now(),
                     })
+                    if candidates_truncated:
+                        break
             candidates = weighted_box_fusion(candidates, 0.6)
             return self._update_attempt(session_id, {
                 **attempt,
@@ -219,6 +235,7 @@ class ReviewInferenceService:
                 "candidate_count": len(candidates),
                 "candidates": candidates,
                 "oom_batch_reduced": retried_oom,
+                "candidates_truncated": candidates_truncated,
                 "updated_at": _now(),
             })
         except Exception as exc:

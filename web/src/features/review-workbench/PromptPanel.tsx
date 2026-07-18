@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Input, InputNumber, Radio, Select, Space, Tag, message } from "antd";
 import { ThunderboltOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -20,8 +20,17 @@ export function PromptPanel({ sessionId, revision, categories, items, onCreated 
   const [bounds, setBounds] = useState("");
   const [mergeMode, setMergeMode] = useState<"append" | "replace_ai_in_scope">("append");
   const [threshold, setThreshold] = useState(0.25);
+  const configured = useRef(false);
   const selected = useMemo(() => categories.filter((item) => selectedCategories.includes(item.id)), [categories, selectedCategories]);
   const exemplars = items.filter((item) => exemplarIds.includes(item.id));
+
+  useEffect(() => {
+    if (!capabilities.data || configured.current) return;
+    configured.current = true;
+    setScope(capabilities.data.defaults.scope);
+    setMergeMode(capabilities.data.defaults.merge_mode);
+    setThreshold(capabilities.data.defaults.threshold);
+  }, [capabilities.data]);
 
   const create = useMutation({
     mutationFn: () => {
