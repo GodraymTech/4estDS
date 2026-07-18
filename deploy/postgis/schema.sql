@@ -157,6 +157,26 @@ CREATE TABLE IF NOT EXISTS tree_observations (
         REFERENCES tiffs(tiff_id, phase_id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS review_sessions (
+    session_id          TEXT PRIMARY KEY,
+    phase_id            TEXT NOT NULL,
+    tiff_id             TEXT NOT NULL,
+    tract_phase_pk      TEXT NOT NULL REFERENCES tract_phases(tract_phase_pk) ON DELETE CASCADE,
+    mode                TEXT NOT NULL CHECK (mode IN ('based_on_active', 'from_scratch')),
+    base_run_id         TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
+    expected_active_run_id TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
+    status              TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'published', 'canceled')),
+    revision            INTEGER NOT NULL DEFAULT 0,
+    draft_path          TEXT NOT NULL,
+    summary_json        TEXT,
+    published_run_id    TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    FOREIGN KEY (tiff_id, phase_id)
+        REFERENCES tiffs(tiff_id, phase_id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_tracts_region ON tracts(region_id);
 CREATE INDEX IF NOT EXISTS idx_tract_phases_tract ON tract_phases(tract_pk, phase_id);
 CREATE INDEX IF NOT EXISTS idx_tiffs_tract_phase ON tiffs(tract_phase_pk);
@@ -164,6 +184,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_tract_phase ON runs(tract_phase_pk, status);
 CREATE INDEX IF NOT EXISTS idx_obs_run ON tree_observations(run_id);
 CREATE INDEX IF NOT EXISTS idx_obs_tract_phase ON tree_observations(tract_phase_pk);
 CREATE INDEX IF NOT EXISTS idx_obs_individual ON tree_observations(individual_id);
+CREATE INDEX IF NOT EXISTS idx_review_sessions_tiff ON review_sessions(phase_id, tiff_id, status);
 CREATE INDEX IF NOT EXISTS idx_tracts_boundary_geom ON tracts USING GIST (boundary_geom);
 CREATE INDEX IF NOT EXISTS idx_tracts_effective_geom ON tracts USING GIST (effective_geom);
 CREATE INDEX IF NOT EXISTS idx_tiffs_footprint_geom ON tiffs USING GIST (footprint_geom);

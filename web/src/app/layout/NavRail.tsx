@@ -11,6 +11,7 @@ import {
   RadarChartOutlined,
   SwapOutlined,
   ThunderboltOutlined,
+  AuditOutlined,
 } from "@ant-design/icons";
 import type { ComponentType } from "react";
 import { Brand } from "./Brand";
@@ -28,6 +29,7 @@ const ICONS: Record<string, ComponentType> = {
   AlertOutlined,
   RadarChartOutlined,
   CloudOutlined,
+  AuditOutlined,
 };
 
 // 左侧固定导航 rail(图标 + 悬停提示)。行业几乎统一, 主导航不藏入抽屉。

@@ -47,6 +47,13 @@ export const primaryNav: NavItem[] = [
     perm: "run:infer",
   },
   {
+    key: "review",
+    path: "/review",
+    label: "智能复核",
+    icon: "AuditOutlined",
+    perm: "run:infer",
+  },
+  {
     key: "reports",
     path: "/reports",
     label: "报告中心",

@@ -111,6 +111,28 @@ class Run(Base):
     created_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class ReviewSession(Base):
+    __tablename__ = "review_sessions"
+    __table_args__ = (
+        ForeignKeyConstraint(["tiff_id", "phase_id"], ["tiffs.tiff_id", "tiffs.phase_id"], ondelete="CASCADE"),
+    )
+
+    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    phase_id: Mapped[str] = mapped_column(String, nullable=False)
+    tiff_id: Mapped[str] = mapped_column(String, nullable=False)
+    tract_phase_pk: Mapped[str] = mapped_column(ForeignKey("tract_phases.tract_phase_pk", ondelete="CASCADE"))
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    base_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.run_id", ondelete="SET NULL"))
+    expected_active_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.run_id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String, default="active")
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    draft_path: Mapped[str] = mapped_column(Text, nullable=False)
+    summary_json: Mapped[str | None] = mapped_column(Text)
+    published_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.run_id", ondelete="SET NULL"))
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class TreeIndividual(Base):
     __tablename__ = "tree_individuals"
 

@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __codename__, __version__
 from ..env import load_local_env
-from .routers import assets, geo, health, jobs, tiles, tracts, uploads
+from .routers import assets, geo, health, jobs, reviews, tiles, tracts, uploads
 
 API_PREFIX = "/api/v1"
 
@@ -44,6 +44,7 @@ def create_app() -> FastAPI:
     app.include_router(assets.router, prefix=API_PREFIX)
     app.include_router(geo.router, prefix=API_PREFIX)
     app.include_router(tiles.router, prefix=API_PREFIX)
+    app.include_router(reviews.router, prefix=API_PREFIX)
     return app
 
 

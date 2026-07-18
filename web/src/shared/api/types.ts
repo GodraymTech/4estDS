@@ -419,6 +419,74 @@ export interface EffectiveAreaImportResponse {
   warnings: string[];
 }
 
+export type ReviewMode = "based_on_active" | "from_scratch";
+export type ReviewItemStatus = "accepted" | "rejected" | "pending";
+
+export interface ReviewItem {
+  id: string;
+  parent_observation_id?: string | null;
+  individual_id?: string | null;
+  species: string;
+  confidence?: number | null;
+  box_px: number[];
+  box_geo?: number[] | null;
+  center_geom?: string | null;
+  crown_geom?: string | null;
+  geom_crown?: string | null;
+  source: "parent" | "human" | "ai";
+  confirmed: boolean;
+  status: ReviewItemStatus;
+  note?: string;
+  conflict?: boolean;
+}
+
+export interface ReviewCategory {
+  id: string;
+  display_name: string;
+  model_prompt: string;
+  color: string;
+}
+
+export interface ReviewSession {
+  session_id: string;
+  phase_id: string;
+  tiff_id: string;
+  tract_phase_pk: string;
+  mode: ReviewMode;
+  base_run_id?: string | null;
+  expected_active_run_id?: string | null;
+  status: "active" | "published" | "canceled";
+  revision: number;
+  published_run_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReviewWorkspace {
+  revision: number;
+  items: ReviewItem[];
+  category_catalog: ReviewCategory[];
+  visible_categories: string[];
+  active_category?: string | null;
+  text_prompts: Array<Record<string, unknown>>;
+  visual_exemplars: Array<Record<string, unknown>>;
+  attempts: Array<Record<string, unknown>>;
+}
+
+export interface ReviewPatch {
+  session_id: string;
+  revision: number;
+  items: ReviewItem[];
+  summary: Record<string, number>;
+}
+
+export interface ReviewPublishResult {
+  session_id: string;
+  run_id: string;
+  observation_count: number;
+  status: string;
+}
+
 // 地块多时相真影像瓦片(对应 schemas.TractImageryOut)。
 // tiles 为空 / available=false 时, 前端回退默认底图。
 export interface TractImagery {

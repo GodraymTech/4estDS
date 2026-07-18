@@ -198,6 +198,68 @@ class EffectiveAreaImportOut(BaseModel):
     warnings: tuple[str, ...] = ()
 
 
+class ReviewCreate(BaseModel):
+    phase_id: str = Field(..., pattern=r"^\d{8}$")
+    tiff_id: str = Field(..., min_length=1)
+    mode: Literal["based_on_active", "from_scratch"] = "based_on_active"
+    base_run_id: Optional[str] = None
+
+
+class ReviewOperationBatch(BaseModel):
+    revision: int = Field(..., ge=0)
+    operation_id: str = Field(..., min_length=1)
+    operations: list[dict[str, Any]] = Field(..., min_length=1)
+
+
+class ReviewRevisionCommand(BaseModel):
+    revision: int = Field(..., ge=0)
+    operation_id: str = Field(..., min_length=1)
+
+
+class ReviewCancelCommand(BaseModel):
+    revision: int = Field(..., ge=0)
+
+
+class ReviewSessionOut(BaseModel):
+    session_id: str
+    phase_id: str
+    tiff_id: str
+    tract_phase_pk: str
+    mode: Literal["based_on_active", "from_scratch"]
+    base_run_id: Optional[str] = None
+    expected_active_run_id: Optional[str] = None
+    status: str
+    revision: int
+    published_run_id: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class ReviewWorkspaceOut(BaseModel):
+    revision: int
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    category_catalog: list[dict[str, Any]] = Field(default_factory=list)
+    visible_categories: list[str] = Field(default_factory=list)
+    active_category: Optional[str] = None
+    text_prompts: list[dict[str, Any]] = Field(default_factory=list)
+    visual_exemplars: list[dict[str, Any]] = Field(default_factory=list)
+    attempts: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ReviewPatchOut(BaseModel):
+    session_id: str
+    revision: int
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    summary: dict[str, int] = Field(default_factory=dict)
+
+
+class ReviewPublishOut(BaseModel):
+    session_id: str
+    run_id: str
+    observation_count: int
+    status: str
+
+
 class TiffOut(BaseModel):
     """TIFF 影像资产行(地图标注与看板聚合的影像维度事实源)。"""
     model_config = {"extra": "allow"}

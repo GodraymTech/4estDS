@@ -16,4 +16,7 @@ export const queryKeys = {
   tractSummary: (tractId: string) => ["tract-summary", tractId] as const,
   tractSummaries: ["tract-summaries"] as const,
   effectiveArea: (tractPk: string) => ["effective-area", tractPk] as const,
+  reviews: ["reviews"] as const,
+  review: (sessionId: string) => ["review", sessionId] as const,
+  reviewWorkspace: (sessionId: string) => ["review-workspace", sessionId] as const,
 };

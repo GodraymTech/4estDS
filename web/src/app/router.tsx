@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { MapWorkspacePage } from "../pages/MapWorkspacePage";
@@ -13,6 +14,8 @@ import { AdminPage } from "../pages/AdminPage";
 import { ForbiddenPage } from "../pages/ForbiddenPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { RoleGate } from "../shared/auth";
+
+const ReviewPage = lazy(() => import("../pages/ReviewPage"));
 
 function AtlasRedirect() {
   const path = window.location.pathname.replace(/^\/atlas/, "/map");
@@ -35,6 +38,10 @@ export const router = createBrowserRouter([
       { path: "change", element: <ChangePage /> },
       { path: "dashboard", element: <DashboardPage /> },
       { path: "ledger", element: <LedgerPage /> },
+      {
+        path: "review/:sessionId?",
+        element: <Suspense fallback={null}><ReviewPage /></Suspense>,
+      },
       {
         path: "tasks",
         element: (

@@ -36,6 +36,11 @@ import type {
   EffectiveAreaImportSource,
   EffectiveAreaPutRequest,
   EffectiveAreaResponse,
+  ReviewMode,
+  ReviewPatch,
+  ReviewPublishResult,
+  ReviewSession,
+  ReviewWorkspace,
 } from "./types";
 
 // 端点定义集中一处(DRY)。承接 v1.0 api.ts 的契约, 重构为 FSD shared 层。
@@ -60,6 +65,38 @@ export const endpoints = {
     if (source.layer) body.append("layer", source.layer);
     return apiPostForm(`/tracts/${encodeURIComponent(tractPk)}/effective-area/imports/inspect`, body);
   },
+
+  listReviews: (status?: string): Promise<ReviewSession[]> =>
+    apiGet(`/reviews${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+
+  createReview: (body: { phase_id: string; tiff_id: string; mode: ReviewMode; base_run_id?: string }): Promise<ReviewSession> =>
+    apiPostJson("/reviews", body),
+
+  getReview: (sessionId: string): Promise<ReviewSession> =>
+    apiGet(`/reviews/${encodeURIComponent(sessionId)}`),
+
+  getReviewWorkspace: (sessionId: string): Promise<ReviewWorkspace> =>
+    apiGet(`/reviews/${encodeURIComponent(sessionId)}/workspace`),
+
+  reviewPreviewUrl: (sessionId: string): string =>
+    apiUrl(`/reviews/${encodeURIComponent(sessionId)}/preview`),
+
+  applyReviewOperations: (
+    sessionId: string,
+    body: { revision: number; operation_id: string; operations: Array<Record<string, unknown>> },
+  ): Promise<ReviewPatch> => apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/operations`, body),
+
+  undoReview: (sessionId: string, revision: number, operationId: string): Promise<ReviewPatch> =>
+    apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/undo`, { revision, operation_id: operationId }),
+
+  redoReview: (sessionId: string, revision: number, operationId: string): Promise<ReviewPatch> =>
+    apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/redo`, { revision, operation_id: operationId }),
+
+  publishReview: (sessionId: string): Promise<ReviewPublishResult> =>
+    apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/publish`, {}),
+
+  cancelReview: (sessionId: string, revision: number): Promise<ReviewSession> =>
+    apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/cancel`, { revision }),
 
   listAssets: (): Promise<AssetRow[]> => apiGet("/assets"),
 

@@ -256,7 +256,7 @@ rtk git commit -m "feat(map): enforce tract effective areas end to end"
 - Produces: `ReviewPublishService.publish(session_id)` 原子创建 review run、克隆最终全量 observations、切换 TIFF active run、更新 session。
 - Produces: `/api/v1/reviews` 会话、workspace、operations、undo、redo、publish、cancel API；`/review` 一级懒加载入口和人工框编辑主路径。
 
-- [ ] **Step 1: 写入会话、幂等、恢复和事务失败测试**
+- [x] **Step 1: 写入会话、幂等、恢复和事务失败测试**
 
 ```python
 def test_based_on_active_loads_parent_without_visual_prompts(service, seeded_active_run):
@@ -273,13 +273,13 @@ def test_duplicate_operation_is_idempotent(service, session):
 
 覆盖 from_scratch、revision 409、撤销重做、断线 checkpoint、进程重启恢复、质量门禁、发布回滚。
 
-- [ ] **Step 2: 运行测试确认会话内核缺失**
+- [x] **Step 2: 运行测试确认会话内核缺失**
 
 Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/bin/pytest tests/test_review_sessions.py tests/test_review_publish.py -q`
 
 Expected: FAIL，原因是 review 模块和 `review_sessions` 缺失。
 
-- [ ] **Step 3: 实现一表索引加文件草稿内核**
+- [x] **Step 3: 实现一表索引加文件草稿内核**
 
 ```python
 class ReviewSessionService:
@@ -291,11 +291,11 @@ class ReviewSessionService:
 
 增量日志在 1 秒防抖或 50 操作时原子 checkpoint，快照压缩后截断日志；operation_id 持久化去重，重启恢复不能重复拼接。
 
-- [ ] **Step 4: 实现质量门禁与原子发布并验证回滚**
+- [x] **Step 4: 实现质量门禁与原子发布并验证回滚**
 
 发布拒绝冲突、有效区域外框、无类别框；review run 的 parent/TIFF/phase 与基线一致，父 observations 不变。用故障注入在 observation 批量插入后抛错，确认 run、active_run 与 session 均回滚。
 
-- [ ] **Step 5: 实现 `/review` 首页和人工编辑工作台**
+- [x] **Step 5: 实现 `/review` 首页和人工编辑工作台**
 
 页面先列最近草稿与可复核 TIFF；工作台支持 based_on_active/from_scratch、类别目录、框新建/移动/缩放/删除/改类/备注、批量接受拒绝、筛选、快捷键、撤销重做、离开保护和导航收起。大数组使用按 ID 索引和增量 patch。
 
@@ -303,7 +303,7 @@ Run: `rtk proxy mise exec -- pnpm run typecheck`（目录 `web`）
 
 Run: `rtk proxy mise exec -- pnpm run build`（目录 `web`）
 
-- [ ] **Step 6: 运行阶段 C 回归并提交**
+- [x] **Step 6: 运行阶段 C 回归并提交**
 
 Run: `rtk proxy env PYTHONPATH=<worktree>/src /home/ray/rays/repos/4estDS/.venv/bin/pytest tests/test_review_sessions.py tests/test_review_publish.py -q`
 

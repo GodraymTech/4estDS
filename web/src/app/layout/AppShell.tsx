@@ -24,7 +24,8 @@ function titleForPath(pathname: string): string {
 // 页脚由具体非地图页自行引入(地图页全屏, 不放 footer)。
 export function AppShell() {
   const { pathname, search } = useLocation();
-  const editorMode = pathname.startsWith("/map") && new URLSearchParams(search).has("effective-area");
+  const editorMode = (pathname.startsWith("/map") && new URLSearchParams(search).has("effective-area"))
+    || /^\/review\/[^/]+/.test(pathname);
   const [railPreview, setRailPreview] = useState(false);
 
   // 每页同步文档标题: 屏读朗读与浏览器标签页可辨识。
