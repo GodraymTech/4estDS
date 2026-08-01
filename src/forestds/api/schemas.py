@@ -440,6 +440,7 @@ class AssetInspectOut(BaseModel):
     suggested_cog_path: Optional[str] = None
     suggested_cog_display_path: Optional[str] = None
     geo_error: Optional[str] = None
+    estimated_cog_seconds: Optional[float] = None
 
 
 class AssetCogConvertRequest(BaseModel):
@@ -510,6 +511,9 @@ class AssetRow(BaseModel):
     area_unit: Optional[str] = None
     observation_count: int = 0
     detected_at: Optional[str] = None
+    pixel_width: Optional[int] = None
+    pixel_height: Optional[int] = None
+    estimated_cog_seconds: Optional[float] = None
 
 
 class GeoPlaceOut(BaseModel):
@@ -539,3 +543,16 @@ class GeoReverseOut(BaseModel):
     region_id: str
     formatted_address: Optional[str] = None
     adcode: Optional[str] = None
+
+
+class ServerFileItem(BaseModel):
+    name: str
+    path: str
+    is_dir: bool
+    size: Optional[int] = None
+
+
+class ServerFileBrowseOut(BaseModel):
+    current_path: str
+    parent_path: Optional[str] = None
+    items: list[ServerFileItem] = Field(default_factory=list)

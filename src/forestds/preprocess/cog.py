@@ -304,3 +304,21 @@ def _convert_with_cog_driver(
         except Exception:
             pass
     return False
+
+
+def estimate_cog_seconds(width: int | None, height: int | None, block_size: int = 512) -> float:
+    """根据图像分辨率估算 COG 转换总耗时。基于金字塔总瓦片数 * 物理硬件转码效率常数 (0.00652581s/tile)。"""
+    if not width or not height:
+        return 5.0
+    import math
+    total_tiles = 0
+    curr_w, curr_h = width, height
+    while True:
+        tiles_w = math.ceil(curr_w / block_size)
+        tiles_h = math.ceil(curr_h / block_size)
+        total_tiles += tiles_w * tiles_h
+        if tiles_w == 1 and tiles_h == 1:
+            break
+        curr_w = math.ceil(curr_w / 2)
+        curr_h = math.ceil(curr_h / 2)
+    return round(total_tiles * 0.00652581 + 1.0, 2)

@@ -23,6 +23,8 @@ from ..schemas import (
     AssetPatch,
     AssetRow,
     AssetTiffCreate,
+    ServerFileItem,
+    ServerFileBrowseOut,
 )
 
 router = APIRouter(prefix="/assets", tags=["assets"])
@@ -85,6 +87,15 @@ def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
         county = row.get("county")
         if (not city or not county) and row.get("region_id"):
             city, county = split_region_id(row["region_id"])
+
+        tiff_type = row.get("tiff_type")
+        estimated_cog_seconds = None
+        if tiff_type and tiff_type != "COG" and tiff_type != "invalid":
+            from ...preprocess.cog import estimate_cog_seconds
+            estimated_cog_seconds = estimate_cog_seconds(
+                row.get("pixel_width"), row.get("pixel_height")
+            )
+
         out.append(
             AssetRow(
                 city=city,
@@ -98,7 +109,7 @@ def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
                 tiff_id=row.get("tiff_id"),
                 image_name=_image_stem(row.get("file_name")),
                 source_path=row.get("source_path"),
-                tiff_type=row.get("tiff_type"),
+                tiff_type=tiff_type,
                 active_run_id=row.get("active_run_id"),
                 run_id=row.get("run_id"),
                 run_count=int(row.get("run_count") or 0),
@@ -109,6 +120,9 @@ def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
                 area_unit=row.get("area_unit"),
                 observation_count=int(row.get("observation_count") or 0),
                 detected_at=row.get("detected_at"),
+                pixel_width=row.get("pixel_width"),
+                pixel_height=row.get("pixel_height"),
+                estimated_cog_seconds=estimated_cog_seconds,
             )
         )
     return out
@@ -166,6 +180,12 @@ def inspect_asset_image(body: AssetInspectRequest) -> AssetInspectOut:
         geo_error = str(exc)
     fallback_name = Path(normalized_path).name if normalized_path else None
     fallback_stem = _image_stem(fallback_name)
+
+    estimated_cog_seconds = None
+    if image and tiff_type and tiff_type != "COG" and tiff_type != "invalid":
+        from ...preprocess.cog import estimate_cog_seconds
+        estimated_cog_seconds = estimate_cog_seconds(image.width, image.height)
+
     return AssetInspectOut(
         input_path=body.input_path,
         normalized_path=normalized_path,
@@ -189,6 +209,7 @@ def inspect_asset_image(body: AssetInspectRequest) -> AssetInspectOut:
         suggested_cog_path=suggested_cog_path,
         suggested_cog_display_path=_display_user_path(suggested_cog_path),
         geo_error=geo_error,
+        estimated_cog_seconds=estimated_cog_seconds,
     )
 
 
@@ -451,4 +472,59 @@ def preview_delete_tiff(
         tiff_id=tiff_id,
         observation_count=int(count or 0),
         requires_confirmation=bool(count),
+    )
+
+
+@router.get("/browse-files", response_model=ServerFileBrowseOut, summary="浏览服务器本地文件与目录")
+def browse_files(path: str | None = Query(None)) -> ServerFileBrowseOut:
+    import os
+    if not path:
+        target_path = Path("/").resolve()
+    else:
+        target_path = Path(path).resolve()
+
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail="路径不存在")
+    if not target_path.is_dir():
+        raise HTTPException(status_code=400, detail="指定路径不是一个有效的目录")
+
+    items = []
+    try:
+        for entry in os.scandir(target_path):
+            if entry.name.startswith("."):
+                continue
+            is_dir = entry.is_dir()
+            
+            if not is_dir:
+                ext = Path(entry.name).suffix.lower()
+                if ext not in {".tif", ".tiff", ".las", ".dem", ".dsm", ".shp", ".geojson", ".zip", ".json"}:
+                    continue
+
+            try:
+                stat = entry.stat()
+                size = stat.st_size
+            except OSError:
+                size = None
+
+            items.append(
+                ServerFileItem(
+                    name=entry.name,
+                    path=str(Path(entry.path).absolute()),
+                    is_dir=is_dir,
+                    size=size,
+                )
+            )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="没有权限访问该目录")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    items.sort(key=lambda x: (not x.is_dir, x.name.lower()))
+    
+    parent_path = str(target_path.parent) if target_path != target_path.parent else None
+
+    return ServerFileBrowseOut(
+        current_path=str(target_path),
+        parent_path=parent_path,
+        items=items,
     )

@@ -227,6 +227,9 @@ export interface AssetRow {
   area_unit?: string | null;
   observation_count: number;
   detected_at?: string | null;
+  pixel_width?: number | null;
+  pixel_height?: number | null;
+  estimated_cog_seconds?: number | null;
 }
 
 export interface AssetDeletePreview {
@@ -265,6 +268,7 @@ export interface AssetInspectResult {
   suggested_cog_path?: string | null;
   suggested_cog_display_path?: string | null;
   geo_error?: string | null;
+  estimated_cog_seconds?: number | null;
 }
 
 export interface AssetCogConvertResult {
@@ -623,4 +627,18 @@ export interface TractSummary {
     [k: string]: unknown;
   };
   [k: string]: unknown;
+}
+
+
+export interface ServerFileItem {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size?: number | null;
+}
+
+export interface ServerFileBrowseOut {
+  current_path: string;
+  parent_path?: string | null;
+  items: ServerFileItem[];
 }

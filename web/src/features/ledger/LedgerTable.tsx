@@ -39,6 +39,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { endpoints, queryKeys, type ArtifactNode, type AssetRow } from "../../shared/api";
 import { env } from "../../shared/config/env";
 import { formatAreaLedgerValue } from "../../entities/effective-area";
+import { ServerFileBrowserModal } from "../../shared/ui/ServerFileBrowserModal";
 
 const { Text } = Typography;
 
@@ -58,6 +59,21 @@ export function LedgerTable() {
   const [rowCogProgress, setRowCogProgress] = useState(0);
   const [skipCogSuggestion, setSkipCogSuggestion] = useState(false);
   const lastInspectedPath = useRef("");
+  const [sortList, setSortList] = useState<Array<{ columnKey: string; order: "ascend" | "descend" }>>([]);
+  const [serverFileBrowserOpen, setServerFileBrowserOpen] = useState(false);
+
+  const handleHeaderClick = (key: string) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSortList((prev) => {
+      const found = prev.find((s) => s.columnKey === key);
+      const filtered = prev.filter((s) => s.columnKey !== key);
+      if (found) {
+        const nextOrder = found.order === "ascend" ? "descend" : "ascend";
+        return [{ columnKey: key, order: nextOrder }, ...filtered];
+      }
+      return [{ columnKey: key, order: "ascend" }, ...filtered];
+    });
+  };
 
   const assets = useQuery({
     queryKey: queryKeys.assets,
@@ -228,14 +244,50 @@ export function LedgerTable() {
 
   const rows = useMemo(() => {
     const kw = q.trim().toLowerCase();
-    const data = assets.data ?? [];
-    if (!kw) return data;
-    return data.filter((r) =>
-      [r.city, r.county, r.town, r.tract_id, r.phase_id, r.image_name, r.run_id, r.status, r.source_path]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(kw)),
-    );
-  }, [assets.data, q]);
+    const rawData = assets.data ?? [];
+    let filtered = [...rawData];
+    if (kw) {
+      filtered = filtered.filter((r) =>
+        [r.city, r.county, r.town, r.tract_id, r.phase_id, r.image_name, r.run_id, r.status, r.source_path]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(kw)),
+      );
+    }
+
+    if (sortList.length > 0) {
+      filtered.sort((a, b) => {
+        for (const s of sortList) {
+          const { columnKey, order } = s;
+          let valA = a[columnKey as keyof AssetRow];
+          let valB = b[columnKey as keyof AssetRow];
+
+          if (columnKey === "geo_area") {
+            valA = a.effective_area_hm2 ?? a.tract_area_hm2 ?? (typeof a.geo_area === "number" ? a.geo_area / 10_000 : null) ?? 0;
+            valB = b.effective_area_hm2 ?? b.tract_area_hm2 ?? (typeof b.geo_area === "number" ? b.geo_area / 10_000 : null) ?? 0;
+          }
+
+          if (valA === valB) continue;
+          if (valA == null) return 1;
+          if (valB == null) return -1;
+
+          const factor = order === "ascend" ? 1 : -1;
+          if (typeof valA === "number" && typeof valB === "number") {
+            return (valA - valB) * factor;
+          }
+          return String(valA).localeCompare(String(valB), "zh-Hans-CN") * factor;
+        }
+        return 0;
+      });
+    } else {
+      filtered.sort((a, b) => {
+        const valA = a.detected_at || "";
+        const valB = b.detected_at || "";
+        if (valA === valB) return 0;
+        return valB.localeCompare(valA);
+      });
+    }
+    return filtered;
+  }, [assets.data, q, sortList]);
 
   const inputPath = Form.useWatch("input_path", form);
   const cityValue = Form.useWatch("city", form);
@@ -288,21 +340,30 @@ export function LedgerTable() {
 
   useEffect(() => {
     if (!convertCog.isPending) return;
-    setCogProgress(8);
+    setCogProgress(5);
+
+    const T = inspect.data?.estimated_cog_seconds || 10;
+    const stepSize = 36 / T;
+
     const timer = window.setInterval(() => {
-      setCogProgress((value) => Math.min(92, value + Math.max(2, Math.round((92 - value) * 0.12))));
-    }, 700);
+      setCogProgress((value) => getNextProgress(value, stepSize));
+    }, 450);
     return () => window.clearInterval(timer);
-  }, [convertCog.isPending]);
+  }, [convertCog.isPending, inspect.data]);
 
   useEffect(() => {
     if (!convertRowCog.isPending) return;
-    setRowCogProgress(6);
+    setRowCogProgress(5);
+
+    const row = convertRowCog.variables;
+    const T = row?.estimated_cog_seconds || 10;
+    const stepSize = 36 / T;
+
     const timer = window.setInterval(() => {
-      setRowCogProgress((value) => Math.min(94, value + Math.max(2, Math.round((94 - value) * 0.1))));
-    }, 800);
+      setRowCogProgress((value) => getNextProgress(value, stepSize));
+    }, 450);
     return () => window.clearInterval(timer);
-  }, [convertRowCog.isPending]);
+  }, [convertRowCog.isPending, convertRowCog.variables]);
 
   useEffect(() => {
     if (modalMode !== "create") return;
@@ -316,14 +377,42 @@ export function LedgerTable() {
   }, [inputPath, inspect, modalMode]);
 
   const columns: TableProps<AssetRow>["columns"] = [
-    { title: "市", dataIndex: "city", key: "city", width: 92, render: empty },
-    { title: "县", dataIndex: "county", key: "county", width: 106, render: empty },
-    { title: "地块", dataIndex: "tract_id", key: "tract_id", width: 120, ellipsis: true, render: empty },
+    {
+      title: "市",
+      dataIndex: "city",
+      key: "city",
+      width: 72,
+      render: empty,
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "city")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("city") }),
+    },
+    {
+      title: "县",
+      dataIndex: "county",
+      key: "county",
+      width: 86,
+      render: empty,
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "county")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("county") }),
+    },
+    {
+      title: "地块",
+      dataIndex: "tract_id",
+      key: "tract_id",
+      width: 100,
+      ellipsis: true,
+      render: empty,
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "tract_id")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("tract_id") }),
+    },
     {
       title: "时相",
       dataIndex: "phase_id",
       key: "phase_id",
-      width: 96,
+      width: 90,
       render: (v: string, row) => {
         if (!v) return "-";
         const clickable = row.city && row.county && row.tract_id && row.phase_id;
@@ -338,30 +427,71 @@ export function LedgerTable() {
             {v}
           </Button>
         );
-      }
+      },
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "phase_id")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("phase_id") }),
     },
-    { title: "影像名", dataIndex: "image_name", key: "image_name", ellipsis: true, render: empty },
     {
-      title: "TIFF状态",
+      title: "影像名",
+      dataIndex: "image_name",
+      key: "image_name",
+      width: 400,
+      ellipsis: true,
+      render: empty,
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "image_name")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("image_name") }),
+    },
+    {
+      title: (
+        <Space size={5}>
+          <span>TIFF状态</span>
+          <Tooltip
+            title={
+              <div style={{ display: "grid", gap: 4 }}>
+                <div><strong>COG:</strong> Cloud Optimized GeoTIFF (最佳)</div>
+                <div><strong>带ovr:</strong> 带有外置金字塔 (良好)</div>
+                <div><strong>Tiled:</strong> 已分块普通 TIFF (建议转换)</div>
+                <div><strong>普通:</strong> 未优化普通 TIFF (建议转换)</div>
+                <div><strong>不可用:</strong> 损坏或非 TIFF 格式的影像</div>
+              </div>
+            }
+          >
+            <InfoCircleOutlined style={{ color: "var(--color-text-muted)", cursor: "help" }} />
+          </Tooltip>
+        </Space>
+      ),
       dataIndex: "tiff_type",
       key: "tiff_type",
-      width: 188,
+      width: 120,
       render: (_: unknown, row) => tiffStatusCell(row),
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "tiff_type")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("tiff_type") }),
     },
     {
       title: "推理状态",
       dataIndex: "status",
       key: "status",
-      width: 112,
+      width: 90,
       render: (_: unknown, row) => inferenceStatusCell(row),
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "status")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("status") }),
     },
-    { title: "正式运行ID", dataIndex: "run_id", key: "run_id", width: 106, render: (v?: string | null) => (v ? <Text code>{v}</Text> : "") },
+    {
+      title: "运行ID",
+      dataIndex: "run_id",
+      key: "run_id",
+      width: 110,
+      render: (v?: string | null) => (v ? <Text code>{v}</Text> : ""),
+    },
     {
       title: "运行次数",
       dataIndex: "run_count",
       key: "run_count",
-      width: 92,
-      align: "right",
+      width: 80,
       render: (value: number | undefined, row) => {
         const count = value ?? 0;
         if (!count || !row.phase_id || !row.tiff_id) return count;
@@ -378,29 +508,49 @@ export function LedgerTable() {
       },
     },
     {
-      title: "面积/有效面积(hm²)",
+      title: (
+        <Space size={4}>
+          <span>面积(hm²)</span>
+          <Tooltip title="括号内表示用户自行圈定的有效区域面积">
+            <InfoCircleOutlined style={{ color: "var(--color-text-muted)", cursor: "help" }} />
+          </Tooltip>
+        </Space>
+      ),
       dataIndex: "geo_area",
       key: "geo_area",
-      width: 112,
-      align: "right",
+      width: 120,
       render: (v: number | null | undefined, row) => formatAreaLedgerValue(
         row.tract_area_hm2 ?? (typeof v === "number" ? v / 10_000 : null),
         row.effective_area_hm2,
       ),
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "geo_area")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("geo_area") }),
     },
     {
       title: "株数",
       dataIndex: "observation_count",
       key: "observation_count",
-      width: 86,
-      align: "right",
+      width: 90,
       render: (v?: number) => (v ? v.toLocaleString() : ""),
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "observation_count")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("observation_count") }),
     },
-    { title: "检测时间", dataIndex: "detected_at", key: "detected_at", width: 170, render: formatTime },
+    {
+      title: "检测时间",
+      dataIndex: "detected_at",
+      key: "detected_at",
+      width: 160,
+      render: formatTime,
+      sorter: true,
+      sortOrder: sortList.find((s) => s.columnKey === "detected_at")?.order || null,
+      onHeaderCell: () => ({ onClick: handleHeaderClick("detected_at") }),
+    },
     {
       title: "操作",
       key: "actions",
-      width: 150,
+      width: 100,
       render: (_: unknown, row) => (
         <Space size={6}>
           <Tooltip title="查看地图">
@@ -517,7 +667,7 @@ export function LedgerTable() {
   function tiffStatusCell(row: AssetRow) {
     const type = row.tiff_type || "invalid";
     if (type === "COG" || type === "ext_ovr") {
-      return <Tag color="success">{tiffTypeLabel(type)} · 可瓦片</Tag>;
+      return <Tag color="success">{tiffTypeLabel(type)}</Tag>;
     }
     if (type === "normal" || type === "tiled") {
       const converting =
@@ -561,6 +711,13 @@ export function LedgerTable() {
 
   return (
     <Space direction="vertical" size={12} style={FULL}>
+      <style>{`
+        .ant-table-thead th .ant-table-column-sorter {
+          order: -1;
+          margin-right: 6px;
+          margin-left: 0 !important;
+        }
+      `}</style>
       <div style={TOOL_ROW}>
         <Input.Search
           placeholder="搜索市 / 县 / 乡镇 / 地块 / 时相 / 影像 / 运行"
@@ -602,6 +759,7 @@ export function LedgerTable() {
             <Button
               icon={<ReloadOutlined />}
               onClick={() => {
+                setSortList([]);
                 queryClient.invalidateQueries({ queryKey: queryKeys.assets });
                 queryClient.invalidateQueries({ queryKey: queryKeys.tiffs });
               }}
@@ -619,6 +777,7 @@ export function LedgerTable() {
           columns={columns}
           dataSource={rows}
           pagination={PAGINATION}
+          showSorterTooltip={false}
           expandable={{
             expandedRowKeys: expanded,
             onExpandedRowsChange: (keys) => setExpanded(keys.map(String)),
@@ -658,19 +817,43 @@ export function LedgerTable() {
           ) : null}
           {modalMode === "create" ? (
             <>
-              <Form.Item name="input_path" label="TIFF 路径" rules={[{ required: true, message: "请输入 TIFF 路径" }]}>
-                <Input.Search
-                  placeholder="输入本机 TIFF 路径"
-                  enterButton="读取属性"
-                  loading={inspect.isPending}
-                  onSearch={(value) => {
-                    const trimmed = value.trim();
-                    if (!trimmed) return;
-                    lastInspectedPath.current = trimmed;
-                    inspect.mutate({ input_path: trimmed });
-                  }}
-                />
-              </Form.Item>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <Form.Item
+                  name="input_path"
+                  label="TIFF 路径"
+                  rules={[{ required: true, message: "请输入 TIFF 路径" }]}
+                  style={{ flex: 1 }}
+                >
+                  <Input
+                    placeholder="输入本机 TIFF 路径"
+                    disabled={inspect.isPending}
+                  />
+                </Form.Item>
+                <div style={{ marginTop: 29 }}>
+                  <Space size={8}>
+                    <Button
+                      icon={<FolderOpenOutlined />}
+                      disabled={inspect.isPending}
+                      onClick={() => setServerFileBrowserOpen(true)}
+                    >
+                      选择
+                    </Button>
+                    <Button
+                      type="primary"
+                      loading={inspect.isPending}
+                      onClick={() => {
+                        const val = form.getFieldValue("input_path");
+                        const trimmed = (val || "").trim();
+                        if (!trimmed) return;
+                        lastInspectedPath.current = trimmed;
+                        inspect.mutate({ input_path: trimmed });
+                      }}
+                    >
+                      读取属性
+                    </Button>
+                  </Space>
+                </div>
+              </div>
               {inspect.data ? (
                 <div style={INSPECT_PANEL}>
                   <div><Text type="secondary">读取状态：</Text>{inspect.data.inspect_error ? <Text type="danger">{inspect.data.inspect_error}</Text> : <Text type="success">可读取</Text>}</div>
@@ -702,7 +885,7 @@ export function LedgerTable() {
                   {convertCog.data ? (
                     <div style={COG_RESULT}>
                       <div><Text type="secondary">新路径：</Text><Text code>{convertCog.data.cog_display_path}</Text></div>
-                      <Text type="secondary">转换确认无误后，可自行删除原始 tif/tiff、tif.ovr 等旁路文件。</Text>
+                      <Text style={{ fontSize: 12, color: "var(--color-text-muted)", opacity: 0.55 }}>ℹ️转换确认无误后，可自行删除同名的 “.tif/.tiff、.tif.ovr” 等文件，只保留“原始图像名_cog.tif”即可。</Text>
                     </div>
                   ) : null}
                 </div>
@@ -734,7 +917,7 @@ export function LedgerTable() {
               <Input placeholder="自动, 可手动修改如:20260606" />
             </Form.Item>
             <Form.Item name="image_name" label="影像名">
-              <Input placeholder="默认使用文件名" />
+              <Input placeholder="默认当前文件名" />
             </Form.Item>
             {modalMode === "edit" ? (
               <Form.Item name="new_path" label="新路径">
@@ -744,6 +927,14 @@ export function LedgerTable() {
           </div>
         </Form>
       </Modal>
+      <ServerFileBrowserModal
+        open={serverFileBrowserOpen}
+        onClose={() => setServerFileBrowserOpen(false)}
+        onSelect={(path) => form.setFieldsValue({ input_path: path })}
+        selectType="file"
+        title="选择服务端.tif图像"
+        defaultPath={form.getFieldValue("input_path")}
+      />
     </Space>
   );
 }
@@ -758,6 +949,14 @@ function RunArtifacts({ runId }: { runId: string }) {
   const [checkedPaths, setCheckedPaths] = useState<string[]>([]);
   const treeData = useMemo(() => toTreeData(data?.tree ?? [], setPreview), [data?.tree]);
   const allKeys = useMemo(() => flattenArtifactKeys(data?.tree ?? []), [data?.tree]);
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+  useEffect(() => {
+    if (exportMode) {
+      setExpandedKeys(allKeys);
+    } else {
+      setExpandedKeys([]);
+    }
+  }, [exportMode, allKeys]);
   const exportArtifacts = useMutation({
     mutationFn: () => endpoints.exportArtifacts(runId, checkedPaths.length ? checkedPaths : ["."]),
     onSuccess: (result) => {
@@ -796,7 +995,8 @@ function RunArtifacts({ runId }: { runId: string }) {
         showLine
         checkable={exportMode}
         selectable={!exportMode}
-        expandedKeys={exportMode ? allKeys : undefined}
+        expandedKeys={expandedKeys}
+        onExpand={(keys) => setExpandedKeys(keys.map(String))}
         checkedKeys={checkedPaths}
         treeData={treeData}
         onCheck={(keys) => {
@@ -827,7 +1027,30 @@ function toTreeData(nodes: ArtifactNode[], setPreview: (node: ArtifactNode) => v
     title: (
       <span>
         {n.description ? <Text strong>{n.name}</Text> : n.name}
-        {n.description ? <Text type="secondary"> - {n.description}</Text> : null}
+        {(() => {
+          if (!n.description) return null;
+          const desc = n.description.trim();
+          const colonIndex = desc.indexOf(":") !== -1 ? desc.indexOf(":") : desc.indexOf("：");
+          if (colonIndex !== -1) {
+            const label = desc.slice(0, colonIndex).trim();
+            const tooltip = desc.slice(colonIndex + 1).trim();
+            return (
+              <>
+                {label ? <Text type="secondary" style={{ marginLeft: 4 }}>- {label}</Text> : null}
+                {tooltip ? (
+                  <Tooltip title={tooltip}>
+                    <InfoCircleOutlined style={{ color: "var(--color-text-muted)", marginLeft: 4, cursor: "help" }} />
+                  </Tooltip>
+                ) : null}
+              </>
+            );
+          }
+          return (
+            <Tooltip title={desc}>
+              <InfoCircleOutlined style={{ color: "var(--color-text-muted)", marginLeft: 4, cursor: "help" }} />
+            </Tooltip>
+          );
+        })()}
         {n.type === "file" ? (
           <Button
             size="small"
@@ -1078,3 +1301,17 @@ const ARTIFACT_HEAD: CSSProperties = {
 const RUN_DIR_LINE: CSSProperties = { minWidth: 0, display: "flex", gap: 8, alignItems: "center" };
 const PREVIEW_IMAGE: CSSProperties = { maxWidth: "100%", maxHeight: "70vh", display: "block", margin: "0 auto" };
 const PREVIEW_FRAME: CSSProperties = { width: "100%", height: "70vh", border: "1px solid var(--color-border)" };
+
+function getNextProgress(current: number, stepSize: number): number {
+  let step = 0;
+  if (current < 85) {
+    // 85% 之前采用基于图像分辨率预估的步长推进，并辅以少量随机扰动保持自然效果
+    const fluctuation = stepSize * (0.8 + Math.random() * 0.4);
+    step = fluctuation;
+  } else if (current < 97) {
+    // 超过预估的 85% 时间后，以 0.05% 的极微速度挂起蠕动，消除静止感
+    step = 0.05;
+  }
+  const next = current + step;
+  return next >= 97 ? 97 : parseFloat(next.toFixed(2));
+}

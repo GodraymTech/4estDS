@@ -8,7 +8,6 @@ import {
   Select,
   Space,
   Tooltip,
-  Upload,
   message,
 } from "antd";
 import {
@@ -20,11 +19,11 @@ import {
   PlayCircleOutlined,
   RightOutlined,
   StopOutlined,
-  UploadOutlined,
 } from "@ant-design/icons";
 import { useSearchParams } from "react-router-dom";
 import { ApiError, endpoints, type InferSubmit, type InputInspectResult } from "../../shared/api";
 import { useJobsStore } from "./jobsStore";
+import { ServerFileBrowserModal } from "../../shared/ui/ServerFileBrowserModal";
 
 const EXPORT_OPTIONS = [
   { value: "shp", label: "shp" },
@@ -58,14 +57,32 @@ export function UploadForm({
   const [overlapPercent, setOverlapPercent] = useState<number | null>(null);
   const [exportFmt, setExportFmt] = useState("shp");
   const [dsmOpen, setDsmOpen] = useState(false);
-  const [demOpen, setDemOpen] = useState(false);
-  const [lasOpen, setLasOpen] = useState(false);
   const [dsm, setDsm] = useState("");
+  const [demOpen, setDemOpen] = useState(false);
   const [dem, setDem] = useState("");
+  const [lasOpen, setLasOpen] = useState(false);
   const [las, setLas] = useState("");
-  const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
   const addJob = useJobsStore((s) => s.addJob);
+
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserConfig, setBrowserConfig] = useState<{
+    value: string;
+    onChange: (val: string) => void;
+    title: string;
+    selectType: "file" | "dir" | "both";
+  } | null>(null);
+
+  const openBrowser = (
+    value: string,
+    onChange: (val: string) => void,
+    title: string,
+    selectType: "file" | "dir" | "both" = "file"
+  ) => {
+    setBrowserConfig({ value, onChange, title, selectType });
+    setBrowserOpen(true);
+  };
 
   useEffect(() => {
     const nextInputPath = searchParams.get("input_path") || "";
@@ -209,27 +226,13 @@ export function UploadForm({
               disabled={busy}
               allowClear
             />
-            <Upload
-              multiple={false}
-              maxCount={1}
-              showUploadList={false}
-              beforeUpload={(file) => {
-                const path = droppedFilePath(file as File & { path?: string });
-                if (path) {
-                  setInputPath(path);
-                  return false;
-                }
-                setUploadFile(file);
-                setInputPath("");
-                setInspect(null);
-                return false;
-              }}
+            <Button
+              icon={<FolderOpenOutlined />}
               disabled={busy}
+              onClick={() => openBrowser(inputPath, setInputPath, "选择输入路径 (影像文件或目录)", "both")}
             >
-              <Button icon={<UploadOutlined />} disabled={busy}>
-                选择
-              </Button>
-            </Upload>
+              选择
+            </Button>
           </div>
         </div>
         <div className="task-drop-zone" onDragOver={(e) => e.preventDefault()} onDrop={handlePathDrop}>
@@ -303,10 +306,48 @@ export function UploadForm({
       </div>
 
       <div className="task-form__section task-form__section--aux">
-        <OptionalPath title="DSM" open={dsmOpen} value={dsm} onOpen={setDsmOpen} onChange={setDsm} disabled={busy} />
-        <OptionalPath title="DEM" open={demOpen} value={dem} onOpen={setDemOpen} onChange={setDem} disabled={busy} />
-        <OptionalPath title="LAS" open={lasOpen} value={las} onOpen={setLasOpen} onChange={setLas} disabled={busy} />
+        <OptionalPath
+          title="DSM"
+          open={dsmOpen}
+          value={dsm}
+          onOpen={setDsmOpen}
+          onChange={setDsm}
+          disabled={busy}
+          onSelectClick={() => openBrowser(dsm, setDsm, "选择 DSM 路径", "file")}
+        />
+        <OptionalPath
+          title="DEM"
+          open={demOpen}
+          value={dem}
+          onOpen={setDemOpen}
+          onChange={setDem}
+          disabled={busy}
+          onSelectClick={() => openBrowser(dem, setDem, "选择 DEM 路径", "file")}
+        />
+        <OptionalPath
+          title="LAS"
+          open={lasOpen}
+          value={las}
+          onOpen={setLasOpen}
+          onChange={setLas}
+          disabled={busy}
+          onSelectClick={() => openBrowser(las, setLas, "选择 LAS 路径", "file")}
+        />
       </div>
+
+      {browserConfig && (
+        <ServerFileBrowserModal
+          open={browserOpen}
+          onClose={() => {
+            setBrowserOpen(false);
+            setBrowserConfig(null);
+          }}
+          onSelect={browserConfig.onChange}
+          selectType={browserConfig.selectType}
+          title={browserConfig.title}
+          defaultPath={browserConfig.value}
+        />
+      )}
 
       {busy && progress > 0 ? <Progress percent={progress} size="small" /> : null}
 
@@ -356,6 +397,7 @@ function OptionalPath({
   onOpen,
   onChange,
   disabled,
+  onSelectClick,
 }: {
   title: string;
   open: boolean;
@@ -363,6 +405,7 @@ function OptionalPath({
   onOpen: (open: boolean) => void;
   onChange: (value: string) => void;
   disabled?: boolean;
+  onSelectClick: () => void;
 }) {
   return (
     <div className={open ? "task-optional task-optional--open" : "task-optional"}>
@@ -382,6 +425,7 @@ function OptionalPath({
             onChange={onChange}
             placeholder={`${title} 路径`}
             disabled={disabled}
+            onSelectClick={onSelectClick}
           />
         ) : (
           <span className="task-optional__hint">默认不设置</span>
@@ -396,11 +440,13 @@ function CompactPathInput({
   onChange,
   placeholder,
   disabled,
+  onSelectClick,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   disabled?: boolean;
+  onSelectClick: () => void;
 }) {
   function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -422,20 +468,9 @@ function CompactPathInput({
         disabled={disabled}
         allowClear
       />
-      <Upload
-        multiple={false}
-        maxCount={1}
-        showUploadList={false}
-        beforeUpload={(file) => {
-          applyPickedPath(file as File & { path?: string }, onChange);
-          return false;
-        }}
-        disabled={disabled}
-      >
-        <Button icon={<UploadOutlined />} disabled={disabled}>
-          选择
-        </Button>
-      </Upload>
+      <Button icon={<FolderOpenOutlined />} disabled={disabled} onClick={onSelectClick}>
+        选择
+      </Button>
     </div>
   );
 }

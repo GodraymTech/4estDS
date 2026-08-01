@@ -44,6 +44,7 @@ import type {
   ReviewAttempt,
   ReviewMaskStroke,
   ReviewCapabilities,
+  ServerFileBrowseOut,
 } from "./types";
 
 // 端点定义集中一处(DRY)。承接 v1.0 api.ts 的契约, 重构为 FSD shared 层。
@@ -144,6 +145,9 @@ export const endpoints = {
     apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/cancel`, { revision }),
 
   listAssets: (): Promise<AssetRow[]> => apiGet("/assets"),
+
+  browseServerFiles: (path?: string): Promise<ServerFileBrowseOut> =>
+    apiGet(`/assets/browse-files${path ? `?path=${encodeURIComponent(path)}` : ""}`),
 
   inspectAssetImage: (body: AssetInspectRequest): Promise<AssetInspectResult> =>
     apiPostJson("/assets/inspect-image", body),
