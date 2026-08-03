@@ -119,12 +119,12 @@ def _to_wgs84(x: float, y: float, tract: dict) -> tuple[float, float] | None:
 def _base_tract_query(where: str = "") -> str:
     return (
         "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_geom_cent, "
-        "tr.effective_geom, tr.effective_area_hm2, tr.boundary_source, "
+        "tr.effective_geom, tr.effective_area_hm2, tr.effective_source, tf.area_hm2 AS tiff_effective_area_hm2, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
         "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tf.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
-        "tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
-        "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, "
+        "tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, tf.center_geom, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
+        "tf.pixel_width, tf.pixel_height, tf.gsd, tf.footprint_area_hm2, tf.area_hm2, tf.band_count, "
         "tf.dtype, tf.nodata, tf.inference_status "
         "FROM tracts tr "
         "LEFT JOIN tract_phases tp ON tp.tract_phase_pk = ("
@@ -145,12 +145,12 @@ def _base_tract_query(where: str = "") -> str:
 def _phase_tract_query(where: str = "") -> str:
     return (
         "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, tr.boundary_geom, tr.boundary_geom_cent, "
-        "tr.effective_geom, tr.effective_area_hm2, tr.boundary_source, "
+        "tr.effective_geom, tr.effective_area_hm2, tr.effective_source, tf.area_hm2 AS tiff_effective_area_hm2, "
         "tr.coverage_status AS tract_coverage_status, tr.notes, tr.created_at, tr.updated_at, "
-        "tp.tract_phase_pk, tp.phase_id, tr.coverage_status, tf.active_run_id, "
+        "tp.tract_phase_pk, tp.phase_id, tp.area_hm2 AS tract_phase_area_hm2, tr.coverage_status, tf.active_run_id, "
         "tf.tiff_id, tf.file_name, tf.path_versions, tf.multisource_path_versions, "
-        "tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
-        "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, "
+        "tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, tf.center_geom, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
+        "tf.pixel_width, tf.pixel_height, tf.gsd, tf.footprint_area_hm2, tf.area_hm2, tf.band_count, "
         "tf.dtype, tf.nodata, tf.inference_status "
         "FROM tract_phases tp "
         "JOIN tracts tr ON tr.tract_pk = tp.tract_pk "
@@ -167,10 +167,13 @@ def _tract_row(row: dict) -> dict:
     out = dict(row)
     out["status"] = out.get("coverage_status") or out.get("tract_coverage_status")
     out["source_path"] = _latest_path(out.get("path_versions"))
-    if out.get("center_lng") is None or out.get("center_lat") is None:
-        center = _parse_wkt_polygon_centroid(out.get("boundary_geom")) or _parse_wkt_point(out.get("boundary_geom_cent"))
-        if center:
-            out["center_lng"], out["center_lat"] = center
+    center = _parse_wkt_point(out.get("center_geom")) or _parse_wkt_polygon_centroid(out.get("boundary_geom")) or _parse_wkt_point(out.get("boundary_geom_cent"))
+    if center:
+        out["center_lng"], out["center_lat"] = center[0], center[1]
+    else:
+        out["center_lng"], out["center_lat"] = None, None
+    if out.get("footprint_area_hm2") is not None:
+        out["geo_area"] = float(out["footprint_area_hm2"]) * 10000.0
     try:
         from shapely.wkt import loads as load_wkt
         from ..effective_area.service import geodesic_area_hm2
@@ -180,14 +183,15 @@ def _tract_row(row: dict) -> dict:
             if out.get("boundary_geom")
             else None
         )
-    except Exception:  # noqa: BLE001 - 元数据读取不能因坏几何中断台账
+    except Exception:
         boundary_area = None
-    if out.get("effective_area_hm2") is None:
-        out["effective_area_hm2"] = boundary_area
-    out["tract_area_hm2"] = boundary_area
+    db_effective = out.get("effective_area_hm2")
+    db_tract = out.get("tract_area_hm2")
+    if db_tract is None:
+        out["tract_area_hm2"] = boundary_area
     out["effective_area_m2"] = (
-        float(out["effective_area_hm2"]) * 10_000.0
-        if out.get("effective_area_hm2") is not None
+        float(db_effective) * 10_000.0
+        if db_effective is not None
         else None
     )
     return out
@@ -202,7 +206,7 @@ def _latest_run_for_tract_conn(conn: sqlite3.Connection, tract_id: str) -> str |
         "ORDER BY r.started_at DESC LIMIT 1",
         (tract_id, tract_id),
     ).fetchone()
-    return row["run_id"] if row else None
+    return row[0] if row else None
 
 
 def _mean_observation_center(
@@ -424,7 +428,7 @@ def list_runs(
         select_sql = (
             "SELECT r.*, "
             "(SELECT COUNT(*) FROM tree_observations o WHERE o.run_id=r.run_id) AS observation_count, "
-            "tp.tract_id, tf.geo_area, tf.area_unit "
+            "tp.tract_id, tf.footprint_area_hm2, tf.area_hm2, tf.effective_area_hm2 "
             "FROM runs r "
             "LEFT JOIN tract_phases tp ON tp.tract_phase_pk = r.tract_phase_pk "
             "LEFT JOIN tiffs tf ON tf.tiff_id=r.tiff_id AND tf.phase_id=r.phase_id "
@@ -497,12 +501,12 @@ def list_tiffs(*, url: str | None = None) -> list[dict]:
             " FROM runs WHERE task_type IN ('infer', 'review') GROUP BY phase_id, tiff_id"
             ") "
             "SELECT tr.tract_pk, tr.region_id, tr.city, tr.county, tr.town, tr.tract_id, "
-            "tr.boundary_geom, tr.boundary_geom_cent, tr.effective_geom, tr.effective_area_hm2, "
-            "tp.tract_phase_pk, tp.phase_id, tf.active_run_id, "
+            "tr.boundary_geom, tr.boundary_geom_cent, tr.effective_geom, tr.effective_area_hm2, tr.effective_source, "
+            "tp.tract_phase_pk, tp.phase_id, tp.area_hm2 AS tract_phase_area_hm2, tf.active_run_id, "
             "tf.tiff_id, tf.file_name, tf.path_versions, tf.tiff_type, tf.footprint_geom, tf.footprint_bbox, "
-            "tf.center_geom, tf.center_lng, tf.center_lat, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
-            "tf.pixel_width, tf.pixel_height, tf.gsd, tf.geo_area, tf.area_unit, tf.band_count, tf.dtype, tf.nodata, "
-            "tf.inference_status, tf.created_at, tf.updated_at, "
+            "tf.center_geom, tf.crs_epsg, tf.crs_wkt, tf.geotransform, "
+            "tf.pixel_width, tf.pixel_height, tf.gsd, tf.footprint_area_hm2, tf.area_hm2, tf.effective_area_hm2, tf.band_count, tf.dtype, tf.nodata, "
+            "tf.inference_status, tf.effective_area_hm2 AS tiff_effective_area_hm2, tf.created_at, tf.updated_at, "
             "tf.active_run_id AS run_id, ar.status AS active_run_status, "
             "COALESCE(ar.ended_at, ar.started_at) AS detected_at, "
             "COALESCE(ra.run_count, 0) AS run_count, COALESCE(ra.queued_count, 0) AS queued_count, "
@@ -545,16 +549,26 @@ def list_tiffs(*, url: str | None = None) -> list[dict]:
             status = "检测中"
         elif not item.get("active_run_id") and status_counts["failed"]:
             status = "检测失败"
+        eff_hm2 = item.get("effective_area_hm2") or item.get("area_hm2") or item.get("footprint_area_hm2")
         item.update(
             {
                 "source_path": source_path,
                 "path_exists": bool(source_path and Path(source_path).expanduser().exists()),
                 "center_lng": center[0] if center else None,
                 "center_lat": center[1] if center else None,
+                "geo_area": float(eff_hm2) * 10000.0 if eff_hm2 is not None else None,
                 "status": status,
                 "has_detection": status == "已检测",
             }
         )
+        for geom_key in ("footprint_geom", "boundary_geom", "effective_geom"):
+            if item.get(geom_key) and isinstance(item[geom_key], str):
+                from shapely.wkt import loads as load_wkt
+                from shapely.geometry import mapping
+                try:
+                    item[geom_key] = mapping(load_wkt(item[geom_key]))
+                except Exception:
+                    pass
         out.append(item)
     return out
 

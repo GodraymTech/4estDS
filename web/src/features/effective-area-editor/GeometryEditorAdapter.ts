@@ -26,8 +26,20 @@ export class GeometryEditorAdapter {
     this.draw = new TerraDraw({
       adapter: new TerraDrawMapLibreGLAdapter({ map }),
       modes: [
-        new TerraDrawPolygonMode(),
-        new TerraDrawLineStringMode(),
+        new TerraDrawPolygonMode({
+          styles: {
+            fillColor: "#ff7a00",
+            fillOpacity: 0.15,
+            outlineColor: "#ff7a00",
+            outlineWidth: 2,
+          } as never,
+        }),
+        new TerraDrawLineStringMode({
+          styles: {
+            lineColor: "#ff7a00",
+            lineWidth: 2.5,
+          } as never,
+        }),
         new TerraDrawSelectMode({
           flags: {
             polygon: {
@@ -38,6 +50,20 @@ export class GeometryEditorAdapter {
             },
           },
           keyEvents: { delete: "Delete", deselect: "Escape", rotate: null, scale: null },
+          styles: {
+            selectedPolygonColor: "#ff7a00",
+            selectedPolygonFillOpacity: 0.25,
+            selectedPolygonOutlineColor: "#ff7a00",
+            selectedPolygonOutlineWidth: 2.5,
+            selectedPointColor: "#ffffff",
+            selectedPointOutlineColor: "#ff7a00",
+            selectedPointWidth: 8,
+            selectedPointOutlineWidth: 2,
+            midPointColor: "#ff7a00",
+            midPointOutlineColor: "#ffffff",
+            midPointWidth: 6,
+            midPointOutlineWidth: 1.5,
+          } as never,
         }),
       ],
     });
@@ -66,6 +92,24 @@ export class GeometryEditorAdapter {
 
   replaceDraft(geometry: EffectiveAreaGeometry): void {
     this.commit(geometry);
+  }
+
+  canUndo(): boolean {
+    return this.history.canUndo();
+  }
+
+  canRedo(): boolean {
+    return this.history.canRedo();
+  }
+
+  reset(): void {
+    const geometry = this.history.reset();
+    this.applyHistory(geometry);
+  }
+
+  clear(): void {
+    const empty: EffectiveAreaGeometry = { type: "MultiPolygon", coordinates: [] };
+    this.commit(empty);
   }
 
   undo(): void {
@@ -146,7 +190,7 @@ export class GeometryEditorAdapter {
     const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
     this.draw.addFeatures(polygons.map((coordinates) => ({
       type: "Feature" as const,
-      properties: {},
+      properties: { mode: "polygon" },
       geometry: { type: "Polygon" as const, coordinates },
     })));
     this.rendering = false;

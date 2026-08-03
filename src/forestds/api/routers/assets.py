@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from loguru import logger as log
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -116,13 +117,17 @@ def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
                 run_status_counts=row.get("run_status_counts") or {},
                 active_run_status=row.get("active_run_status"),
                 status=row.get("status") or "未检测",
-                geo_area=row.get("geo_area"),
-                area_unit=row.get("area_unit"),
+                footprint_area_hm2=row.get("footprint_area_hm2"),
+                area_hm2=(row.get("area_hm2") if (row.get("area_hm2") is not None and row.get("area_hm2") > 0) else (row.get("footprint_area_hm2") or row.get("tiff_effective_area_hm2"))),
+                geo_area=(row.get("area_hm2") if (row.get("area_hm2") is not None and row.get("area_hm2") > 0) else (row.get("footprint_area_hm2") or row.get("tiff_effective_area_hm2"))),
                 observation_count=int(row.get("observation_count") or 0),
                 detected_at=row.get("detected_at"),
                 pixel_width=row.get("pixel_width"),
                 pixel_height=row.get("pixel_height"),
                 estimated_cog_seconds=estimated_cog_seconds,
+                effective_area_hm2=row.get("tiff_effective_area_hm2") if row.get("tiff_effective_area_hm2") is not None else row.get("area_hm2"),
+                tract_area_hm2=row.get("effective_area_hm2"),
+                tract_phase_area_hm2=row.get("tract_phase_area_hm2"),
             )
         )
     return out
@@ -214,8 +219,15 @@ def inspect_asset_image(body: AssetInspectRequest) -> AssetInspectOut:
 
 
 @router.post("/convert-cog", response_model=AssetCogConvertOut, summary="将单个 TIFF 转为严格 COG")
-def convert_asset_cog(body: AssetCogConvertRequest) -> AssetCogConvertOut:
-    from ...preprocess.cog import TIFF_COG, TIFF_FORMAT_LABELS, inspect_tiff_format, prepared_cog_path
+def convert_asset_cog(body: AssetCogConvertRequest, db_url: str | None = Depends(get_db_url)) -> AssetCogConvertOut:
+    from ...preprocess.cog import (
+        TIFF_COG,
+        TIFF_FORMAT_LABELS,
+        inspect_tiff_format,
+        prepared_cog_path,
+        calculate_exact_effective_ratio,
+    )
+    from ...db.writer import _compute_tiff_metadata
 
     normalized = normalize_user_path(body.input_path)
     path = Path(normalized).expanduser()
@@ -228,6 +240,62 @@ def convert_asset_cog(body: AssetCogConvertRequest) -> AssetCogConvertOut:
     cog_path, prepared_type = prepared_cog_path(path, force=True)
     if prepared_type != TIFF_COG:
         raise HTTPException(status_code=500, detail=f"COG 转换失败: {prepared_type}")
+
+    # 【方案B】：转码成功后，100% 精准更新数据库里的物理数据与有效面积
+    if prepared_type == TIFF_COG:
+        try:
+            exact_ratio = calculate_exact_effective_ratio(cog_path)
+            tiff_meta = _compute_tiff_metadata(
+                cog_path,
+                phase_id="00000000",
+                tract_phase_pk="dummy",
+            )
+            if tiff_meta:
+                exact_effective_area = None
+                if tiff_meta.get("footprint_area_hm2") is not None:
+                    exact_effective_area = round(tiff_meta["footprint_area_hm2"] * exact_ratio, 4)
+
+                conn = _connect(db_url)
+                try:
+                    # 匹配包含该 TIFF 文件路径的行
+                    rows = conn.execute(
+                        "SELECT tiff_id, phase_id, tract_phase_pk FROM tiffs "
+                        "WHERE path_versions LIKE ? OR path_versions LIKE ?",
+                        (f"%{str(path)}%", f"%{body.input_path}%")
+                    ).fetchall()
+                    for r in rows:
+                        t_id = r["tiff_id"]
+                        ph_id = r["phase_id"]
+                        tp_pk = r["tract_phase_pk"]
+
+                        tp_row = conn.execute(
+                            "SELECT tract_pk FROM tract_phases WHERE tract_phase_pk=?",
+                            (tp_pk,)
+                        ).fetchone()
+
+                        # 更新 tiffs 表数据属性与精确有效面积
+                        conn.execute(
+                            "UPDATE tiffs SET "
+                            "path_versions=?, tiff_type=?, "
+                            "pixel_width=?, pixel_height=?, footprint_area_hm2=?, "
+                            "area_hm2=?, updated_at=datetime('now') "
+                            "WHERE tiff_id=? AND phase_id=?",
+                            (
+                                tiff_meta["path_versions"],
+                                "COG",
+                                tiff_meta["pixel_width"],
+                                tiff_meta["pixel_height"],
+                                tiff_meta.get("footprint_area_hm2"),
+                                exact_effective_area,
+                                t_id,
+                                ph_id,
+                            )
+                        )
+                    conn.commit()
+                finally:
+                    conn.close()
+        except Exception as e:
+            log.warning("转 COG 后更新数据库失败: {}", e)
 
     return AssetCogConvertOut(
         input_path=body.input_path,

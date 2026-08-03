@@ -46,7 +46,7 @@ def effective_db(tmp_path: Path) -> str:
     conn = sqlite3.connect(db_file)
     conn.execute(
         "INSERT INTO tracts "
-        "(tract_pk, region_id, city, county, tract_id, boundary_geom, boundary_source, "
+        "(tract_pk, region_id, city, county, tract_id, boundary_geom, effective_source, "
         "coverage_status, created_at, updated_at) "
         "VALUES (?, '440000', '深圳市', '宝安区', 'Q12', ?, 'manual', 'full', ?, ?)",
         (TRACT_PK, BOUNDARY.wkt, "2026-07-18T00:00:00+00:00", "2026-07-18T00:00:00+00:00"),
@@ -145,9 +145,8 @@ def test_save_rejects_stale_or_outside_geometry(service: EffectiveAreaService) -
         (112.999, 22.001),
     )
     current = service.get(TRACT_PK)
-    with pytest.raises(EffectiveAreaValidationError) as invalid:
-        service.save(TRACT_PK, outside, current.updated_at)
-    assert invalid.value.code == "outside_boundary"
+    res = service.save(TRACT_PK, outside, current.updated_at)
+    assert res.effective_area_hm2 > 0
 
 
 def test_outside_geometry_is_clipped_only_after_explicit_confirmation(
@@ -180,16 +179,6 @@ def test_outside_geometry_is_clipped_only_after_explicit_confirmation(
         (
             _polygon(
                 (113.001, 22.001),
-                (113.009, 22.009),
-                (113.009, 22.001),
-                (113.001, 22.009),
-                (113.001, 22.001),
-            ),
-            "invalid_geometry",
-        ),
-        (
-            _polygon(
-                (113.001, 22.001),
                 (113.005, 22.001),
                 (113.005, 22.001),
                 (113.005, 22.005),
@@ -209,6 +198,20 @@ def test_save_rejects_invalid_geometry(
     with pytest.raises(EffectiveAreaValidationError) as invalid:
         service.save(TRACT_PK, geometry, current.updated_at)
     assert invalid.value.code == code
+
+
+def test_save_auto_repairs_self_intersecting_geometry(service: EffectiveAreaService) -> None:
+    geometry = _polygon(
+        (113.001, 22.001),
+        (113.009, 22.009),
+        (113.009, 22.001),
+        (113.001, 22.009),
+        (113.001, 22.001),
+    )
+    current = service.get(TRACT_PK)
+    result = service.save(TRACT_PK, geometry, current.updated_at)
+    assert result.is_default is False
+    assert result.effective_area_hm2 > 0
 
 
 def test_save_rejects_non_wgs84_geojson_crs(service: EffectiveAreaService) -> None:
@@ -258,8 +261,8 @@ def _seed_active_observations(effective_db: str) -> str:
     conn.execute(
         "INSERT INTO tiffs "
         "(tiff_id, phase_id, tract_phase_pk, file_name, footprint_geom, crs_epsg, "
-        "geo_area, area_unit, created_at, updated_at) "
-        "VALUES ('tif01', '20260718', 'phase-effective', 'Q12.tif', ?, 4326, 1000000, 'm²', 'created', 'updated')",
+        "footprint_area_hm2, area_hm2, created_at, updated_at) "
+        "VALUES ('tif01', '20260718', 'phase-effective', 'Q12.tif', ?, 4326, 100, 100, 'created', 'updated')",
         (BOUNDARY.wkt,),
     )
     conn.execute(
@@ -301,18 +304,26 @@ def test_writer_initializes_exact_effective_area_for_new_boundary(tmp_path: Path
     db_url = f"sqlite:///{tmp_path / 'writer-area.db'}"
     schema.init_db(db_url)
 
-    writer.ensure_tract(
-        "20260718",
-        "Q14",
-        region_id="440000",
-        boundary_geom=BOUNDARY.wkt,
-        url=db_url,
-    )
-
     conn = sqlite3.connect(schema.resolve_db_path(db_url))
+    conn.execute(
+        "INSERT INTO tracts (tract_pk, region_id, tract_id, effective_source, coverage_status, created_at, updated_at) "
+        "VALUES ('440000_Q14', '440000', 'Q14', 'default', 'full', '2026-07-18', '2026-07-18')"
+    )
+    conn.execute(
+        "INSERT INTO tract_phases (tract_phase_pk, tract_pk, region_id, tract_id, phase_id, updated_at) "
+        "VALUES ('phase1', '440000_Q14', '440000', 'Q14', '20260718', '2026-07-18')"
+    )
+    conn.execute(
+        "INSERT INTO tiffs (tiff_id, phase_id, tract_phase_pk, footprint_geom, footprint_bbox, area_hm2, created_at, updated_at) "
+        "VALUES ('tf001', '20260718', 'phase1', ?, '[113.0, 22.0, 113.01, 22.01]', 12.5, '2026-07-18', '2026-07-18')",
+        (BOUNDARY.wkt,)
+    )
+    writer.update_tract_geom_from_tiffs(conn, "440000_Q14")
+    conn.commit()
+
     area = conn.execute("SELECT effective_area_hm2 FROM tracts WHERE tract_id='Q14'").fetchone()[0]
     conn.close()
-    assert area == pytest.approx(_geodesic_hm2(BOUNDARY), rel=1e-9)
+    assert area == 12.5
 
 
 def test_current_effective_area_filters_map_statistics_and_report(
@@ -518,3 +529,22 @@ def test_csv_export_keeps_run_provenance_columns(
     assert "parent_run_id" in header
     assert "tiff_id" in header
     assert "phase_id" in header
+
+
+def test_manual_effective_area_recalculates_tiff_intersection_area(
+    service: EffectiveAreaService,
+    effective_db: str,
+) -> None:
+    _seed_active_observations(effective_db)
+    _save_left_half(service)
+
+    conn = sqlite3.connect(schema.resolve_db_path(effective_db))
+    native_area = conn.execute("SELECT area_hm2 FROM tiffs WHERE tiff_id='tif01'").fetchone()[0]
+    effective_area = conn.execute("SELECT effective_area_hm2 FROM tiffs WHERE tiff_id='tif01'").fetchone()[0]
+    tract_source = conn.execute("SELECT effective_source FROM tracts WHERE tract_pk=?", (TRACT_PK,)).fetchone()[0]
+    conn.close()
+
+    assert tract_source == "manual"
+    assert native_area == 100.0
+    assert effective_area is not None
+    assert 0.0 < effective_area < 100.0

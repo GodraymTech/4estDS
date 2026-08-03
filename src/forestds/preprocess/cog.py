@@ -322,3 +322,66 @@ def estimate_cog_seconds(width: int | None, height: int | None, block_size: int 
         curr_w = math.ceil(curr_w / 2)
         curr_h = math.ceil(curr_h / 2)
     return round(total_tiles * 0.00652581 + 1.0, 2)
+
+
+def estimate_effective_area_from_overviews(image_path: str | Path, geo_area: float | None) -> float | None:
+    """若影像已具备金字塔 Overviews(包括COG或带外部ovr)，快速通过金字塔最顶层采样非 nodata 占比，作为初始有效面积。"""
+    if not geo_area:
+        return None
+    try:
+        import rasterio
+        import numpy as np
+        p = Path(image_path).expanduser()
+        if not p.is_file():
+            return None
+        with rasterio.open(p) as src:
+            if src.crs and len(src.overviews(1)) > 0:
+                factors = src.overviews(1)
+                max_level = len(factors) - 1
+                data = src.read(1, overview_level=max_level)
+                nodata_val = src.nodata
+                if nodata_val is not None:
+                    if np.isnan(nodata_val):
+                        valid_pixels = np.count_nonzero(~np.isnan(data))
+                    else:
+                        valid_pixels = np.count_nonzero(data != nodata_val)
+                else:
+                    valid_pixels = np.count_nonzero(data != 0)
+                
+                if data.size > 0:
+                    valid_ratio = float(valid_pixels) / data.size
+                    return round((geo_area * valid_ratio) / 10000.0, 2)
+    except Exception as exc:
+        log.warning("从金字塔 Overview 估算有效面积失败: {}", exc)
+    return None
+
+
+def calculate_exact_effective_ratio(image_path: str | Path) -> float:
+    """采用 block 迭代，高效率、低内存地计算整张图像的非 Nodata 像素占比。"""
+    try:
+        import rasterio
+        import numpy as np
+        p = Path(image_path).expanduser()
+        if not p.is_file():
+            return 1.0
+        with rasterio.open(p) as src:
+            nodata_val = src.nodata
+            total_valid = 0
+            total_pixels = 0
+            # 迭代每一个分块，防止 OOM 崩溃
+            for _, window in src.block_windows():
+                data = src.read(1, window=window)
+                if nodata_val is not None:
+                    if np.isnan(nodata_val):
+                        valid = np.count_nonzero(~np.isnan(data))
+                    else:
+                        valid = np.count_nonzero(data != nodata_val)
+                else:
+                    valid = np.count_nonzero(data != 0)
+                total_valid += valid
+                total_pixels += data.size
+            if total_pixels > 0:
+                return float(total_valid) / total_pixels
+    except Exception as exc:
+        log.warning("精确计算有效面积占比失败: {}", exc)
+    return 1.0

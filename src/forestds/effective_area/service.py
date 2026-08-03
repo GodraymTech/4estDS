@@ -12,8 +12,10 @@ from shapely import transform as transform_geometry
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, mapping, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import orient
-from shapely.validation import explain_validity
+from shapely.validation import explain_validity, make_valid
 from shapely.wkt import loads as load_wkt
+
+from loguru import logger
 
 from ..db.schema import resolve_db_path
 
@@ -53,6 +55,7 @@ class EffectiveAreaResult:
     boundary_geometry: dict[str, Any]
     geometry: dict[str, Any]
     tract_area_hm2: float
+    tract_phase_area_hm2: float
     effective_area_hm2: float
     effective_ratio: float
     updated_at: str
@@ -188,11 +191,13 @@ def _parse_geometry(value: Mapping[str, Any] | BaseGeometry) -> MultiPolygon:
         raise EffectiveAreaValidationError("有效区域不能为空。", code="empty_geometry")
     polygonal = _as_multipolygon(geometry)
     if not polygonal.is_valid:
-        raise EffectiveAreaValidationError(
-            "有效区域几何无效。",
-            code="invalid_geometry",
-            details={"reason": explain_validity(polygonal)},
-        )
+        polygonal = _as_multipolygon(make_valid(polygonal))
+        if not polygonal.is_valid:
+            raise EffectiveAreaValidationError(
+                "有效区域几何无效。",
+                code="invalid_geometry",
+                details={"reason": explain_validity(polygonal)},
+            )
     if polygonal.area <= 0:
         raise EffectiveAreaValidationError("有效区域面积必须大于零。", code="zero_area")
     minx, miny, maxx, maxy = polygonal.bounds
@@ -275,24 +280,39 @@ class EffectiveAreaService:
                 details={"tract_pk": row["tract_pk"]},
             ) from exc
 
-    @staticmethod
     def _result(
+        self,
         row: sqlite3.Row,
         boundary: MultiPolygon,
         effective: MultiPolygon,
         *,
+        conn: sqlite3.Connection | None = None,
         warnings: tuple[str, ...] = (),
         is_default: bool,
     ) -> EffectiveAreaResult:
         tract_area = geodesic_area_hm2(boundary)
         effective_area = geodesic_area_hm2(effective)
+        c = conn or _connect(self.db_url)
+        try:
+            row_phase = c.execute(
+                "SELECT tp.area_hm2 FROM tract_phases tp "
+                "JOIN tiffs tf ON tf.tract_phase_pk = tp.tract_phase_pk "
+                "WHERE tp.tract_pk=? GROUP BY tp.phase_id ORDER BY COUNT(tf.tiff_id) DESC, tp.phase_id DESC LIMIT 1",
+                (row["tract_pk"],),
+            ).fetchone()
+            tract_phase_area = (row_phase[0] if row_phase and row_phase[0] is not None else 0.0)
+        finally:
+            if conn is None:
+                c.close()
+
         return EffectiveAreaResult(
             tract_pk=row["tract_pk"],
             boundary_geometry=mapping(boundary),
             geometry=mapping(effective),
             tract_area_hm2=tract_area,
+            tract_phase_area_hm2=round(float(tract_phase_area), 4),
             effective_area_hm2=effective_area,
-            effective_ratio=(effective_area / tract_area if tract_area > 0 else 0.0),
+            effective_ratio=(effective_area / tract_phase_area if tract_phase_area > 0 else (effective_area / tract_area if tract_area > 0 else 0.0)),
             updated_at=row["updated_at"],
             warnings=warnings,
             is_default=is_default,
@@ -345,13 +365,7 @@ class EffectiveAreaService:
                 )
             boundary = self._boundary(row)
             warnings: tuple[str, ...] = ()
-            if not self._within_boundary(candidate, boundary):
-                if not clip_to_boundary:
-                    raise EffectiveAreaValidationError(
-                        "有效区域超出地块边界；确认后可显式裁剪。",
-                        code="outside_boundary",
-                        details={"can_clip": True},
-                    )
+            if clip_to_boundary:
                 candidate = _as_multipolygon(candidate.intersection(boundary))
                 if candidate.is_empty or candidate.area <= 0:
                     raise EffectiveAreaValidationError(
@@ -362,17 +376,23 @@ class EffectiveAreaService:
 
             is_default = candidate.equals(boundary)
             area_hm2 = geodesic_area_hm2(candidate)
+            effective_source = "default" if is_default else "manual"
             updated_at = self._next_updated_at(row["updated_at"])
             cursor = conn.execute(
-                "UPDATE tracts SET effective_geom=?, effective_area_hm2=?, updated_at=? "
+                "UPDATE tracts SET effective_geom=?, effective_area_hm2=?, effective_source=?, updated_at=? "
                 "WHERE tract_pk=? AND updated_at=?",
-                (None if is_default else candidate.wkt, area_hm2, updated_at, tract_pk, expected_updated_at),
+                (None if is_default else candidate.wkt, area_hm2, effective_source, updated_at, tract_pk, expected_updated_at),
             )
             if cursor.rowcount != 1:
                 raise EffectiveAreaConflict(
                     "有效区域已被其他操作更新，请重新加载后再保存。",
                     code="effective_area_conflict",
                 )
+            if is_default:
+                from ..db.writer import update_tract_geom_from_tiffs
+                update_tract_geom_from_tiffs(conn, tract_pk)
+            else:
+                _update_tiff_intersections_for_manual_tract(conn, tract_pk, candidate)
             active_runs = conn.execute(
                 "SELECT DISTINCT r.run_id, r.metrics_json FROM runs r "
                 "JOIN tiffs tf ON tf.active_run_id=r.run_id "
@@ -435,8 +455,43 @@ class EffectiveAreaService:
             polygon_count=imported.polygon_count,
             layer=imported.layer,
             layers=imported.layers,
-            effective_area_hm2=area,
+            effective_area_hm2=round(area, 4),
             effective_ratio=(area / current.tract_area_hm2 if current.tract_area_hm2 > 0 else 0.0),
             requires_clip=requires_clip,
             warnings=tuple(warnings),
         )
+
+
+def _update_tiff_intersections_for_manual_tract(
+    conn: sqlite3.Connection,
+    tract_pk: str,
+    candidate_polygon: Polygon | MultiPolygon,
+) -> None:
+    """当地块有效区域为 manual 模式时，更新该地块下所有 TIFF 的 area_hm2 为其 footprint 与手绘有效区域的交集公顷数。"""
+    from shapely.wkt import loads as load_wkt
+
+    rows = conn.execute(
+        "SELECT tf.tiff_id, tf.phase_id, tf.footprint_geom FROM tiffs tf "
+        "JOIN tract_phases tp ON tp.tract_phase_pk = tf.tract_phase_pk "
+        "WHERE tp.tract_pk=?",
+        (tract_pk,),
+    ).fetchall()
+
+    for r in rows:
+        t_id = r["tiff_id"] if hasattr(r, "keys") else r[0]
+        p_id = r["phase_id"] if hasattr(r, "keys") else r[1]
+        footprint_wkt = r["footprint_geom"] if hasattr(r, "keys") else r[2]
+        if not footprint_wkt:
+            continue
+        try:
+            footprint = load_wkt(footprint_wkt)
+            if not footprint.is_valid:
+                footprint = footprint.buffer(0)
+            inter = footprint.intersection(candidate_polygon)
+            inter_area = 0.0 if inter.is_empty else round(geodesic_area_hm2(inter), 4)
+            conn.execute(
+                "UPDATE tiffs SET effective_area_hm2=? WHERE tiff_id=? AND phase_id=?",
+                (inter_area, t_id, p_id),
+            )
+        except Exception as exc:
+            logger.warning("计算 TIFF 交集有效面积失败: tiff_id={} err={}", t_id, exc)

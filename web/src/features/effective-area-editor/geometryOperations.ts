@@ -5,12 +5,45 @@ import { feature, featureCollection } from "@turf/helpers";
 import turfUnion from "@turf/union";
 import type { EffectiveAreaGeometry, EffectiveAreaRing } from "../../shared/api";
 
+export function intersectGeometry(
+  left: EffectiveAreaGeometry,
+  right: EffectiveAreaGeometry,
+): EffectiveAreaGeometry {
+  try {
+    const outerDiff = subtractGeometry(left, right);
+    return subtractGeometry(left, outerDiff);
+  } catch {
+    return left;
+  }
+}
+
 export function areaHm2(geometry: EffectiveAreaGeometry): number {
   return turfArea(feature(geometry as never)) / 10_000;
 }
 
 export function geometryBbox(geometry: EffectiveAreaGeometry): [number, number, number, number] {
   return turfBbox(feature(geometry as never)) as [number, number, number, number];
+}
+
+export function sanitizeGeometry(geometry: EffectiveAreaGeometry): EffectiveAreaGeometry {
+  if (!geometry) return geometry;
+  const source = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
+  const validPolygons: EffectiveAreaRing[][] = [];
+  for (const polygon of source) {
+    if (!polygon || !polygon.length) continue;
+    const cleanRings: EffectiveAreaRing[] = [];
+    for (const ring of polygon) {
+      if (!ring || ring.length < 3) continue;
+      const closed = samePosition(ring[0], ring[ring.length - 1]) ? [...ring] : [...ring, [...ring[0]]];
+      if (closed.length >= 4) cleanRings.push(closed);
+    }
+    if (cleanRings.length > 0 && cleanRings[0].length >= 4) {
+      validPolygons.push(cleanRings);
+    }
+  }
+  if (validPolygons.length === 0) return geometry;
+  if (validPolygons.length === 1) return { type: "Polygon", coordinates: validPolygons[0] };
+  return { type: "MultiPolygon", coordinates: validPolygons };
 }
 
 export function mergeGeometry(
@@ -21,7 +54,8 @@ export function mergeGeometry(
     feature(left as never),
     feature(right as never),
   ]) as never);
-  return result?.geometry as EffectiveAreaGeometry ?? combineGeometry(left, right);
+  const geom = (result?.geometry as EffectiveAreaGeometry) ?? combineGeometry(left, right);
+  return sanitizeGeometry(geom);
 }
 
 export function subtractGeometry(
@@ -33,7 +67,7 @@ export function subtractGeometry(
     feature(mask as never),
   ]) as never);
   if (!result) throw new Error("几何操作后有效区域为空");
-  return result.geometry as EffectiveAreaGeometry;
+  return sanitizeGeometry(result.geometry as EffectiveAreaGeometry);
 }
 
 export function splitGeometryByLine(
@@ -61,7 +95,7 @@ export function splitGeometryByLine(
     }
   }
   if (parts.length < 2) return geometry;
-  return { type: "MultiPolygon", coordinates: parts };
+  return sanitizeGeometry({ type: "MultiPolygon", coordinates: parts });
 }
 
 export function combineGeometry(

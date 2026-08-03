@@ -25,8 +25,8 @@ def clean_db(tmp_path):
     conn = sqlite3.connect(db_file)
     conn.execute(
         "INSERT INTO tracts "
-        "(tract_pk, region_id, tract_id, boundary_geom, boundary_source, coverage_status, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, 'auto', 'full', ?, ?)",
+        "(tract_pk, region_id, tract_id, boundary_geom, effective_source, coverage_status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, 'default', 'full', ?, ?)",
         (TRACT_PK, "region", "Q12", "POLYGON ((0 0, 2 0, 2 1, 0 1, 0 0))", "2026-07-01", "2026-07-01"),
     )
     conn.execute(
@@ -46,7 +46,7 @@ def seed_two_tiffs_same_phase(db_url: str) -> tuple[str, str]:
         conn.execute(
             "INSERT INTO tiffs "
             "(tiff_id, phase_id, tract_phase_pk, file_name, path_versions, footprint_geom, "
-            "geo_area, area_unit, created_at, updated_at) "
+            "footprint_area_hm2, area_hm2, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 tiff_id,
@@ -55,8 +55,8 @@ def seed_two_tiffs_same_phase(db_url: str) -> tuple[str, str]:
                 f"image-{index}.tif",
                 json.dumps({"v1": f"/data/image-{index}.tif"}),
                 f"POLYGON (({index - 1} 0, {index} 0, {index} 1, {index - 1} 1, {index - 1} 0))",
-                10000.0,
-                "m2",
+                1.0,
+                1.0,
                 f"2026-07-01T00:0{index}:00",
                 f"2026-07-01T00:0{index}:00",
             ),

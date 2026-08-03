@@ -262,8 +262,10 @@ export function LedgerTable() {
           let valB = b[columnKey as keyof AssetRow];
 
           if (columnKey === "geo_area") {
-            valA = a.effective_area_hm2 ?? a.tract_area_hm2 ?? (typeof a.geo_area === "number" ? a.geo_area / 10_000 : null) ?? 0;
-            valB = b.effective_area_hm2 ?? b.tract_area_hm2 ?? (typeof b.geo_area === "number" ? b.geo_area / 10_000 : null) ?? 0;
+            const areaA = typeof a.area_hm2 === "number" ? a.area_hm2 : (typeof a.geo_area === "number" ? (a.geo_area > 1000 ? a.geo_area / 10_000 : a.geo_area) : null);
+            const areaB = typeof b.area_hm2 === "number" ? b.area_hm2 : (typeof b.geo_area === "number" ? (b.geo_area > 1000 ? b.geo_area / 10_000 : b.geo_area) : null);
+            valA = a.effective_area_hm2 ?? areaA ?? 0;
+            valB = b.effective_area_hm2 ?? areaB ?? 0;
           }
 
           if (valA === valB) continue;
@@ -511,7 +513,14 @@ export function LedgerTable() {
       title: (
         <Space size={4}>
           <span>面积(hm²)</span>
-          <Tooltip title="括号内表示用户自行圈定的有效区域面积">
+          <Tooltip
+            title={
+              <div>
+                <div>括号外: tiff影像中的正射面积</div>
+                <div>括号内: 用户自定义的有效区域面积</div>
+              </div>
+            }
+          >
             <InfoCircleOutlined style={{ color: "var(--color-text-muted)", cursor: "help" }} />
           </Tooltip>
         </Space>
@@ -519,10 +528,10 @@ export function LedgerTable() {
       dataIndex: "geo_area",
       key: "geo_area",
       width: 120,
-      render: (v: number | null | undefined, row) => formatAreaLedgerValue(
-        row.tract_area_hm2 ?? (typeof v === "number" ? v / 10_000 : null),
-        row.effective_area_hm2,
-      ),
+      render: (_: unknown, row) => {
+        const nativeArea = typeof row.area_hm2 === "number" ? row.area_hm2 : (typeof row.geo_area === "number" ? (row.geo_area > 1000 ? row.geo_area / 10_000 : row.geo_area) : null);
+        return formatAreaLedgerValue(nativeArea, row.effective_area_hm2);
+      },
       sorter: true,
       sortOrder: sortList.find((s) => s.columnKey === "geo_area")?.order || null,
       onHeaderCell: () => ({ onClick: handleHeaderClick("geo_area") }),
@@ -811,8 +820,8 @@ export function LedgerTable() {
         <Form form={form} layout="vertical">
           {modalMode === "edit" && editing?.tract_pk ? (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <Text type="secondary">有效区域绑定完整地块，不受当前 TIFF 范围限制。</Text>
-              <Button type="link" onClick={() => openEffectiveArea(editing)}>编辑有效区域</Button>
+              <Text type="secondary">手动修改资产元信息。</Text>
+              <Button type="link" onClick={() => openEffectiveArea(editing)}>编辑地块有效区域</Button>
             </div>
           ) : null}
           {modalMode === "create" ? (
@@ -904,7 +913,7 @@ export function LedgerTable() {
             </Form.Item>
             <Form.Item name="tract_id" label="地块名">
               <AutoComplete
-                placeholder="自动, 可手动选择或输入"
+                placeholder="自动（可自定义）"
                 options={tractOptions}
                 filterOption={(inputValue, option) =>
                   String(option?.value ?? "").toUpperCase().indexOf(inputValue.toUpperCase()) !== -1
@@ -914,7 +923,7 @@ export function LedgerTable() {
               </AutoComplete>
             </Form.Item>
             <Form.Item name="phase_id" label="时相">
-              <Input placeholder="自动, 可手动修改如:20260606" />
+              <Input placeholder="自动（可自定义:20260101）" />
             </Form.Item>
             <Form.Item name="image_name" label="影像名">
               <Input placeholder="默认当前文件名" />

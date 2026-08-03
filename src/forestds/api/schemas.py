@@ -176,6 +176,7 @@ class EffectiveAreaOut(BaseModel):
     boundary_geometry: dict[str, Any]
     geometry: dict[str, Any]
     tract_area_hm2: float
+    tract_phase_area_hm2: float = 0.0
     effective_area_hm2: float
     effective_ratio: float
     updated_at: str
@@ -506,9 +507,12 @@ class AssetRow(BaseModel):
     run_count: int = 0
     run_status_counts: dict[str, int] = Field(default_factory=dict)
     active_run_status: Optional[str] = None
-    status: str = "未检测"
+    footprint_area_hm2: Optional[float] = None
+    area_hm2: Optional[float] = None
     geo_area: Optional[float] = None
-    area_unit: Optional[str] = None
+    effective_area_hm2: Optional[float] = None
+    tract_area_hm2: Optional[float] = None
+    tract_phase_area_hm2: Optional[float] = None
     observation_count: int = 0
     detected_at: Optional[str] = None
     pixel_width: Optional[int] = None

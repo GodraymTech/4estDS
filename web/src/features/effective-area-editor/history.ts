@@ -19,6 +19,19 @@ export class GeometryHistory<T> {
     return this.current();
   }
 
+  canUndo(): boolean {
+    return this.index > 0;
+  }
+
+  canRedo(): boolean {
+    return this.index < this.entries.length - 1;
+  }
+
+  reset(): T {
+    this.index = 0;
+    return this.current();
+  }
+
   undo(): T | null {
     if (this.index === 0) return null;
     this.index -= 1;

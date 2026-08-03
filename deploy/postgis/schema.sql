@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS tracts (
     boundary_geom_cent  geometry(Point, 0),
     effective_geom      geometry(MultiPolygon, 4326),
     effective_area_hm2 DOUBLE PRECISION,
-    boundary_source     TEXT NOT NULL DEFAULT 'auto'
-        CHECK (boundary_source IN ('auto', 'manual')),
+    effective_source    TEXT NOT NULL DEFAULT 'default'
+        CHECK (effective_source IN ('default', 'manual')),
     coverage_status     TEXT NOT NULL DEFAULT 'none'
         CHECK (coverage_status IN ('none', 'partial', 'full')),
     notes               TEXT,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS tract_phases (
     region_id       TEXT NOT NULL,
     tract_id        TEXT NOT NULL,
     phase_id        TEXT NOT NULL CHECK (phase_id ~ '^[0-9]{8}$'),
-    boundary_geom   geometry(Geometry, 0),
+    area_hm2        DOUBLE PRECISION DEFAULT 0.0,
     updated_at      TEXT NOT NULL,
     UNIQUE (tract_pk, phase_id)
 );
@@ -75,16 +75,15 @@ CREATE TABLE IF NOT EXISTS tiffs (
     footprint_geom             geometry(Geometry, 0) NOT NULL,
     footprint_bbox             TEXT,
     center_geom                geometry(Point, 0),
-    center_lng                 DOUBLE PRECISION,
-    center_lat                 DOUBLE PRECISION,
     crs_epsg                   INTEGER,
     crs_wkt                    TEXT,
     geotransform               TEXT,
     pixel_width                INTEGER,
     pixel_height               INTEGER,
     gsd                        DOUBLE PRECISION,
-    geo_area                   DOUBLE PRECISION,
-    area_unit                  TEXT,
+    footprint_area_hm2         DOUBLE PRECISION,
+    area_hm2                   DOUBLE PRECISION,
+    effective_area_hm2         DOUBLE PRECISION,
     band_count                 INTEGER,
     dtype                      TEXT,
     nodata                     DOUBLE PRECISION,

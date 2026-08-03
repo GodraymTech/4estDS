@@ -14,6 +14,7 @@ import {
 import {
   BorderOutlined,
   CalendarOutlined,
+  EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   LineChartOutlined,
@@ -23,6 +24,7 @@ import {
   SwapOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { geometryBbox } from "../features/effective-area-editor/geometryOperations";
 import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
 import { MapStage } from "../shared/ui/MapStage";
 import {
@@ -45,7 +47,7 @@ import { env } from "../shared/config/env";
 import { formatAreaValue } from "../shared/lib/format";
 import type { GeoFeature } from "../shared/api";
 import { useObservations, type FeatureCollection } from "../entities/observation";
-import { buildInvalidAreaMask, useEffectiveArea } from "../entities/effective-area";
+import { buildInvalidAreaMask, formatHm2, useEffectiveArea } from "../entities/effective-area";
 import {
   useTractImagery,
   useTractSummary,
@@ -139,7 +141,8 @@ export function MapWorkspacePage() {
   const [basemapId, setBasemapId] = useState(env.defaultBasemapId);
   const [roadVisible, setRoadVisible] = useState(false);
   const [showDetections, setShowDetections] = useState(true);
-  const [showEffectiveMask, setShowEffectiveMask] = useState(true);
+  const [showEffectiveArea, setShowEffectiveArea] = useState(false);
+  const [effectiveMode, setEffectiveMode] = useState<"outline" | "mask">("outline");
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
   const [zoom, setZoom] = useState(env.overviewZoom);
   const [metersPerPixel, setMetersPerPixel] = useState(0);
@@ -250,15 +253,37 @@ export function MapWorkspacePage() {
     }
     return data;
   }, [isSingleImageView, observations.data, requestedTiff, selectedPhaseTiffs]);
+  const activeAreaHm2 = useMemo(() => {
+    if (isSingleImageView && requestedTiff) {
+      const eff = requestedTiff.effective_area_hm2 ?? requestedTiff.area_hm2;
+      if (typeof eff === "number" && eff > 0) return eff;
+      if (typeof requestedTiff.geo_area === "number" && requestedTiff.geo_area > 0) {
+        return requestedTiff.geo_area > 1000 ? requestedTiff.geo_area / 10000 : requestedTiff.geo_area;
+      }
+    }
+    if (activeTract) {
+      const effTract = activeTract.effective_area_hm2 ?? activeTract.tract_phase_area_hm2 ?? activeTract.tract_area_hm2;
+      if (typeof effTract === "number" && effTract > 0) return effTract;
+      if (typeof activeTract.geo_area === "number" && activeTract.geo_area > 0) {
+        return activeTract.geo_area > 1000 ? activeTract.geo_area / 10000 : activeTract.geo_area;
+      }
+    }
+    return undefined;
+  }, [activeTract, isSingleImageView, requestedTiff]);
+
+  const activeAreaM2 = useMemo(() => {
+    return activeAreaHm2 !== undefined ? activeAreaHm2 * 10000 : undefined;
+  }, [activeAreaHm2]);
+
   const visibleSummary = useMemo(
     () =>
       visibleObservations
         ? summaryFromObservations(
           visibleObservations,
-          isSingleImageView ? requestedTiff?.geo_area : selectedPhaseTiffs.reduce((sum, tiff) => sum + (tiff.geo_area ?? 0), 0),
+          activeAreaM2,
         )
         : undefined,
-    [isSingleImageView, requestedTiff?.geo_area, selectedPhaseTiffs, visibleObservations],
+    [activeAreaM2, visibleObservations],
   );
   const imagery = useTractImagery(isSingleImageView ? activeTractId : undefined, {
     phaseId: requestedTiff?.phase_id ?? requestedPhaseId,
@@ -479,7 +504,7 @@ export function MapWorkspacePage() {
             rasterBasemap([tiffTileUrl(tiff)], {
               tileSize: 256,
               minZoom: 12,
-              maxZoom: 24,
+              maxZoom: 25,
             }),
           );
           return id;
@@ -498,7 +523,7 @@ export function MapWorkspacePage() {
         rasterBasemap([tiffTileUrl(requestedTiff)], {
           tileSize: 256,
           minZoom: 12,
-          maxZoom: 24,
+          maxZoom: 25,
         }),
       );
     } else if (activeTract && imagery.data?.available && imagery.data.tiles?.length) {
@@ -533,38 +558,55 @@ export function MapWorkspacePage() {
     if (!map || !ready) return;
     map.removeLayer(EFFECTIVE_MASK);
     map.removeLayer(EFFECTIVE_LINE);
-    if (!showEffectiveMask || !effectiveArea.data) return;
-    map.setGeoJsonLayer({
-      id: EFFECTIVE_MASK,
-      kind: "polygon",
-      data: buildInvalidAreaMask(effectiveArea.data.boundary_geometry, effectiveArea.data.geometry),
-      color: "#24171a",
-      opacity: 0.55,
-    });
-    map.setGeoJsonLayer({
-      id: EFFECTIVE_LINE,
-      kind: "line",
-      data: { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: effectiveArea.data.geometry }] },
-      color: "#75efbb",
-      opacity: 0.95,
-      lineWidth: 2.2,
-    });
-  }, [effectiveArea.data, map, ready, showEffectiveMask]);
+    if (!showEffectiveArea || !effectiveArea.data) return;
+
+    if (effectiveMode === "mask") {
+      map.setGeoJsonLayer({
+        id: EFFECTIVE_MASK,
+        kind: "polygon",
+        data: buildInvalidAreaMask(effectiveArea.data.boundary_geometry, effectiveArea.data.geometry),
+        color: "#24171a",
+        opacity: 0.55,
+      });
+    }
+
+    if (effectiveMode === "outline") {
+      const geomToDraw = effectiveArea.data.geometry;
+      map.setGeoJsonLayer({
+        id: EFFECTIVE_LINE,
+        kind: "line",
+        data: { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: geomToDraw }] },
+        color: "#ff7a00",
+        opacity: 0.95,
+        lineWidth: 2.2,
+      });
+    }
+  }, [effectiveArea.data, effectiveMode, map, ready, showEffectiveArea]);
 
   useEffect(() => {
     if (!map || !ready || !activeTract || !visibleObservations) return;
     const fitKey = requestedTiff ? `${activeTract.tract_id}:${requestedTiff.tiff_id}` : activeTract.tract_id;
     if (fittedTract.current === fitKey) return;
     fittedTract.current = fitKey;
-    const tiffBounds = requestedTiff ? tiffFootprintBounds(requestedTiff) : null;
-    if (tiffBounds) {
-      map.fitBounds(tiffBounds, { padding: 88, maxZoom: 18, duration: 420 });
-      return;
+
+    if (requestedTiff) {
+      const tiffBounds = tiffFootprintBounds(requestedTiff);
+      if (tiffBounds) {
+        map.fitBounds(tiffBounds, { padding: 88, maxZoom: 18, duration: 420 });
+        return;
+      }
+      if (hasTiffCenter(requestedTiff)) {
+        map.flyTo([requestedTiff.center_lng, requestedTiff.center_lat], 16);
+        return;
+      }
+    } else {
+      if (effectiveArea.data?.boundary_geometry) {
+        const [west, south, east, north] = geometryBbox(effectiveArea.data.boundary_geometry);
+        map.fitBounds([[west, south], [east, north]], { padding: 88, maxZoom: 18, duration: 420 });
+        return;
+      }
     }
-    if (requestedTiff && hasTiffCenter(requestedTiff)) {
-      map.flyTo([requestedTiff.center_lng, requestedTiff.center_lat], 16);
-      return;
-    }
+
     const b = boundsOf(visibleObservations as GeoJson);
     if (b) {
       map.fitBounds(b, 88);
@@ -572,7 +614,7 @@ export function MapWorkspacePage() {
     }
     const group = groupByTract.get(tractRequestId(activeTract));
     if (group) map.flyTo(group.center, 15);
-  }, [activeTract, groupByTract, map, ready, requestedTiff, visibleObservations]);
+  }, [activeTract, effectiveArea.data?.boundary_geometry, groupByTract, map, ready, requestedTiff, visibleObservations]);
 
   useEffect(() => {
     if (!map || !ready || measureMode === "idle") return;
@@ -855,14 +897,10 @@ export function MapWorkspacePage() {
           onSelectPhase={selectPhaseTract}
           loading={observations.isFetching || imagery.isFetching || summary.isFetching}
           tiffName={requestedTiffName}
+          isSingleImageView={isSingleImageView}
+          requestedTiff={requestedTiff}
           width={profileWidth}
           onWidthChange={setProfileWidth}
-          onEditEffectiveArea={() => {
-            if (!activeTract.tract_pk) return;
-            const next = new URLSearchParams(searchParams);
-            next.set("effective-area", activeTract.tract_pk);
-            setSearchParams(next);
-          }}
         />
       ) : null}
 
@@ -881,8 +919,49 @@ export function MapWorkspacePage() {
 
       {!chromeHidden && selectedGroup && activeTract ? (
         <div style={TRACT_TOOLS}>
-          <Space direction="vertical" size={6} style={FULL}>
-            <Space size={6} wrap>
+          <Space direction="vertical" size={10} style={FULL}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <Button
+                size="small"
+                type={showEffectiveArea ? "primary" : "default"}
+                icon={showEffectiveArea ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                onClick={() => setShowEffectiveArea((v) => !v)}
+              >
+                显示有效区
+              </Button>
+              {showEffectiveArea ? (
+                <Space size={4} style={{ display: "inline-flex" }}>
+                  <Button
+                    size="small"
+                    type={effectiveMode === "outline" ? "primary" : "default"}
+                    onClick={() => setEffectiveMode("outline")}
+                  >
+                    框线模式
+                  </Button>
+                  <Button
+                    size="small"
+                    type={effectiveMode === "mask" ? "primary" : "default"}
+                    onClick={() => setEffectiveMode("mask")}
+                  >
+                    遮罩模式
+                  </Button>
+                </Space>
+              ) : null}
+              <Button
+                size="small"
+                type="default"
+                icon={<EditOutlined />}
+                onClick={() => {
+                  if (!activeTract.tract_pk) return;
+                  const next = new URLSearchParams(searchParams);
+                  next.set("effective-area", activeTract.tract_pk);
+                  setSearchParams(next);
+                }}
+              >
+                编辑有效区
+              </Button>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               <Button
                 size="small"
                 type={showDetections ? "primary" : "default"}
@@ -891,15 +970,7 @@ export function MapWorkspacePage() {
               >
                 显示检测框
               </Button>
-              <Button
-                size="small"
-                type={showEffectiveMask ? "primary" : "default"}
-                icon={showEffectiveMask ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-                onClick={() => setShowEffectiveMask((value) => !value)}
-              >
-                遮罩无效区
-              </Button>
-            </Space>
+            </div>
             {showDetections && speciesList.length > 0 ? (
               <Checkbox.Group
                 value={selectedSpecies}
@@ -1186,7 +1257,7 @@ function spreadNearbyMarkers(markers: MarkerSpec[], zoom: number): MarkerSpec[] 
     const point = projectLngLat(marker.lngLat, zoom);
     const group = groups.find((items) => {
       const first = projectLngLat(items[0].lngLat, zoom);
-      return Math.hypot(first[0] - point[0], first[1] - point[1]) < 28;
+      return Math.hypot(first[0] - point[0], first[1] - point[1]) < 25;
     });
     if (group) group.push(marker);
     else groups.push([marker]);
@@ -1506,9 +1577,10 @@ function ProfilePanel({
   onSelectPhase,
   loading,
   tiffName,
+  isSingleImageView,
+  requestedTiff,
   width,
   onWidthChange,
-  onEditEffectiveArea,
 }: {
   tract: Tract;
   group: TractGroup;
@@ -1519,11 +1591,18 @@ function ProfilePanel({
   onSelectPhase: (tract: Tract) => void;
   loading: boolean;
   tiffName?: string;
+  isSingleImageView?: boolean;
+  requestedTiff?: TiffAsset;
   width: number;
   onWidthChange: (width: number) => void;
-  onEditEffectiveArea: () => void;
 }) {
-  const metricSections = buildProfileMetricSections(summary, tract, speciesColors);
+  const activeAreaHm2 = isSingleImageView && requestedTiff
+    ? (requestedTiff.effective_area_hm2 ?? requestedTiff.area_hm2 ?? (requestedTiff.geo_area ? (requestedTiff.geo_area > 1000 ? requestedTiff.geo_area / 10000 : requestedTiff.geo_area) : undefined))
+    : (tract.effective_area_hm2 ?? tract.tract_phase_area_hm2 ?? tract.tract_area_hm2 ?? (tract.geo_area ? (tract.geo_area > 1000 ? tract.geo_area / 10000 : tract.geo_area) : undefined));
+
+  const activeAreaM2 = activeAreaHm2 !== undefined ? Number(activeAreaHm2) * 10000 : (summary?.meta?.area_m2 ?? tract.geo_area);
+
+  const metricSections = buildProfileMetricSections(summary, tract, speciesColors, activeAreaM2);
   const detectedTiffs = (phaseTiffs ?? []).filter((t) => t.has_detection || t.observation_count > 0);
 
   function startResize(e: ReactMouseEvent<HTMLDivElement>) {
@@ -1541,8 +1620,10 @@ function ProfilePanel({
     window.addEventListener("mouseup", up);
   }
 
-  const overallArea = summary?.meta?.area_m2 ?? tract.geo_area;
-  const overallDensity = summary?.density_per_ha ?? densityFromCount(summary?.tree_count ?? tract.observation_count ?? 0, overallArea);
+  const overallArea = activeAreaM2;
+  const overallDensity = densityFromCount(summary?.tree_count ?? tract.observation_count ?? 0, overallArea) ?? summary?.density_per_ha;
+
+  const displayAreaText = formatHm2(typeof activeAreaHm2 === "number" ? activeAreaHm2 : (activeAreaHm2 !== undefined && activeAreaHm2 !== null ? Number(activeAreaHm2) : null));
 
   return (
     <div style={{ ...PROFILE_PANEL, width }} className="custom-glass-scroll">
@@ -1577,15 +1658,12 @@ function ProfilePanel({
               时相选择
             </Button>
           </Popover>
-          <Button size="small" type="primary" onClick={onEditEffectiveArea}>
-            编辑有效区域
-          </Button>
           {loading ? <Spin size="small" /> : null}
         </Space>
       </div>
       <div style={PROFILE_PRIMARY_GRID}>
-        <ProfileBigMetric label="面积" value={formatAreaValue(overallArea)} />
-        <ProfileBigMetric label="种植密度" value={formatDensity(overallDensity)} />
+        <ProfileBigMetric label="面积(hm²)" value={displayAreaText} />
+        <ProfileBigMetric label="种植密度(株/hm²)" value={formatDensity(overallDensity)} />
       </div>
       <div style={PROFILE_SPECIES_LIST}>
         {metricSections.map((section) => (
@@ -1640,8 +1718,8 @@ function ProfileMetricSection({ section }: { section: ProfileMetricSectionData }
       <div style={PROFILE_QUAD_GRID}>
         <MiniMetric label="株数" value={section.count.toLocaleString()} />
         <MiniMetric label="占比" value={formatPercent(section.ratio)} />
-        <MiniMetric label="密度" value={formatDensity(section.density)} />
-        <MiniMetric label="冠幅和" value={formatAreaValue(section.crownArea)} />
+        <MiniMetric label="密度(株/hm²)" value={formatDensity(section.density)} />
+        <MiniMetric label="冠幅和(m²)" value={formatDensity(section.crownArea)} />
       </div>
       <div style={PROFILE_DIST_STACK}>
         <ProfileDistRow label="冠尺寸(m)" value={<DistributionPills dist={section.crownSize} unit="" />} />
@@ -1676,7 +1754,9 @@ function buildProfileMetricSections(
   summary: TractSummary | undefined,
   tract: Tract,
   speciesColors: Map<string, string>,
+  activeAreaM2?: number,
 ): ProfileMetricSectionData[] {
+  const effectiveAreaM2 = activeAreaM2 ?? summary?.meta?.area_m2 ?? tract.geo_area;
   const totalCount = summary?.tree_count ?? tract.observation_count ?? 0;
   const total: ProfileMetricSectionData = {
     key: "__total",
@@ -1685,7 +1765,7 @@ function buildProfileMetricSections(
     total: true,
     count: totalCount,
     ratio: totalCount > 0 ? 1 : null,
-    density: summary?.density_per_ha ?? densityFromCount(totalCount, tract.geo_area),
+    density: densityFromCount(totalCount, effectiveAreaM2) ?? summary?.density_per_ha ?? null,
     crownArea: summary?.meta?.total_crown_area ?? 0,
     crownSize: summary?.crown_size_geo ?? equivalentCrownSize(summary?.crown_width_geo, summary?.crown_height_geo),
     crownAreaDist: summary?.crown_area_geo,
@@ -1701,7 +1781,7 @@ function buildProfileMetricSections(
         color: speciesColors.get(label) ?? speciesColor(label, idx),
         count,
         ratio: item.ratio ?? (totalCount > 0 ? count / totalCount : null),
-        density: item.density_per_ha ?? densityFromCount(count, tract.geo_area),
+        density: densityFromCount(count, effectiveAreaM2) ?? item.density_per_ha ?? null,
         crownArea: item.total_crown_area ?? (item.avg_crown_area ?? 0) * count,
         crownSize: item.crown_size_geo ?? equivalentCrownSize(item.crown_width_geo, item.crown_height_geo),
         crownAreaDist: item.crown_area_geo,
@@ -1771,7 +1851,7 @@ function formatTractArea(tract: Tract): string {
 
 function formatDensity(value: number | null | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "-";
-  return value.toLocaleString(undefined, { maximumFractionDigits: 1 }) + " 株/hm\u00b2";
+  return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
 function metersPerScreenPixel(camera: { center: LngLat; zoom: number }): number {
@@ -1781,10 +1861,10 @@ function metersPerScreenPixel(camera: { center: LngLat; zoom: number }): number 
 
 function formatPixelSize(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "-";
-  if (value >= 100) return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
-  if (value >= 1) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  if (value >= 0.01) return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
-  return value.toExponential(2);
+  const displayVal = Math.max(0.001, value);
+  if (displayVal >= 100) return displayVal.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (displayVal >= 1) return displayVal.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return displayVal.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
 function densityFromCount(count: number, areaM2: number | undefined): number | null {
@@ -1805,11 +1885,11 @@ function DistributionPills({ dist, unit }: { dist?: DistributionSummary; unit?: 
   if (!hasDistribution(dist)) return <span>-</span>;
   const suffix = unit ? " " + unit : "";
   const values = [
-    { label: "极小值", value: dist.min },
-    { label: "p25", value: dist.p25 ?? dist.p10 },
-    { label: "中值", value: dist.median },
-    { label: "p75", value: dist.p75 ?? dist.p90 },
-    { label: "极大值", value: dist.max },
+    { label: "极小值", value: dist.min, isMedian: false },
+    { label: "p25", value: dist.p25 ?? dist.p10, isMedian: false },
+    { label: "中值", value: dist.median, isMedian: true },
+    { label: "p75", value: dist.p75 ?? dist.p90, isMedian: false },
+    { label: "极大值", value: dist.max, isMedian: false },
   ];
   return (
     <div style={DIST_PILL_WRAP}>
@@ -1826,7 +1906,9 @@ function DistributionPills({ dist, unit }: { dist?: DistributionSummary; unit?: 
         <span key={item.label} style={DIST_QUANTILE_ITEM}>
           {index > 0 ? <span style={DIST_SEPARATOR}>-</span> : null}
           <Tooltip title={item.label}>
-            <span style={DIST_NUMBER}>{formatMetric(item.value)}</span>
+            <span style={item.isMedian ? DIST_NUMBER_MEDIAN : DIST_NUMBER}>
+              {formatMetric(item.value)}
+            </span>
           </Tooltip>
         </span>
       ))}
@@ -2208,10 +2290,19 @@ const DIST_BADGE_QUANTILE: CSSProperties = {
   ...DIST_BADGE_STATS,
   color: "#42310b",
   background: "rgba(242, 211, 130, 0.74)",
+  marginLeft: 8,
 };
 const DIST_NUMBER: CSSProperties = {
   color: "var(--glass-text)",
   fontWeight: 760,
+};
+const DIST_NUMBER_MEDIAN: CSSProperties = {
+  color: "#ffaa00",
+  fontWeight: 850,
+  background: "rgba(255, 170, 0, 0.16)",
+  padding: "0 4px",
+  borderRadius: 4,
+  border: "1px solid rgba(255, 170, 0, 0.35)",
 };
 const DIST_PM: CSSProperties = {
   color: "var(--glass-muted)",

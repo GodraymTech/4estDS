@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
+  App,
   Button,
-  Checkbox,
+  Collapse,
   Divider,
   Empty,
   Input,
-  Modal,
+  Segmented,
   Select,
-  Space,
   Spin,
   Tag,
   Tooltip,
@@ -16,15 +15,18 @@ import {
 } from "antd";
 import {
   BorderOutlined,
+  ClearOutlined,
   DeleteOutlined,
   DragOutlined,
+  HistoryOutlined,
+  InboxOutlined,
   MergeCellsOutlined,
   MinusCircleOutlined,
   PlusOutlined,
-  RedoOutlined,
+  ArrowLeftOutlined,
+  ArrowRightOutlined,
   SaveOutlined,
   ScissorOutlined,
-  UndoOutlined,
 } from "@ant-design/icons";
 import maplibregl from "maplibre-gl";
 import { useBlocker } from "react-router-dom";
@@ -52,14 +54,14 @@ export interface EffectiveAreaEditorProps {
   onClose: () => void;
 }
 
-const TOOLS: Array<{ key: GeometryEditorTool; label: string; icon: React.ReactNode }> = [
-  { key: "select", label: "选择", icon: <DragOutlined /> },
-  { key: "draw", label: "绘制", icon: <BorderOutlined /> },
-  { key: "add", label: "增加", icon: <PlusOutlined /> },
-  { key: "hole", label: "挖洞", icon: <MinusCircleOutlined /> },
-  { key: "split", label: "分割", icon: <ScissorOutlined /> },
-  { key: "merge", label: "合并", icon: <MergeCellsOutlined /> },
-  { key: "delete", label: "删除", icon: <DeleteOutlined /> },
+const TOOLS: Array<{ key: GeometryEditorTool; label: string; tooltip: string; icon: React.ReactNode }> = [
+  { key: "select", label: "选择", tooltip: "选择与节点编辑", icon: <DragOutlined /> },
+  { key: "draw", label: "绘制", tooltip: "绘制多边形", icon: <BorderOutlined /> },
+  { key: "add", label: "追加", tooltip: "追加多边形", icon: <PlusOutlined /> },
+  { key: "hole", label: "挖洞", tooltip: "镂空多边形", icon: <MinusCircleOutlined /> },
+  { key: "split", label: "分割", tooltip: "分割多边形", icon: <ScissorOutlined /> },
+  { key: "merge", label: "合并", tooltip: "合并多边形", icon: <MergeCellsOutlined /> },
+  { key: "delete", label: "删除", tooltip: "删除多边形", icon: <DeleteOutlined /> },
 ];
 
 export function EffectiveAreaEditor(props: EffectiveAreaEditorProps) {
@@ -83,6 +85,7 @@ function EditorWorkspace({
   onClose,
   data,
 }: EffectiveAreaEditorProps & { data: NonNullable<ReturnType<typeof useEffectiveArea>["data"]> }) {
+  const { modal } = App.useApp();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const adapterRef = useRef<GeometryEditorAdapter | null>(null);
@@ -91,7 +94,7 @@ function EditorWorkspace({
   const [draft, setDraft] = useState(() => cloneGeometry(data.geometry));
   const [tool, setTool] = useState<GeometryEditorTool>("select");
   const [dirty, setDirty] = useState(false);
-  const [invalidMaskVisible, setInvalidMaskVisible] = useState(true);
+  const [invalidMaskVisible, setInvalidMaskVisible] = useState(false);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const [zoom, setZoom] = useState(15);
   const [localPath, setLocalPath] = useState("");
@@ -114,7 +117,7 @@ function EditorWorkspace({
 
   useEffect(() => {
     if (blocker.state !== "blocked") return;
-    Modal.confirm({
+    modal.confirm({
       title: "放弃未保存的有效区域？",
       content: "当前编辑尚未保存，离开后本次修改将丢失。",
       okText: "放弃并离开",
@@ -135,7 +138,7 @@ function EditorWorkspace({
       center: [(west + east) / 2, (south + north) / 2],
       zoom: 15,
       attributionControl: false,
-      maxZoom: 24,
+      maxZoom: 25,
     });
     mapRef.current = map;
     map.on("load", () => {
@@ -153,6 +156,21 @@ function EditorWorkspace({
         source: "effective-boundary",
         paint: { "line-color": "#d9fff0", "line-width": 2, "line-dasharray": [3, 2] },
       });
+      map.addSource("effective-draft", {
+        type: "geojson",
+        data: featureOf(data.geometry) as never,
+      });
+      map.addLayer({
+        id: "effective-draft-line",
+        type: "line",
+        source: "effective-draft",
+        layout: { visibility: displayMode === "outline" ? "visible" : "none" },
+        paint: {
+          "line-color": "#ff7a00",
+          "line-width": 2.5,
+          "line-opacity": 0.9,
+        },
+      });
       map.addSource("effective-invalid-mask", {
         type: "geojson",
         data: buildInvalidAreaMask(data.boundary_geometry, data.geometry) as never,
@@ -161,6 +179,7 @@ function EditorWorkspace({
         id: "effective-invalid-mask",
         type: "fill",
         source: "effective-invalid-mask",
+        layout: { visibility: invalidMaskVisible ? "visible" : "none" },
         paint: { "fill-color": "#28161a", "fill-opacity": 0.58 },
       });
       const adapter = new GeometryEditorAdapter(map, data.geometry);
@@ -169,6 +188,10 @@ function EditorWorkspace({
         setDraft(geometry);
         setDirty(JSON.stringify(geometry) !== initialRef.current);
         updateMask(map, data.boundary_geometry, geometry);
+        const draftSource = map.getSource("effective-draft") as maplibregl.GeoJSONSource;
+        if (draftSource) {
+          draftSource.setData(featureOf(geometry) as never);
+        }
       });
       map.fitBounds([[west, south], [east, north]], { padding: 72, maxZoom: 18, duration: 0 });
       setZoom(map.getZoom());
@@ -188,10 +211,21 @@ function EditorWorkspace({
     if (map?.getLayer("effective-invalid-mask")) {
       map.setLayoutProperty("effective-invalid-mask", "visibility", invalidMaskVisible ? "visible" : "none");
     }
+    if (map?.getLayer("effective-draft-line")) {
+      map.setLayoutProperty("effective-draft-line", "visibility", !invalidMaskVisible ? "visible" : "none");
+    }
   }, [invalidMaskVisible]);
 
+  const [displayMode, setDisplayMode] = useState<"outline" | "mask">("outline");
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  useEffect(() => {
+    setInvalidMaskVisible(displayMode === "mask");
+  }, [displayMode]);
+
   const previewArea = useMemo(() => areaHm2(draft), [draft]);
-  const validArea = previewArea > 0 && previewArea <= data.tract_area_hm2 * 1.0001;
+  const orthoArea = useMemo(() => data.tract_phase_area_hm2 || data.tract_area_hm2, [data]);
+  const effectiveRatio = useMemo(() => (orthoArea > 0 ? (previewArea / orthoArea) * 100 : 0), [orthoArea, previewArea]);
 
   async function persist(clipToBoundary: boolean) {
     try {
@@ -206,7 +240,7 @@ function EditorWorkspace({
     } catch (error) {
       const failure = apiFailure(error);
       if (!clipToBoundary && failure.code === "outside_boundary") {
-        Modal.confirm({
+        modal.confirm({
           title: "有效区域超出地块边界",
           content: "后端验证发现越界。是否明确确认，将草稿裁剪到完整地块边界后保存？",
           okText: "确认裁剪并保存",
@@ -227,7 +261,7 @@ function EditorWorkspace({
       setImportLayers(result.layers);
       setImportLayer(result.layer ?? undefined);
       adapterRef.current?.replaceDraft(result.geometry);
-      if (result.requires_clip) message.warning("导入区域超出地块边界，保存时必须确认裁剪");
+      if (result.requires_clip) message.warning("导入区域超出地块边界，保存时可按需确认裁剪");
       else message.success(`已载入 ${result.polygon_count} 个面`);
     } catch (error) {
       message.error(effectiveAreaErrorMessage(apiFailure(error)));
@@ -236,25 +270,29 @@ function EditorWorkspace({
     }
   }
 
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      setFiles(droppedFiles);
+      void inspectImport({ files: droppedFiles });
+    }
+  };
+
   return (
-    <div className="effective-editor">
+    <div className="effective-editor" onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }} onDragLeave={() => setIsDragOver(false)} onDrop={handleDrop}>
       <header className="effective-editor__topbar">
         <div>
           <strong>有效区域编辑器</strong>
           <span>{tractLabel}</span>
           <Tag color={dirty ? "gold" : "green"}>{dirty ? "未保存" : "已同步"}</Tag>
         </div>
-        <Space>
-          <Button onClick={onClose}>取消</Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={save.isPending} disabled={!dirty || !validArea} onClick={() => persist(false)}>
-            保存
-          </Button>
-        </Space>
       </header>
 
       <aside className="effective-editor__tools">
         {TOOLS.map((item) => (
-          <Tooltip title={item.key === "delete" ? "选择后单击要删除的岛" : item.label} placement="right" key={item.key}>
+          <Tooltip title={item.tooltip} placement="right" key={item.key}>
             <Button
               type={tool === item.key ? "primary" : "text"}
               danger={item.key === "delete"}
@@ -263,61 +301,174 @@ function EditorWorkspace({
                 setTool(item.key === "merge" ? "select" : item.key);
                 adapterRef.current?.setTool(item.key);
               }}
-            >
-              {item.label}
-            </Button>
+            />
           </Tooltip>
         ))}
         <Divider />
-        <Button icon={<UndoOutlined />} onClick={() => adapterRef.current?.undo()}>撤销</Button>
-        <Button icon={<RedoOutlined />} onClick={() => adapterRef.current?.redo()}>重做</Button>
+        <Tooltip title="撤销" placement="right">
+          <Button
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            disabled={!adapterRef.current?.canUndo()}
+            onClick={() => {
+              adapterRef.current?.undo();
+              setDraft(adapterRef.current?.getDraft() ?? draft);
+            }}
+          />
+        </Tooltip>
+        <Tooltip title="重做" placement="right">
+          <Button
+            type="text"
+            icon={<ArrowRightOutlined />}
+            disabled={!adapterRef.current?.canRedo()}
+            onClick={() => {
+              adapterRef.current?.redo();
+              setDraft(adapterRef.current?.getDraft() ?? draft);
+            }}
+          />
+        </Tooltip>
+        <Tooltip title="重置" placement="right">
+          <Button
+            type="text"
+            icon={<HistoryOutlined />}
+            onClick={() => {
+              adapterRef.current?.reset();
+              setDraft(adapterRef.current?.getDraft() ?? draft);
+            }}
+          />
+        </Tooltip>
+        <Tooltip title="清空" placement="right">
+          <Button
+            type="text"
+            danger
+            icon={<ClearOutlined />}
+            onClick={() => {
+              modal.confirm({
+                title: "清空有效区域？",
+                content: "将删除该地块所有手绘多边形，此操作不可通过重置恢复，仍可撤销。",
+                okText: "清空",
+                okButtonProps: { danger: true },
+                cancelText: "取消",
+                onOk: () => {
+                  adapterRef.current?.clear();
+                  setDraft(adapterRef.current?.getDraft() ?? draft);
+                },
+              });
+            }}
+          />
+        </Tooltip>
       </aside>
 
       <main className="effective-editor__map" ref={containerRef} />
 
       <aside className="effective-editor__inspector">
-        <section>
-          <h3>面积</h3>
-          <div className="effective-editor__metric"><span>地块面积</span><strong>{formatHm2(data.tract_area_hm2)} hm²</strong></div>
-          <div className="effective-editor__metric"><span>草稿有效面积</span><strong>{formatHm2(previewArea)} hm²</strong></div>
-          <div className="effective-editor__metric"><span>占比</span><strong>{((previewArea / data.tract_area_hm2) * 100).toFixed(1)}%</strong></div>
-        </section>
-        <section>
-          <h3>验证</h3>
-          <Alert
-            type={validArea ? "success" : "warning"}
-            showIcon
-            message={validArea ? "前端预检通过" : "面积为空或超过地块面积"}
-            description="自相交、CRS、精确越界与面积由后端 Shapely/Geod 最终校验。"
-          />
-          <Checkbox checked={invalidMaskVisible} onChange={(event) => setInvalidMaskVisible(event.target.checked)}>
-            遮罩无效区
-          </Checkbox>
-        </section>
-        <section>
-          <h3>导入 GIS</h3>
-          <input type="file" multiple accept=".json,.geojson,.zip,.shp,.dbf,.shx,.prj,.gpkg,.kml,.fgb" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
-          <div className="effective-editor__or">或</div>
-          <Input value={localPath} onChange={(event) => setLocalPath(event.target.value)} placeholder="后端可访问的本地矢量路径" />
-          {importLayers.length > 1 ? (
-            <Select
-              value={importLayer}
-              options={importLayers.map((value) => ({ value, label: value }))}
-              placeholder="选择图层"
-              onChange={(layer) => {
-                setImportLayer(layer);
-                if (sourceRef.current) void inspectImport({ ...sourceRef.current, layer });
-              }}
+        <div className="effective-editor__inspector-body">
+          <section>
+            <h3>视图模式</h3>
+            <Segmented
+              block
+              options={[
+                { label: "框线模式", value: "outline" },
+                { label: "遮罩模式", value: "mask" },
+              ]}
+              value={displayMode}
+              onChange={(val) => setDisplayMode(val as "outline" | "mask")}
+              className="effective-editor__mode-selector"
             />
-          ) : null}
+          </section>
+
+          <section>
+            <h3>面积统计</h3>
+            <div className="effective-editor__metric">
+              <span>地块面积</span>
+              <strong>{formatHm2(data.tract_area_hm2)} hm²</strong>
+            </div>
+            <div className="effective-editor__metric">
+              <span>正射面积</span>
+              <strong>{formatHm2(orthoArea)} hm²</strong>
+            </div>
+            <div className="effective-editor__metric effective-editor__metric--highlight">
+              <span>有效面积</span>
+              <strong>{formatHm2(previewArea)} hm²</strong>
+            </div>
+            <div className="effective-editor__metric">
+              <span>有效占比</span>
+              <strong>{effectiveRatio.toFixed(1)}%</strong>
+            </div>
+          </section>
+
+          <section>
+            <Collapse
+              ghost
+              size="small"
+              items={[
+                {
+                  key: "gis-import",
+                  label: <h3 style={{ display: "inline" }}>导入 GIS 矢量文件</h3>,
+                  children: (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 4 }}>
+                      <div
+                        className={`effective-editor__dropzone ${isDragOver ? "effective-editor__dropzone--active" : ""}`}
+                        onClick={() => {
+                          const input = document.createElement("input");
+                          input.type = "file";
+                          input.multiple = true;
+                          input.accept = ".json,.geojson,.zip,.shp,.dbf,.shx,.prj,.gpkg,.kml,.fgb";
+                          input.onchange = (ev) => {
+                            const selected = Array.from((ev.target as HTMLInputElement).files ?? []);
+                            setFiles(selected);
+                            if (selected.length) void inspectImport({ files: selected });
+                          };
+                          input.click();
+                        }}
+                      >
+                        <InboxOutlined style={{ fontSize: 24, color: "#52c99a" }} />
+                        <span className="effective-editor__dropzone-text">点击或将 Shapefile/GeoJSON/GPKG 拖拽至此处</span>
+                      </div>
+                      <Input
+                        value={localPath}
+                        onChange={(event) => setLocalPath(event.target.value)}
+                        placeholder="或输入服务端可访问的矢量路径"
+                      />
+                      {importLayers.length > 1 ? (
+                        <Select
+                          value={importLayer}
+                          options={importLayers.map((value) => ({ value, label: value }))}
+                          placeholder="选择图层"
+                          onChange={(layer) => {
+                            setImportLayer(layer);
+                            if (sourceRef.current) void inspectImport({ ...sourceRef.current, layer });
+                          }}
+                        />
+                      ) : null}
+                      <Button
+                        loading={importing}
+                        disabled={!files.length && !localPath.trim()}
+                        onClick={() => inspectImport(files.length ? { files, layer: importLayer } : { localPath: localPath.trim(), layer: importLayer })}
+                      >
+                        预检并载入
+                      </Button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          </section>
+        </div>
+
+        <div className="effective-editor__panel-footer">
+          <Button onClick={onClose} style={{ flex: 1 }}>取消</Button>
           <Button
-            loading={importing}
-            disabled={!files.length && !localPath.trim()}
-            onClick={() => inspectImport(files.length ? { files, layer: importLayer } : { localPath: localPath.trim(), layer: importLayer })}
+            type="primary"
+            icon={<SaveOutlined />}
+            loading={save.isPending}
+            disabled={!dirty}
+            onClick={() => persist(false)}
+            style={{ flex: 1 }}
           >
-            预检并载入
+            保存
           </Button>
-        </section>
+        </div>
       </aside>
 
       <footer className="effective-editor__statusbar">
@@ -347,7 +498,7 @@ function editorStyle(): maplibregl.StyleSpecification {
 
 function addImagery(map: maplibregl.Map, tile: string, index: number) {
   const id = `editor-tiff-${index}`;
-  map.addSource(id, { type: "raster", tiles: [tile], tileSize: 256, minzoom: 12, maxzoom: 24 });
+  map.addSource(id, { type: "raster", tiles: [tile], tileSize: 256, minzoom: 12, maxzoom: 25 });
   map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": 0.88 } });
 }
 

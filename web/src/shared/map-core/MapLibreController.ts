@@ -101,7 +101,10 @@ export class MapLibreController implements MapController {
     } else {
       this.setData(spec.id, spec.data);
     }
-    if (map.getLayer(spec.id)) return;
+    if (map.getLayer(spec.id)) {
+      map.moveLayer(spec.id);
+      return;
+    }
     if (spec.kind === "point") {
       map.addLayer({
         id: spec.id,
@@ -141,6 +144,7 @@ export class MapLibreController implements MapController {
         },
       });
     }
+    map.moveLayer(spec.id);
   }
 
   removeLayer(id: string): void {
@@ -294,12 +298,15 @@ export class MapLibreController implements MapController {
       }
     }
     if (!map.getLayer(id)) {
+      const layers = map.getStyle().layers;
+      const vectorTypes = ["fill", "line", "circle", "symbol"];
+      const firstVector = layers?.find((l) => l.id !== "base" && vectorTypes.includes(l.type));
       map.addLayer({
         id,
         type: "raster",
         source: id,
         paint: { "raster-opacity": overlay.opacity ?? 0.9 },
-      });
+      }, firstVector?.id);
       return;
     }
     map.setPaintProperty(id, "raster-opacity", overlay.opacity ?? 0.9);

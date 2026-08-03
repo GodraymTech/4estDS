@@ -216,7 +216,6 @@ def _compute_tiff_metadata(
         return None
 
     path = Path(image_path)
-    # 资产台账的影像名统一使用 stem；真实路径仍完整保存在 path_versions。
     file_name = path.stem
     fallback_input = f"{phase_id}|{image_path}"
     meta: dict[str, Any] = {
@@ -230,16 +229,14 @@ def _compute_tiff_metadata(
         "footprint_geom": "POLYGON EMPTY",
         "footprint_bbox": None,
         "center_geom": None,
-        "center_lng": None,
-        "center_lat": None,
         "crs_epsg": crs_epsg,
         "crs_wkt": crs_wkt,
         "geotransform": None,
         "pixel_width": pixel_w,
         "pixel_height": pixel_h,
         "gsd": gsd,
-        "geo_area": geo_area,
-        "area_unit": area_unit,
+        "footprint_area_hm2": round(geo_area / 10000.0, 4) if geo_area is not None else None,
+        "area_hm2": round(geo_area / 10000.0, 4) if geo_area is not None else None,
         "band_count": None,
         "dtype": None,
         "nodata": None,
@@ -268,30 +265,58 @@ def _compute_tiff_metadata(
             center = _polygon_centroid(coords)
             pixel_area = abs(src.transform.a * src.transform.e - src.transform.b * src.transform.d)
             inferred_area = geo_area
-            inferred_unit = area_unit
             if inferred_area is None and pixel_area > 0:
                 if src.crs and getattr(src.crs, "is_projected", False):
                     inferred_area = float(pixel_area * width * height)
-                    inferred_unit = inferred_unit or "m²"
                 else:
                     inferred_area = _geo_area_from_wgs84(coords)
-                    inferred_unit = inferred_unit or ("m²" if inferred_area is not None else None)
+            
+            footprint_hm2 = round(inferred_area / 10000.0, 4) if inferred_area is not None else None
+            
+            # 【方案A】：若带 Overview 或者是 COG，快速估算非 nodata 的有效面积
+            estimated_effective_area_hm2 = footprint_hm2
+            try:
+                if len(src.overviews(1)) > 0:
+                    factors = src.overviews(1)
+                    max_level = len(factors) - 1
+                    decim = factors[max_level]
+                    ov_h = int(src.height // decim)
+                    ov_w = int(src.width // decim)
+                    from rasterio.enums import Resampling
+                    data = src.read(1, out_shape=(ov_h, ov_w), resampling=Resampling.nearest)
+                    nodata_val = src.nodata
+                    import numpy as np
+                    if nodata_val is not None:
+                        if np.isnan(nodata_val):
+                            valid_pixels = np.count_nonzero(~np.isnan(data))
+                        else:
+                            valid_pixels = np.count_nonzero(data != nodata_val)
+                    else:
+                        valid_pixels = data.size
+                    
+                    if data.size > 0 and inferred_area:
+                        valid_ratio = float(valid_pixels) / data.size
+                        estimated_effective_area_hm2 = round((inferred_area * valid_ratio) / 10000.0, 4)
+                        if estimated_effective_area_hm2 <= 0:
+                            estimated_effective_area_hm2 = footprint_hm2
+            except Exception as exc:
+                log.debug("从 Overview 估算有效面积失败: {}", exc)
+
             meta.update(
-                    {
-                        "tiff_id": _hash(f"{phase_id}|{normalized}|{path.resolve()}", 5),
-                        "footprint_geom": _wkt_polygon(coords),
-                        "footprint_bbox": _dump([minx, miny, maxx, maxy]),
-                        "center_geom": _wkt_point(*center) if center else None,
-                        "center_lng": center[0] if center else None,
-                        "center_lat": center[1] if center else None,
-                        "crs_epsg": src.crs.to_epsg() if src.crs and hasattr(src.crs, "to_epsg") else crs_epsg,
+                {
+                    "tiff_id": _hash(f"{phase_id}|{normalized}|{path.resolve()}", 5),
+                    "footprint_geom": _wkt_polygon(coords),
+                    "footprint_bbox": _dump([minx, miny, maxx, maxy]),
+                    "center_geom": _wkt_point(*center) if center else None,
+                    "crs_epsg": src.crs.to_epsg() if src.crs and hasattr(src.crs, "to_epsg") else crs_epsg,
                     "crs_wkt": src.crs.to_wkt() if src.crs and hasattr(src.crs, "to_wkt") else crs_wkt,
                     "geotransform": _dump(tuple(src.transform)),
                     "pixel_width": width,
                     "pixel_height": height,
                     "gsd": gsd if gsd is not None else (float(pixel_area ** 0.5) if pixel_area > 0 and src.crs and getattr(src.crs, "is_projected", False) else None),
-                    "geo_area": inferred_area,
-                    "area_unit": inferred_unit,
+                    "footprint_area_hm2": footprint_hm2,
+                    "area_hm2": estimated_effective_area_hm2,
+                    "effective_area_hm2": estimated_effective_area_hm2,
                     "band_count": int(src.count),
                     "dtype": str(src.dtypes[0]) if src.dtypes else None,
                     "nodata": src.nodata,
@@ -304,13 +329,12 @@ def _compute_tiff_metadata(
 
 
 def _ensure_run_exists(conn: sqlite3.Connection, run_id: str, task_type: str = "infer") -> None:
-    row = conn.execute("SELECT run_id FROM runs WHERE run_id=?", (run_id,)).fetchone()
-    if row:
-        return
     now = _now()
     conn.execute(
-        "INSERT INTO runs (run_id, task_type, status, started_at, created_at) VALUES (?, ?, ?, ?, ?)",
-        (run_id, task_type, "running", now, now),
+        "INSERT INTO runs (run_id, task_type, status, started_at, created_at) "
+        "VALUES (?, ?, 'running', ?, ?) "
+        "ON CONFLICT(run_id) DO NOTHING",
+        (run_id, task_type, now, now),
     )
 
 
@@ -432,17 +456,6 @@ def ensure_tract(
     )
     tract_pk = _safe_pk("tract", resolved_region_id, tract_id)
     now = _now()
-    boundary_center = _centroid_from_wkt_polygon(boundary_geom)
-    boundary_geom_cent = _wkt_point(*boundary_center) if boundary_center else None
-    boundary_area_hm2 = None
-    if boundary_geom:
-        try:
-            from shapely.wkt import loads as load_wkt
-            from ..effective_area.service import geodesic_area_hm2
-
-            boundary_area_hm2 = geodesic_area_hm2(load_wkt(boundary_geom))
-        except Exception as exc:  # noqa: BLE001
-            log.warning("地块边界面积计算失败，暂不写 effective_area_hm2: {}", exc)
 
     conn = _connect(url)
     try:
@@ -479,15 +492,10 @@ def ensure_tract(
         conn.execute(
             "INSERT INTO tracts "
             "(tract_pk, region_id, city, county, town, tract_id, boundary_geom, boundary_geom_cent, "
-            "effective_geom, effective_area_hm2, boundary_source, coverage_status, created_at, updated_at) "
+            "effective_geom, effective_area_hm2, effective_source, coverage_status, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tract_pk) DO UPDATE SET region_id=excluded.region_id, city=excluded.city, county=excluded.county, "
-            "town=excluded.town, boundary_geom=COALESCE(excluded.boundary_geom, tracts.boundary_geom), "
-            "boundary_geom_cent=COALESCE(excluded.boundary_geom_cent, tracts.boundary_geom_cent), "
-            "effective_area_hm2=CASE "
-            "WHEN tracts.effective_geom IS NULL AND excluded.boundary_geom IS NOT NULL "
-            "THEN excluded.effective_area_hm2 ELSE tracts.effective_area_hm2 END, "
-            "updated_at=excluded.updated_at",
+            "town=excluded.town, updated_at=excluded.updated_at",
             (
                 tract_pk,
                 resolved_region_id,
@@ -495,11 +503,11 @@ def ensure_tract(
                 county,
                 town,
                 tract_id,
-                boundary_geom,
-                boundary_geom_cent,
                 None,
-                boundary_area_hm2,
-                "manual" if boundary_geom else "auto",
+                None,
+                None,
+                None,
+                "default",
                 "none",
                 now,
                 now,
@@ -507,8 +515,8 @@ def ensure_tract(
         )
         conn.execute(
             "INSERT INTO tract_phases "
-            "(tract_phase_pk, tract_pk, region_id, tract_id, phase_id, boundary_geom, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "(tract_phase_pk, tract_pk, region_id, tract_id, phase_id, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tract_pk, phase_id) DO UPDATE SET region_id=excluded.region_id, "
             "tract_id=excluded.tract_id, updated_at=excluded.updated_at",
             (
@@ -517,7 +525,6 @@ def ensure_tract(
                 resolved_region_id,
                 tract_id,
                 phase_id,
-                None,
                 now,
             ),
         )
@@ -545,19 +552,20 @@ def ensure_tract(
             conn.execute(
                 "INSERT INTO tiffs "
                 "(tiff_id, phase_id, tract_phase_pk, file_name, path_versions, multisource_path_versions, "
-                " tiff_type, footprint_geom, footprint_bbox, center_geom, center_lng, center_lat, crs_epsg, crs_wkt, geotransform, "
-                " pixel_width, pixel_height, gsd, geo_area, area_unit, band_count, dtype, nodata, "
-                " inference_status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                " tiff_type, footprint_geom, footprint_bbox, center_geom, crs_epsg, crs_wkt, geotransform, "
+                " pixel_width, pixel_height, gsd, footprint_area_hm2, area_hm2, effective_area_hm2, "
+                " band_count, dtype, nodata, inference_status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(tiff_id, phase_id) DO UPDATE SET "
                 " tract_phase_pk=excluded.tract_phase_pk, file_name=excluded.file_name, path_versions=excluded.path_versions, "
                 " multisource_path_versions=excluded.multisource_path_versions, tiff_type=excluded.tiff_type, "
                 " footprint_geom=excluded.footprint_geom, footprint_bbox=excluded.footprint_bbox, "
-                " center_geom=excluded.center_geom, center_lng=excluded.center_lng, "
-                " center_lat=excluded.center_lat, crs_epsg=excluded.crs_epsg, crs_wkt=excluded.crs_wkt, "
+                " center_geom=excluded.center_geom, crs_epsg=excluded.crs_epsg, crs_wkt=excluded.crs_wkt, "
                 " geotransform=excluded.geotransform, pixel_width=excluded.pixel_width, pixel_height=excluded.pixel_height, "
-                " gsd=excluded.gsd, geo_area=excluded.geo_area, area_unit=excluded.area_unit, "
-                " band_count=excluded.band_count, dtype=excluded.dtype, nodata=excluded.nodata, updated_at=excluded.updated_at",
+                " gsd=excluded.gsd, footprint_area_hm2=excluded.footprint_area_hm2, area_hm2=excluded.area_hm2, "
+                " effective_area_hm2=COALESCE(tiffs.effective_area_hm2, excluded.effective_area_hm2), "
+                " band_count=excluded.band_count, dtype=excluded.dtype, nodata=excluded.nodata, "
+                " updated_at=excluded.updated_at",
                 (
                     tiff_meta["tiff_id"],
                     phase_id,
@@ -569,16 +577,15 @@ def ensure_tract(
                     tiff_meta["footprint_geom"],
                     tiff_meta["footprint_bbox"],
                     tiff_meta["center_geom"],
-                    tiff_meta["center_lng"],
-                    tiff_meta["center_lat"],
                     tiff_meta["crs_epsg"],
                     tiff_meta["crs_wkt"],
                     tiff_meta["geotransform"],
                     tiff_meta["pixel_width"],
                     tiff_meta["pixel_height"],
                     tiff_meta["gsd"],
-                    tiff_meta["geo_area"],
-                    tiff_meta["area_unit"],
+                    tiff_meta.get("footprint_area_hm2"),
+                    tiff_meta.get("area_hm2"),
+                    tiff_meta.get("effective_area_hm2"),
                     tiff_meta["band_count"],
                     tiff_meta["dtype"],
                     tiff_meta["nodata"],
@@ -930,13 +937,15 @@ def persist_individuals(individuals, *, url: str | None = None) -> int:
 
 
 def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> None:
-    """如果地块的 boundary_source 为 'auto'，则重新计算并更新该地块下所有 TIFF 的合并外接正矩形。"""
+    """重新计算并更新该地块下全量 TIFF 的合并外接正矩形与有效区域。"""
     import json
     row = conn.execute(
-        "SELECT boundary_source FROM tracts WHERE tract_pk=?", (tract_pk,)
+        "SELECT effective_source FROM tracts WHERE tract_pk=?", (tract_pk,)
     ).fetchone()
-    if not row or row["boundary_source"] == "manual":
+    if not row:
         return
+
+    effective_source = (row["effective_source"] if hasattr(row, "keys") else row[0]) or "default"
 
     # 获取该地块下所有的 TIFF 资产 footprint_bbox
     # bbox 存储格式为 JSON 字符串: [minx, miny, maxx, maxy]
@@ -949,13 +958,17 @@ def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> Non
 
     now = _now()
     if not bbox_rows:
-        # 无 TIFF 资产，重置边界为空，但保持 auto 来源状态
-        conn.execute(
-            "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, "
-            "effective_area_hm2=CASE WHEN effective_geom IS NULL THEN NULL ELSE effective_area_hm2 END, "
-            "updated_at=? WHERE tract_pk=?",
-            (now, tract_pk),
-        )
+        if effective_source == "default":
+            conn.execute(
+                "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, "
+                "effective_geom=NULL, effective_area_hm2=NULL, updated_at=? WHERE tract_pk=?",
+                (now, tract_pk),
+            )
+        else:
+            conn.execute(
+                "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, updated_at=? WHERE tract_pk=?",
+                (now, tract_pk),
+            )
         return
 
     # 解析所有 bbox 并合并
@@ -964,7 +977,7 @@ def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> Non
     valid_bbox_found = False
 
     for r in bbox_rows:
-        bbox_str = r["footprint_bbox"]
+        bbox_str = r["footprint_bbox"] if hasattr(r, "keys") else r[0]
         if not bbox_str:
             continue
         try:
@@ -979,12 +992,17 @@ def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> Non
             continue
 
     if not valid_bbox_found:
-        conn.execute(
-            "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, "
-            "effective_area_hm2=CASE WHEN effective_geom IS NULL THEN NULL ELSE effective_area_hm2 END, "
-            "updated_at=? WHERE tract_pk=?",
-            (now, tract_pk),
-        )
+        if effective_source == "default":
+            conn.execute(
+                "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, "
+                "effective_geom=NULL, effective_area_hm2=NULL, updated_at=? WHERE tract_pk=?",
+                (now, tract_pk),
+            )
+        else:
+            conn.execute(
+                "UPDATE tracts SET boundary_geom=NULL, boundary_geom_cent=NULL, updated_at=? WHERE tract_pk=?",
+                (now, tract_pk),
+            )
         return
 
     # 构造外接正矩形 WKT 多边形
@@ -998,18 +1016,45 @@ def update_tract_geom_from_tiffs(conn: sqlite3.Connection, tract_pk: str) -> Non
     boundary_geom = _wkt_polygon(coords)
     center = ((min_lng + max_lng) / 2.0, (min_lat + max_lat) / 2.0)
     boundary_geom_cent = _wkt_point(*center)
-    boundary_area_hm2 = None
-    try:
-        from shapely.wkt import loads as load_wkt
-        from ..effective_area.service import geodesic_area_hm2
-
-        boundary_area_hm2 = geodesic_area_hm2(load_wkt(boundary_geom))
-    except Exception as exc:  # noqa: BLE001
-        log.warning("自动地块边界面积计算失败: {}", exc)
 
     conn.execute(
-        "UPDATE tracts SET boundary_geom=?, boundary_geom_cent=?, boundary_source='auto', "
-        "effective_area_hm2=CASE WHEN effective_geom IS NULL THEN ? ELSE effective_area_hm2 END, "
-        "updated_at=? WHERE tract_pk=?",
-        (boundary_geom, boundary_geom_cent, boundary_area_hm2, now, tract_pk),
+        "UPDATE tract_phases SET area_hm2 = ("
+        "  SELECT COALESCE(SUM(area_hm2), 0.0) FROM tiffs WHERE tract_phase_pk = tract_phases.tract_phase_pk"
+        ") WHERE tract_pk=?",
+        (tract_pk,),
     )
+    if effective_source == "default":
+        effective_geom = boundary_geom
+        conn.execute(
+            "UPDATE tiffs SET effective_area_hm2 = COALESCE(area_hm2, footprint_area_hm2) "
+            "WHERE tract_phase_pk IN (SELECT tract_phase_pk FROM tract_phases WHERE tract_pk=?)",
+            (tract_pk,),
+        )
+        row_phase = conn.execute(
+            "SELECT tp.phase_id, COUNT(tf.tiff_id) as cnt FROM tract_phases tp "
+            "JOIN tiffs tf ON tf.tract_phase_pk = tp.tract_phase_pk "
+            "WHERE tp.tract_pk=? GROUP BY tp.phase_id ORDER BY cnt DESC, tp.phase_id DESC LIMIT 1",
+            (tract_pk,),
+        ).fetchone()
+        best_phase = (row_phase["phase_id"] if hasattr(row_phase, "keys") else row_phase[0]) if row_phase else None
+        if best_phase:
+            sum_row = conn.execute(
+                "SELECT SUM(tf.effective_area_hm2) as total FROM tiffs tf "
+                "JOIN tract_phases tp ON tp.tract_phase_pk = tf.tract_phase_pk "
+                "WHERE tp.tract_pk=? AND tp.phase_id=?",
+                (tract_pk, best_phase),
+            ).fetchone()
+            effective_area_hm2 = (sum_row["total"] if hasattr(sum_row, "keys") else sum_row[0]) if sum_row else None
+        else:
+            effective_area_hm2 = None
+
+        conn.execute(
+            "UPDATE tracts SET boundary_geom=?, boundary_geom_cent=?, "
+            "effective_geom=?, effective_area_hm2=?, updated_at=? WHERE tract_pk=?",
+            (boundary_geom, boundary_geom_cent, effective_geom, effective_area_hm2, now, tract_pk),
+        )
+    else:
+        conn.execute(
+            "UPDATE tracts SET boundary_geom=?, boundary_geom_cent=?, updated_at=? WHERE tract_pk=?",
+            (boundary_geom, boundary_geom_cent, now, tract_pk),
+        )

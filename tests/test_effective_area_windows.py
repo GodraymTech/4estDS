@@ -107,7 +107,7 @@ def test_load_filter_uses_current_tract_version_and_tiff_transform(tmp_path) -> 
     conn.execute(
         "INSERT INTO tracts "
         "(tract_pk, region_id, tract_id, boundary_geom, effective_geom, effective_area_hm2, "
-        "boundary_source, coverage_status, created_at, updated_at) "
+        "effective_source, coverage_status, created_at, updated_at) "
         "VALUES ('tract-1', 'region', 'Q12', ?, ?, 1, 'manual', 'full', 'created', 'updated-1')",
         (boundary.wkt, effective.wkt),
     )

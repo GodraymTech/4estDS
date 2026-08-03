@@ -29,8 +29,8 @@ DDL: tuple[str, ...] = (
         boundary_geom_cent TEXT,
         effective_geom  TEXT,
         effective_area_hm2 REAL,
-        boundary_source TEXT NOT NULL DEFAULT 'auto'
-            CHECK (boundary_source IN ('auto', 'manual')),
+        effective_source TEXT NOT NULL DEFAULT 'default'
+            CHECK (effective_source IN ('default', 'manual')),
         coverage_status TEXT NOT NULL DEFAULT 'none'
             CHECK (coverage_status IN ('none', 'partial', 'full')),
         notes           TEXT,
@@ -67,7 +67,7 @@ DDL: tuple[str, ...] = (
         tract_id        TEXT NOT NULL,
         phase_id        TEXT NOT NULL
             CHECK (phase_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
-        boundary_geom   TEXT,
+        area_hm2        REAL DEFAULT 0.0,
         updated_at      TEXT NOT NULL,
         UNIQUE (tract_pk, phase_id)
     )
@@ -86,16 +86,15 @@ DDL: tuple[str, ...] = (
         footprint_geom             TEXT NOT NULL,
         footprint_bbox             TEXT,
         center_geom                TEXT,
-        center_lng                 REAL,
-        center_lat                 REAL,
         crs_epsg                   INTEGER,
         crs_wkt                    TEXT,
         geotransform               TEXT,
         pixel_width                INTEGER,
         pixel_height               INTEGER,
         gsd                        REAL,
-        geo_area                   REAL,
-        area_unit                  TEXT,
+        footprint_area_hm2         REAL,
+        area_hm2                   REAL,
+        effective_area_hm2         REAL,
         band_count                 INTEGER,
         dtype                      TEXT,
         nodata                     REAL,
@@ -217,9 +216,10 @@ def _assert_new_schema(conn: sqlite3.Connection) -> None:
             "boundary_geom_cent",
             "effective_geom",
             "effective_area_hm2",
+            "effective_source",
         },
         "tract_phases": {"tract_phase_pk", "tract_pk", "phase_id"},
-        "tiffs": {"tiff_id", "phase_id", "tract_phase_pk", "center_geom", "tiff_type", "active_run_id"},
+        "tiffs": {"tiff_id", "phase_id", "tract_phase_pk", "center_geom", "footprint_area_hm2", "area_hm2", "tiff_type", "active_run_id"},
         "runs": {"run_id", "tract_phase_pk", "task_type"},
         "tree_observations": {"observation_id", "run_id", "tract_phase_pk"},
         "review_sessions": {"session_id", "phase_id", "tiff_id", "revision", "draft_path"},

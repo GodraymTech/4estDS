@@ -300,9 +300,9 @@ def test_prepare_inference_image_routing():
             settings=settings,
             out_dir=tmp_path
         )
-        # 必须是 on_the_fly 且跳过了 cog 后缀转换，直接使用原图路径
+        # 必须是 on_the_fly 且自动转为严格 COG (tiled_cog.tif)
         assert res_tiled["mode"] == "on_the_fly"
-        assert Path(res_tiled["image_path"]).name == "tiled.tif"
+        assert Path(res_tiled["image_path"]).name == "tiled_cog.tif"
 
         # 3. 测试 Normal (Striped) TIFF：在动态模式下必须自动强制执行 convert_to_cog，随后由于转换成功变为了 Tiled/COG，自动路由至 on_the_fly
         normal_tiff = tmp_path / "normal.tif"

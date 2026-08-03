@@ -10,6 +10,7 @@ export interface Tract {
   tract_id: string;
   geo_area?: number;
   tract_area_hm2?: number | null;
+  tract_phase_area_hm2?: number | null;
   effective_area_hm2?: number | null;
   area_unit?: string;
   crs_epsg?: number;
@@ -222,7 +223,9 @@ export interface AssetRow {
   active_run_status?: JobState | null;
   status: string;
   geo_area?: number | null;
+  area_hm2?: number | null;
   tract_area_hm2?: number | null;
+  tract_phase_area_hm2?: number | null;
   effective_area_hm2?: number | null;
   area_unit?: string | null;
   observation_count: number;
@@ -389,6 +392,7 @@ export interface EffectiveAreaResponse {
   boundary_geometry: EffectiveAreaGeometry;
   geometry: EffectiveAreaGeometry;
   tract_area_hm2: number;
+  tract_phase_area_hm2?: number;
   effective_area_hm2: number;
   effective_ratio: number;
   updated_at: string;

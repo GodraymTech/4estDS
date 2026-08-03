@@ -54,7 +54,7 @@ def test_promote_switches_active_run_without_tree_join_table(tmp_path):
     conn.execute(
         "INSERT INTO tiffs "
         "(tiff_id, phase_id, tract_phase_pk, file_name, path_versions, footprint_geom, "
-        "geo_area, area_unit, created_at, updated_at) "
+        "footprint_area_hm2, area_hm2, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, '{}', ?, ?, ?, ?, ?)",
         (
             "tif01",
@@ -62,8 +62,8 @@ def test_promote_switches_active_run_without_tree_join_table(tmp_path):
             tract_phase_pk,
             "Q12.tif",
             "POLYGON ((110 20, 111 20, 111 21, 110 21, 110 20))",
-            10000.0,
-            "m2",
+            1.0,
+            1.0,
             "2026-07-01T00:00:00",
             "2026-07-01T00:00:00",
         ),

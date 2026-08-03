@@ -6,7 +6,7 @@ export function LedgerPage() {
   return (
     <PageContainer
       title="监管台账"
-      subtitle="面向政府监管的可追溯台账: 面积现状与变化、修复成效、合规证据链。"
+      subtitle="生态资产的结构化清单：覆盖影像类型、飞行时相、有效面积与检测统计。"
     >
       <LedgerTable />
     </PageContainer>

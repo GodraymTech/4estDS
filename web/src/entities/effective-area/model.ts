@@ -21,10 +21,19 @@ export function formatHm2(value: number | null | undefined): string {
 }
 
 export function formatAreaLedgerValue(
-  tractAreaHm2: number | null | undefined,
+  nativeAreaHm2: number | null | undefined,
   effectiveAreaHm2: number | null | undefined,
 ): string {
-  return `${formatHm2(tractAreaHm2)}（${formatHm2(effectiveAreaHm2)}）`;
+  const nativeStr = formatHm2(nativeAreaHm2);
+  const effectiveStr = formatHm2(effectiveAreaHm2);
+  if (
+    typeof nativeAreaHm2 === "number" &&
+    typeof effectiveAreaHm2 === "number" &&
+    (nativeStr === effectiveStr || Math.abs(nativeAreaHm2 - effectiveAreaHm2) < 0.05)
+  ) {
+    return `${nativeStr}（—）`;
+  }
+  return `${nativeStr}（${effectiveStr}）`;
 }
 
 export function geometryVertexCount(geometry: EffectiveAreaGeometry | null | undefined): number {
@@ -56,7 +65,7 @@ export function buildInvalidAreaMask(
         ...polygon.slice(1),
         ...effectivePolygons
           .map((candidate) => candidate[0])
-          .filter((ring) => ring[0] && pointInRing(ring[0], polygon[0])),
+          .filter(Boolean),
       ],
     },
   }));
@@ -91,17 +100,4 @@ function openRingLength(ring: EffectiveAreaRing): number {
   const first = ring[0];
   const last = ring[ring.length - 1];
   return first[0] === last[0] && first[1] === last[1] ? ring.length - 1 : ring.length;
-}
-
-function pointInRing(point: number[], ring: EffectiveAreaRing): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
-    const [xi, yi] = ring[i];
-    const [xj, yj] = ring[j];
-    if ((yi > point[1]) !== (yj > point[1])
-      && point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
 }

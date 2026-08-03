@@ -21,7 +21,7 @@ def review_db(tmp_path: Path) -> tuple[str, Path]:
     conn = sqlite3.connect(tmp_path / "review.db")
     now = "2026-07-18T00:00:00+00:00"
     conn.execute(
-        "INSERT INTO tracts (tract_pk, region_id, tract_id, boundary_geom, effective_area_hm2, boundary_source, coverage_status, created_at, updated_at) "
+        "INSERT INTO tracts (tract_pk, region_id, tract_id, boundary_geom, effective_area_hm2, effective_source, coverage_status, created_at, updated_at) "
         "VALUES ('tract-1','region','Q01','POLYGON((0 0,1 0,1 1,0 1,0 0))',123,'manual','full',?,?)",
         (now, now),
     )

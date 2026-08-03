@@ -59,5 +59,5 @@ export const env = {
       [117.35, 25.55],
     ],
   ),
-  maxZoom: parseNumber(import.meta.env.VITE_MAX_ZOOM as string | undefined, 24),
+  maxZoom: parseNumber(import.meta.env.VITE_MAX_ZOOM as string | undefined, 25),
 } as const;

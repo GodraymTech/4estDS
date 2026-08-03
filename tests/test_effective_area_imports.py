@@ -27,7 +27,7 @@ def import_service(tmp_path: Path) -> EffectiveAreaService:
     conn = sqlite3.connect(db_file)
     conn.execute(
         "INSERT INTO tracts "
-        "(tract_pk, region_id, tract_id, boundary_geom, boundary_source, coverage_status, created_at, updated_at) "
+        "(tract_pk, region_id, tract_id, boundary_geom, effective_source, coverage_status, created_at, updated_at) "
         "VALUES (?, '440000', 'Q13', ?, 'manual', 'full', '2026-07-18', '2026-07-18')",
         (TRACT_PK, BOUNDARY.wkt),
     )
