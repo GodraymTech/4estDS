@@ -87,6 +87,11 @@ def test_effective_area_to_multi_attempt_review_publish_http(
     _attach_tiff(url, drafts.parent / "http-review.tif")
 
     with _serve(url, runtime) as base:
+        status, hz_root = _request(base, "GET", "/healthz")
+        assert status == 200 and hz_root.get("status") == "ok"
+        status, hz_v1 = _request(base, "GET", "/api/v1/healthz")
+        assert status == 200 and hz_v1.get("status") == "ok"
+
         status, capabilities = _request(base, "GET", "/api/v1/reviews/capabilities")
         assert status == 200, capabilities
         assert capabilities["defaults"]["scope"] == "viewport"
@@ -112,7 +117,7 @@ def test_effective_area_to_multi_attempt_review_publish_http(
             base,
             "POST",
             "/api/v1/reviews",
-            {"phase_id": PHASE, "tiff_id": TIFF, "mode": "based_on_active"},
+            {"phase_id": PHASE, "tiff_id": TIFF, "mode": "inherit"},
         )
         assert status == 200
         session_id = created["session_id"]

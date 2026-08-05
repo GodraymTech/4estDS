@@ -61,3 +61,64 @@ export const env = {
   ),
   maxZoom: parseNumber(import.meta.env.VITE_MAX_ZOOM as string | undefined, 25),
 } as const;
+
+const STORAGE_ENDPOINT_KEY = "FORESTDS_ENDPOINT_URL";
+const STORAGE_OFFLINE_KEY = "FORESTDS_OFFLINE_MODE";
+
+export const DEFAULT_LOCAL_ENDPOINT = "http://localhost:8000";
+
+export function getStoredEndpoint(): string {
+  try {
+    return localStorage.getItem(STORAGE_ENDPOINT_KEY)?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setStoredEndpoint(url: string | null): void {
+  try {
+    if (!url || !url.trim()) {
+      localStorage.removeItem(STORAGE_ENDPOINT_KEY);
+    } else {
+      localStorage.setItem(STORAGE_ENDPOINT_KEY, url.trim());
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getOfflineMode(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_OFFLINE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function setOfflineMode(offline: boolean): void {
+  try {
+    localStorage.setItem(STORAGE_OFFLINE_KEY, String(offline));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function resolveApiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  const custom = getStoredEndpoint();
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (custom) {
+    const baseUrl = custom.replace(/\/+$/, "");
+    if (normalizedPath.startsWith("/api/v1") || normalizedPath === "/healthz" || normalizedPath === "/health") {
+      return `${baseUrl}${normalizedPath}`;
+    }
+    return `${baseUrl}/api/v1${normalizedPath}`;
+  }
+
+  const defaultBase = env.apiBase.replace(/\/+$/, "");
+  if (normalizedPath.startsWith("/api/v1")) {
+    return normalizedPath;
+  }
+  return `${defaultBase}${normalizedPath}`;
+}

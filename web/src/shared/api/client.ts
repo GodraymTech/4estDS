@@ -1,4 +1,4 @@
-import { env } from "../config/env";
+import { resolveApiUrl } from "../config/env";
 import { authHeaders } from "../auth/session";
 
 /**
@@ -43,19 +43,19 @@ async function parse<T>(res: Response): Promise<T> {
 
 export async function apiGet<T>(path: string): Promise<T> {
   return parse<T>(
-    await fetch(`${env.apiBase}${path}`, { headers: authHeaders() }),
+    await fetch(resolveApiUrl(path), { headers: authHeaders() }),
   );
 }
 
 export async function apiGetText(path: string): Promise<string> {
-  const res = await fetch(`${env.apiBase}${path}`, { headers: authHeaders() });
+  const res = await fetch(resolveApiUrl(path), { headers: authHeaders() });
   if (!res.ok) throw new ApiError(res.status, `请求失败 (${res.status}): ${res.statusText}`);
   return res.text();
 }
 
 export async function apiPostJson<T>(path: string, body: unknown): Promise<T> {
   return parse<T>(
-    await fetch(`${env.apiBase}${path}`, {
+    await fetch(resolveApiUrl(path), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
@@ -65,7 +65,7 @@ export async function apiPostJson<T>(path: string, body: unknown): Promise<T> {
 
 export async function apiPatchJson<T>(path: string, body: unknown): Promise<T> {
   return parse<T>(
-    await fetch(`${env.apiBase}${path}`, {
+    await fetch(resolveApiUrl(path), {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
@@ -75,7 +75,7 @@ export async function apiPatchJson<T>(path: string, body: unknown): Promise<T> {
 
 export async function apiPutJson<T>(path: string, body: unknown): Promise<T> {
   return parse<T>(
-    await fetch(`${env.apiBase}${path}`, {
+    await fetch(resolveApiUrl(path), {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
@@ -85,7 +85,7 @@ export async function apiPutJson<T>(path: string, body: unknown): Promise<T> {
 
 export async function apiPostForm<T>(path: string, body: FormData): Promise<T> {
   return parse<T>(
-    await fetch(`${env.apiBase}${path}`, {
+    await fetch(resolveApiUrl(path), {
       method: "POST",
       headers: authHeaders(),
       body,
@@ -95,7 +95,7 @@ export async function apiPostForm<T>(path: string, body: FormData): Promise<T> {
 
 export async function apiDelete<T>(path: string): Promise<T> {
   return parse<T>(
-    await fetch(`${env.apiBase}${path}`, {
+    await fetch(resolveApiUrl(path), {
       method: "DELETE",
       headers: authHeaders(),
     }),
@@ -113,7 +113,7 @@ export function apiUpload<T>(
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${env.apiBase}${path}`);
+    xhr.open("POST", resolveApiUrl(path));
     for (const [k, v] of Object.entries(authHeaders())) {
       xhr.setRequestHeader(k, v);
     }
@@ -149,5 +149,5 @@ export function apiUpload<T>(
 
 /** 拼接绝对 API URL(用于报告/导出等直接下载链接)。 */
 export function apiUrl(path: string): string {
-  return `${env.apiBase}${path}`;
+  return resolveApiUrl(path);
 }

@@ -42,3 +42,12 @@ class DraftStore:
             return ReviewWorkspace.from_dict(value)
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
             raise ReviewNotFound("复核草稿损坏，无法恢复。", code="draft_corrupt", details={"session_id": session_id}) from exc
+
+    def delete(self, session_id: str) -> None:
+        target = self.path_for(session_id)
+        if target.exists():
+            try:
+                target.unlink()
+            except OSError:
+                pass
+

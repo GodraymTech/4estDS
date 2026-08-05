@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
-ReviewMode = Literal["based_on_active", "from_scratch"]
+ReviewMode = Literal["inherit", "fresh"]
 
 
 class ReviewError(RuntimeError):

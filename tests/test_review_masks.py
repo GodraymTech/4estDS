@@ -62,7 +62,7 @@ def test_mask_edit_updates_geometry_and_participates_in_undo(
 ) -> None:
     url, drafts = review_db
     service = ReviewSessionService(url, draft_root=drafts)
-    session = service.create(PHASE, TIFF, "from_scratch")
+    session = service.create(PHASE, TIFF, "fresh")
     item_id, revision = _add_mask_item(service, session.session_id)
 
     edited = service.apply_mask_operation(
@@ -88,7 +88,7 @@ def test_publish_persists_edited_mask_crown_geometry(
 ) -> None:
     url, drafts = review_db
     service = ReviewSessionService(url, draft_root=drafts)
-    session = service.create(PHASE, TIFF, "from_scratch")
+    session = service.create(PHASE, TIFF, "fresh")
     item_id, revision = _add_mask_item(service, session.session_id)
     edited = service.apply_mask_operation(
         session.session_id,

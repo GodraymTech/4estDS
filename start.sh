@@ -120,7 +120,7 @@ start_backend() {
   fi
 
   echo "正在启动后端 API 服务..."
-  uv --cache-dir "$UV_CACHE_DIR" run --frozen uvicorn forestds.api.main:app --reload --host 127.0.0.1 --port 8000 >"$LOG_DIR/backend.log" 2>&1 &
+  uv --cache-dir "$UV_CACHE_DIR" run --frozen uvicorn forestds.api.main:app --reload --host 0.0.0.0 --port 8000 >"$LOG_DIR/backend.log" 2>&1 &
   echo $! >"$BACKEND_PID_FILE"
   echo "后端 API 服务已启动，PID: $(cat "$BACKEND_PID_FILE") (日志输出到 $LOG_DIR/backend.log)"
 }

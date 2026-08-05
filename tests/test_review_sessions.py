@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from forestds.db.schema import init_db
-from forestds.review import ReviewConflict, ReviewSessionService
+from forestds.review import ReviewConflict, ReviewNotFound, ReviewSessionService
 
 PHASE = "20260705"
 TIFF = "Q0001"
@@ -57,7 +57,7 @@ def review_db(tmp_path: Path) -> tuple[str, Path]:
 def test_based_on_active_loads_parent_without_visual_prompts(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     service = ReviewSessionService(url, draft_root=drafts)
-    session = service.create(PHASE, TIFF, "based_on_active")
+    session = service.create(PHASE, TIFF, "inherit")
 
     workspace = service.workspace(session.session_id)
     assert session.base_run_id == BASE_RUN
@@ -69,7 +69,7 @@ def test_based_on_active_loads_parent_without_visual_prompts(review_db: tuple[st
 def test_from_scratch_and_duplicate_operation_are_recoverable(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     service = ReviewSessionService(url, draft_root=drafts)
-    session = service.create(PHASE, TIFF, "from_scratch")
+    session = service.create(PHASE, TIFF, "fresh")
     add = {"type": "add", "item": {"box_px": [1, 2, 8, 9], "species": "秋茄"}}
     first = service.apply_operations(session.session_id, 0, "op-1", [add])
     duplicate = service.apply_operations(session.session_id, 0, "op-1", [add])
@@ -83,7 +83,7 @@ def test_from_scratch_and_duplicate_operation_are_recoverable(review_db: tuple[s
 def test_revision_conflict_and_undo_redo(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     service = ReviewSessionService(url, draft_root=drafts)
-    session = service.create(PHASE, TIFF, "based_on_active")
+    session = service.create(PHASE, TIFF, "inherit")
     item_id = service.workspace(session.session_id).items[0]["id"]
     changed = service.apply_operations(
         session.session_id,
@@ -104,7 +104,7 @@ def test_revision_conflict_and_undo_redo(review_db: tuple[str, Path]) -> None:
 def test_delta_history_restores_added_and_deleted_items(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     service = ReviewSessionService(url, draft_root=drafts)
-    session = service.create(PHASE, TIFF, "from_scratch")
+    session = service.create(PHASE, TIFF, "fresh")
     added = service.apply_operations(
         session.session_id,
         0,
@@ -129,8 +129,20 @@ def test_delta_history_restores_added_and_deleted_items(review_db: tuple[str, Pa
 def test_cancel_prevents_further_writes(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     service = ReviewSessionService(url, draft_root=drafts)
-    session = service.create(PHASE, TIFF, "from_scratch")
+    session = service.create(PHASE, TIFF, "fresh")
     canceled = service.cancel(session.session_id, 0)
     assert canceled.status == "canceled"
     with pytest.raises(ReviewConflict):
         service.apply_operations(session.session_id, 0, "late", [{"type": "add", "item": {"box_px": [0, 0, 1, 1]}}])
+
+
+def test_delete_review_session(review_db: tuple[str, Path]) -> None:
+    url, drafts = review_db
+    service = ReviewSessionService(url, draft_root=drafts)
+    session = service.create(PHASE, TIFF, "fresh")
+    assert service.drafts.path_for(session.session_id).exists()
+    service.delete(session.session_id)
+    with pytest.raises(ReviewNotFound):
+        service.get(session.session_id)
+    assert not service.drafts.path_for(session.session_id).exists()
+

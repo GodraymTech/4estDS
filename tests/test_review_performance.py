@@ -63,7 +63,7 @@ def test_spatial_index_keeps_oversized_box_merge_semantics() -> None:
 def test_single_edit_uses_delta_history_in_10k_workspace(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     service = ReviewSessionService(url, draft_root=drafts)
-    session = service.create(PHASE, TIFF, "from_scratch")
+    session = service.create(PHASE, TIFF, "fresh")
     workspace = service.workspace(session.session_id)
     workspace.items = [
         {

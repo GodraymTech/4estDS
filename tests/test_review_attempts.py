@@ -71,7 +71,7 @@ def test_attempt_stays_out_of_runs_and_applies_candidates(review_db: tuple[str, 
     image = drafts.parent / "attempt.tif"
     _attach_tiff(url, image)
     sessions = ReviewSessionService(url, draft_root=drafts)
-    session = sessions.create(PHASE, TIFF, "from_scratch")
+    session = sessions.create(PHASE, TIFF, "fresh")
     service = ReviewInferenceService(url, session_service=sessions, tile_size=64, batch_size=2)
     attempt = service.create_attempt(
         session.session_id,
@@ -99,7 +99,7 @@ def test_attempt_stays_out_of_runs_and_applies_candidates(review_db: tuple[str, 
 def test_cancel_and_expand_reuse_attempt_configuration(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     sessions = ReviewSessionService(url, draft_root=drafts)
-    session = sessions.create(PHASE, TIFF, "from_scratch")
+    session = sessions.create(PHASE, TIFF, "fresh")
     service = ReviewInferenceService(url, session_service=sessions)
     attempt = service.create_attempt(
         session.session_id,
@@ -128,7 +128,7 @@ def test_oom_reduces_batch_once_and_keeps_completed_result(review_db: tuple[str,
     image = drafts.parent / "oom.tif"
     _attach_tiff(url, image)
     sessions = ReviewSessionService(url, draft_root=drafts)
-    session = sessions.create(PHASE, TIFF, "from_scratch")
+    session = sessions.create(PHASE, TIFF, "fresh")
     service = ReviewInferenceService(url, session_service=sessions, batch_size=4)
     attempt = service.create_attempt(
         session.session_id,

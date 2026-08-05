@@ -26,6 +26,14 @@ export function useCreateReview() {
   });
 }
 
+export function useDeleteReview() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => endpoints.deleteReview(sessionId),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.reviews }),
+  });
+}
+
 export function useReviewCommand(sessionId: string) {
   const client = useQueryClient();
   const sync = (patch: ReviewPatch) => {

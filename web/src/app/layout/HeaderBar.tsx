@@ -5,6 +5,7 @@ import { BulbOutlined, MoonOutlined, QuestionCircleOutlined, UserOutlined } from
 import type { MenuProps } from "antd";
 import { AboutModal } from "./AboutModal";
 import { useAppTheme } from "../providers";
+import { ConnectionStatus } from "../../shared/ui/ConnectionStatus";
 
 const { Text } = Typography;
 
@@ -47,6 +48,7 @@ export function HeaderBar() {
             aria-label="帮助"
           />
         </Dropdown>
+        <ConnectionStatus />
         <Button
           type="text"
           style={ACTION}

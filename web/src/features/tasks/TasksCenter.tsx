@@ -6,7 +6,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { endpoints, queryKeys, type JobHistoryItem, type JobState, type JobStatus } from "../../shared/api";
 import { useJob } from "../../entities/run";
-import { formatHm2 } from "../../entities/effective-area";
 import { UploadForm } from "./UploadForm";
 import { JobStatusCell } from "./JobStatusCell";
 import { useJobsStore, type SubmittedJob } from "./jobsStore";
@@ -149,7 +148,6 @@ export function TasksCenter() {
 
 function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
   const phaseId = searchParams.get("phase_id")?.trim() || undefined;
   const tiffId = searchParams.get("tiff_id")?.trim() || undefined;
   const hasAssetFilter = Boolean(phaseId || tiffId);
@@ -158,10 +156,6 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
     queryKey: queryKeys.jobs(taskType, phaseId, tiffId),
     queryFn: () => endpoints.listJobs({ taskType, phaseId, tiffId, limit: 80 }),
     refetchInterval: 5000,
-  });
-  const { data: assets = [] } = useQuery({
-    queryKey: queryKeys.assets,
-    queryFn: endpoints.listAssets,
   });
 
   const columns: TableProps<JobHistoryItem>["columns"] = [

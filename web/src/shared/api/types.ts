@@ -427,7 +427,7 @@ export interface EffectiveAreaImportResponse {
   warnings: string[];
 }
 
-export type ReviewMode = "based_on_active" | "from_scratch";
+export type ReviewMode = "inherit" | "fresh";
 export type ReviewItemStatus = "accepted" | "rejected" | "pending";
 
 export interface ReviewMaskRle {
@@ -489,6 +489,9 @@ export interface ReviewSession {
   published_run_id?: string | null;
   created_at: string;
   updated_at: string;
+  image_name?: string | null;
+  city?: string | null;
+  tract_id?: string | null;
 }
 
 export interface ReviewWorkspace {

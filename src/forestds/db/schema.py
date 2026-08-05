@@ -45,7 +45,7 @@ DDL: tuple[str, ...] = (
         phase_id            TEXT NOT NULL,
         tiff_id             TEXT NOT NULL,
         tract_phase_pk      TEXT NOT NULL REFERENCES tract_phases(tract_phase_pk) ON DELETE CASCADE,
-        mode                TEXT NOT NULL CHECK (mode IN ('based_on_active', 'from_scratch')),
+        mode                TEXT NOT NULL CHECK (mode IN ('inherit', 'fresh')),
         base_run_id         TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
         expected_active_run_id TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
         status              TEXT NOT NULL DEFAULT 'active'
@@ -239,13 +239,24 @@ def resolve_db_path(url: str | None = None) -> Path:
     return paths.default_db_path()
 
 
+def _fix_review_sessions_schema(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "review_sessions"):
+        return
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='review_sessions'"
+    ).fetchone()
+    if row and row[0] and ("based_on_active" in row[0] or "from_scratch" in row[0]):
+        conn.execute("DROP TABLE review_sessions")
+
+
 def init_db(url: str | None = None) -> Path:
-    """创建新数据库表；不迁移、不归档旧 schema。"""
+    """创建新数据库表；自动升级旧 schema。"""
     db_path = resolve_db_path(url)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
+        _fix_review_sessions_schema(conn)
         _assert_new_schema(conn)
         for stmt in DDL:
             conn.execute(stmt)

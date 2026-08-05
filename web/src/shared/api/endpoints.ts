@@ -144,6 +144,14 @@ export const endpoints = {
   cancelReview: (sessionId: string, revision: number): Promise<ReviewSession> =>
     apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/cancel`, { revision }),
 
+  deleteReview: (sessionId: string): Promise<{ session_id: string; status: string }> =>
+    apiDelete(`/reviews/${encodeURIComponent(sessionId)}`),
+
+  checkHealth: (): Promise<{ status: string }> => apiGet("/healthz"),
+
+  checkReadiness: (): Promise<{ status: string; checks?: { storage?: string; database?: string } }> =>
+    apiGet("/health"),
+
   listAssets: (): Promise<AssetRow[]> => apiGet("/assets"),
 
   browseServerFiles: (path?: string): Promise<ServerFileBrowseOut> =>

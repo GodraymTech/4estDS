@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __codename__, __version__
+from ..db.schema import init_db
 from ..env import load_local_env
 from .routers import assets, geo, health, jobs, reviews, tiles, tracts, uploads
 
@@ -18,6 +19,7 @@ API_PREFIX = "/api/v1"
 
 def create_app() -> FastAPI:
     load_local_env()
+    init_db()
     app = FastAPI(
         title=f"{__codename__} API",
         version=__version__,
@@ -36,8 +38,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # 健康探针不加版本前缀(供编排/网关直接探测)；业务路由统一 /api/v1。
+    # 健康探针既支持根路径直测(/healthz)，也支持挂在 /api/v1 下供代理转发。
     app.include_router(health.router)
+    app.include_router(health.router, prefix=API_PREFIX)
     app.include_router(uploads.router, prefix=API_PREFIX)
     app.include_router(jobs.router, prefix=API_PREFIX)
     app.include_router(tracts.router, prefix=API_PREFIX)

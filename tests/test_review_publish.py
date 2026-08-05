@@ -18,7 +18,7 @@ def _connection(url: str) -> sqlite3.Connection:
 def test_publish_creates_review_run_and_switches_only_target_tiff(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     sessions = ReviewSessionService(url, draft_root=drafts)
-    session = sessions.create(PHASE, TIFF, "based_on_active")
+    session = sessions.create(PHASE, TIFF, "inherit")
     result = ReviewPublishService(url, session_service=sessions).publish(session.session_id)
 
     conn = _connection(url)
@@ -39,7 +39,7 @@ def test_publish_creates_review_run_and_switches_only_target_tiff(review_db: tup
 def test_publish_failure_rolls_back_run_observations_active_and_session(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     sessions = ReviewSessionService(url, draft_root=drafts)
-    session = sessions.create(PHASE, TIFF, "based_on_active")
+    session = sessions.create(PHASE, TIFF, "inherit")
 
     def fail(_conn, _run_id):
         raise RuntimeError("injected")
@@ -60,7 +60,7 @@ def test_publish_failure_rolls_back_run_observations_active_and_session(review_d
 def test_publish_rejects_missing_category_and_outside_effective_area(review_db: tuple[str, Path]) -> None:
     url, drafts = review_db
     sessions = ReviewSessionService(url, draft_root=drafts)
-    empty = sessions.create(PHASE, TIFF, "from_scratch")
+    empty = sessions.create(PHASE, TIFF, "fresh")
     patch = sessions.apply_operations(
         empty.session_id,
         0,
@@ -71,7 +71,7 @@ def test_publish_rejects_missing_category_and_outside_effective_area(review_db: 
         ReviewPublishService(url, session_service=sessions).publish(empty.session_id)
     assert missing.value.code == "category_required"
 
-    based = sessions.create(PHASE, TIFF, "based_on_active")
+    based = sessions.create(PHASE, TIFF, "inherit")
     item_id = sessions.workspace(based.session_id).items[0]["id"]
     sessions.apply_operations(
         based.session_id,

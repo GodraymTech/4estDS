@@ -43,9 +43,27 @@ def _http_error(exc: ReviewError) -> HTTPException:
     return HTTPException(status_code=status, detail=exc.as_detail())
 
 
-def _session_out(value) -> ReviewSessionOut:
+def _session_out(value, db_url: str | None = None) -> ReviewSessionOut:
     data = asdict(value)
     data.pop("draft_path", None)
+    try:
+        from ...review.session_service import _connect
+        conn = _connect(db_url)
+        try:
+            row = conn.execute(
+                "SELECT t.file_name as image_name, tp.city, tp.tract_id "
+                "FROM tiffs t LEFT JOIN tract_phases tp ON t.tract_phase_pk = tp.tract_phase_pk "
+                "WHERE t.phase_id=? AND t.tiff_id=?",
+                (value.phase_id, value.tiff_id),
+            ).fetchone()
+            if row:
+                data["image_name"] = row["image_name"]
+                data["city"] = row["city"]
+                data["tract_id"] = row["tract_id"]
+        finally:
+            conn.close()
+    except Exception:
+        pass
     return ReviewSessionOut(**data)
 
 
@@ -54,14 +72,14 @@ def list_reviews(
     status: str | None = Query(None),
     db_url: str | None = Depends(get_db_url),
 ) -> list[ReviewSessionOut]:
-    return [_session_out(item) for item in ReviewSessionService(db_url).list(status=status)]
+    return [_session_out(item, db_url) for item in ReviewSessionService(db_url).list(status=status)]
 
 
 @router.post("", response_model=ReviewSessionOut, summary="创建单 TIFF 复核会话")
 def create_review(body: ReviewCreate, db_url: str | None = Depends(get_db_url)) -> ReviewSessionOut:
     try:
         value = ReviewSessionService(db_url).create(body.phase_id, body.tiff_id, body.mode, body.base_run_id)
-        return _session_out(value)
+        return _session_out(value, db_url)
     except ReviewError as exc:
         raise _http_error(exc) from exc
 
@@ -91,7 +109,16 @@ def review_capabilities() -> dict:
 @router.get("/{session_id}", response_model=ReviewSessionOut, summary="复核会话详情")
 def get_review(session_id: str, db_url: str | None = Depends(get_db_url)) -> ReviewSessionOut:
     try:
-        return _session_out(ReviewSessionService(db_url).get(session_id))
+        return _session_out(ReviewSessionService(db_url).get(session_id), db_url)
+    except ReviewError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.delete("/{session_id}", summary="真删除复核会话")
+def delete_review(session_id: str, db_url: str | None = Depends(get_db_url)) -> dict[str, str]:
+    try:
+        ReviewSessionService(db_url).delete(session_id)
+        return {"session_id": session_id, "status": "deleted"}
     except ReviewError as exc:
         raise _http_error(exc) from exc
 

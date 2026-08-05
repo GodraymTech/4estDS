@@ -177,7 +177,7 @@ class ReviewSessionService:
         mode: ReviewMode,
         base_run_id: str | None = None,
     ) -> ReviewSession:
-        if mode not in {"based_on_active", "from_scratch"}:
+        if mode not in {"inherit", "fresh"}:
             raise ReviewValidationError("不支持的复核初始化模式。", code="invalid_review_mode")
         conn = _connect(self.db_url)
         path: Path | None = None
@@ -190,7 +190,7 @@ class ReviewSessionService:
                 raise ReviewNotFound("TIFF 不存在。", code="tiff_not_found", details={"phase_id": phase_id, "tiff_id": tiff_id})
             expected_active = tiff["active_run_id"]
             resolved_base = base_run_id
-            if mode == "based_on_active":
+            if mode == "inherit":
                 resolved_base = base_run_id or expected_active
                 if not resolved_base:
                     raise ReviewValidationError("当前 TIFF 尚无已发布结果，请选择从 0 开始。", code="active_run_required")
@@ -425,6 +425,18 @@ class ReviewSessionService:
         finally:
             conn.close()
         return self.get(session_id)
+
+    def delete(self, session_id: str) -> None:
+        session = self.get(session_id)
+        if session.status == "published":
+            raise ReviewConflict("已发布的复核会话无法删除。", code="cannot_delete_published_session")
+        conn = _connect(self.db_url)
+        try:
+            conn.execute("DELETE FROM review_sessions WHERE session_id=?", (session_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        self.drafts.delete(session_id)
 
     def apply_mask_operation(
         self,

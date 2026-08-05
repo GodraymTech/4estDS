@@ -202,7 +202,7 @@ class EffectiveAreaImportOut(BaseModel):
 class ReviewCreate(BaseModel):
     phase_id: str = Field(..., pattern=r"^\d{8}$")
     tiff_id: str = Field(..., min_length=1)
-    mode: Literal["based_on_active", "from_scratch"] = "based_on_active"
+    mode: Literal["inherit", "fresh"] = "inherit"
     base_run_id: Optional[str] = None
 
 
@@ -240,7 +240,7 @@ class ReviewSessionOut(BaseModel):
     phase_id: str
     tiff_id: str
     tract_phase_pk: str
-    mode: Literal["based_on_active", "from_scratch"]
+    mode: Literal["inherit", "fresh"]
     base_run_id: Optional[str] = None
     expected_active_run_id: Optional[str] = None
     status: str
@@ -248,6 +248,9 @@ class ReviewSessionOut(BaseModel):
     published_run_id: Optional[str] = None
     created_at: str
     updated_at: str
+    image_name: Optional[str] = None
+    city: Optional[str] = None
+    tract_id: Optional[str] = None
 
 
 class ReviewWorkspaceOut(BaseModel):
