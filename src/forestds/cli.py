@@ -491,7 +491,7 @@ def cmd_track(
         obs = reader.fetch_observations(tract_id=tid, run_id=run_for, url=db_url)
         recs = []
         for o in obs:
-            pt = writer.parse_point(o.get("geom_point"))
+            pt = writer.parse_point(o.get("center_geom"))
             if pt is None:
                 continue
             recs.append(TreeRecord(

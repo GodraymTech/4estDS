@@ -179,8 +179,6 @@ class TreeObservation(Base):
     crown_volume_geo_real: Mapped[float | None] = mapped_column(Float)                                                  # 树冠真实/精确体积 (m³)
     source_subimage_path: Mapped[str | None] = mapped_column(Text)                                                      # 来源单木切片小图相对/绝对路径
     slice_size: Mapped[int | None] = mapped_column(Integer)                                                             # 检测该单木时的图像切割尺寸 (PX)
-    geom_point: Mapped[str | None] = mapped_column(Text)                                                                # 点渲染几何 (GeoJSON/WKT，优先与 center_geom 保持一致)
-    geom_crown: Mapped[str | None] = mapped_column(Text)                                                                # 轮廓渲染几何 (GeoJSON/WKT，优先与 crown_geom 保持一致)
     created_at: Mapped[str] = mapped_column(String, nullable=False)                                                    # 创建时间 (ISO 8601)
 
     individual: Mapped[TreeIndividual | None] = relationship(back_populates="observations")

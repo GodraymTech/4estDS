@@ -456,9 +456,10 @@ export interface ReviewItem {
   confidence?: number | null;
   box_px: number[];
   box_geo?: number[] | null;
+  /** 地图渲染专用 EPSG:4326 外接框，由后端从 box_px 精确派生。 */
+  box_wgs84?: number[] | null;
   center_geom?: string | null;
   crown_geom?: string | null;
-  geom_crown?: string | null;
   mask_rle?: ReviewMaskRle;
   source_window?: number[];
   mask_geometry_px?: ReviewMaskGeometry;
@@ -467,6 +468,8 @@ export interface ReviewItem {
   status: ReviewItemStatus;
   note?: string;
   conflict?: boolean;
+  /** 冻结框: 上一轮已并入工作集的存量框。不可删除, 几何与树种锁定, 仅可改判定与备注。 */
+  frozen?: boolean;
 }
 
 export interface ReviewCategory {
@@ -525,14 +528,21 @@ export interface ReviewPublishResult {
   status: string;
 }
 
+/** AI 识别范围: 以地图中心为基准的正方形像素区域, 或整图。 */
+export type ReviewScope =
+  | { type: "region"; center_px: [number, number]; side_px: number }
+  | { type: "full" };
+
+export type ReviewMergeMode = "append" | "replace_all";
+
 export interface ReviewAttempt {
   attempt_id: string;
   status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "applied";
   prompt_type: "text" | "visual";
   prompts?: Array<Record<string, unknown>>;
   visual_exemplars?: Array<Record<string, unknown>>;
-  scope: { type: "viewport" | "full"; bounds?: number[] };
-  merge_mode: "append" | "replace_ai_in_scope";
+  scope: ReviewScope;
+  merge_mode: ReviewMergeMode;
   threshold: number;
   progress: number;
   completed_windows: number;
@@ -541,6 +551,12 @@ export interface ReviewAttempt {
   candidates: ReviewItem[];
   parent_attempt_id?: string | null;
   error?: string | null;
+  /** 落在有效区域外被跳过的切片数。 */
+  skipped_windows?: number;
+  /** 中心点落在有效区域外被丢弃的检测框数。 */
+  dropped_outside?: number;
+  /** 推理耗时(秒)。 */
+  elapsed_seconds?: number;
 }
 
 export interface ReviewCapabilities {
@@ -548,8 +564,8 @@ export interface ReviewCapabilities {
   available?: boolean;
   segmentation?: boolean;
   defaults: {
-    scope: "viewport" | "full";
-    merge_mode: "append" | "replace_ai_in_scope";
+    scope: ReviewScope["type"];
+    merge_mode: ReviewMergeMode;
     threshold: number;
   };
   limits: {
@@ -558,6 +574,19 @@ export interface ReviewCapabilities {
     bbox_page_size: number;
   };
   [key: string]: unknown;
+}
+
+export interface ReviewMapContext {
+  phase_id: string;
+  tiff_id: string;
+  tract_pk?: string | null;
+  pixel_width: number;
+  pixel_height: number;
+  gsd: number;
+  bounds_wgs84: [number, number, number, number];
+  /** 左上、右上、右下、左下；用于局部双线性像素/经纬度换算。 */
+  corner_wgs84: [[number, number], [number, number], [number, number], [number, number]];
+  effective_geometry?: EffectiveAreaGeometry | null;
 }
 
 // 地块多时相真影像瓦片(对应 schemas.TractImageryOut)。

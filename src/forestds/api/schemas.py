@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -284,19 +284,39 @@ class ReviewPublishOut(BaseModel):
     status: str
 
 
+class ReviewRegionScope(BaseModel):
+    """以图像像素为准的正方形识别范围。"""
+
+    type: Literal["region"]
+    center_px: tuple[float, float]
+    side_px: float = Field(..., gt=0)
+
+
+class ReviewFullScope(BaseModel):
+    """全图识别范围。"""
+
+    type: Literal["full"]
+
+
+ReviewAttemptScope = Annotated[
+    Union[ReviewRegionScope, ReviewFullScope],
+    Field(discriminator="type"),
+]
+
+
 class ReviewAttemptCreate(BaseModel):
     revision: int = Field(..., ge=0)
     prompt_type: Literal["text", "visual"]
     prompts: list[dict[str, Any]] = Field(default_factory=list)
     visual_exemplars: list[dict[str, Any]] = Field(default_factory=list)
-    scope: dict[str, Any]
-    merge_mode: Literal["append", "replace_ai_in_scope"] = "append"
+    scope: ReviewAttemptScope
+    merge_mode: Literal["append", "replace_all"] = "append"
     threshold: float = Field(0.25, ge=0, le=1)
 
 
 class ReviewAttemptApply(BaseModel):
     revision: int = Field(..., ge=0)
-    merge_mode: Optional[Literal["append", "replace_ai_in_scope"]] = None
+    merge_mode: Optional[Literal["append", "replace_all"]] = None
 
 
 class ReviewAttemptExpand(BaseModel):

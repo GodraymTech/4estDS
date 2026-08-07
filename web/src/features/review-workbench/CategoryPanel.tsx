@@ -1,108 +1,84 @@
-import { useState, useMemo } from "react";
-import type { CSSProperties } from "react";
-import { Input, Tag, Space, Typography, Tooltip, ColorPicker } from "antd";
-import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { useMemo, useState } from "react";
+import { Alert, ColorPicker, Dropdown, Input, Tag, Tooltip, Typography } from "antd";
+import { EyeInvisibleOutlined, EyeOutlined, MoreOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import type { ReviewCategory, ReviewItem } from "../../entities/review";
 import { useReviewWorkbenchStore } from "./store";
 
 const { Text } = Typography;
 
-interface CategoryPanelProps {
+export function CategoryPanel({ categories, items, freshMode = false, onAddCategory, onChangeColor, onCategoryAction }: {
   categories: ReviewCategory[];
   items: ReviewItem[];
+  freshMode?: boolean;
   onAddCategory?: (name: string, color?: string) => void;
   onChangeColor?: (id: string, color: string) => void;
-}
-
-export function CategoryPanel({
-  categories,
-  items,
-  onAddCategory,
-  onChangeColor,
-}: CategoryPanelProps) {
+  onCategoryAction?: (id: string, action: "accept" | "reject" | "delete") => void;
+}) {
   const [query, setQuery] = useState("");
-  const activeCategory = useReviewWorkbenchStore((s) => s.activeCategory);
-  const setActiveCategory = useReviewWorkbenchStore((s) => s.setActiveCategory);
-
-  // 统计每个类别的数量
+  const activeCategory = useReviewWorkbenchStore((state) => state.activeCategory);
+  const setActiveCategory = useReviewWorkbenchStore((state) => state.setActiveCategory);
+  const hiddenCategories = useReviewWorkbenchStore((state) => state.hiddenCategories);
+  const toggleCategoryVisibility = useReviewWorkbenchStore((state) => state.toggleCategoryVisibility);
   const counts = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const item of items) {
-      if (item.species) {
-        map.set(item.species, (map.get(item.species) || 0) + 1);
-      }
-    }
-    return map;
+    const result = new Map<string, number>();
+    for (const item of items) result.set(item.species, (result.get(item.species) ?? 0) + 1);
+    return result;
   }, [items]);
-
   const filtered = useMemo(() => {
-    if (!query.trim()) return categories;
-    return categories.filter(
-      (c) =>
-        c.display_name.toLowerCase().includes(query.toLowerCase()) ||
-        c.id.toLowerCase().includes(query.toLowerCase())
-    );
+    const normalized = query.trim().toLowerCase();
+    return normalized ? categories.filter((category) => `${category.display_name} ${category.id}`.toLowerCase().includes(normalized)) : categories;
   }, [categories, query]);
-
-  const canCreate = query.trim().length > 0 && !categories.some((c) => c.display_name === query.trim());
-
-  const handleCreate = () => {
-    if (canCreate) {
-      onAddCategory?.(query.trim());
-      setQuery("");
-    }
+  const canCreate = Boolean(query.trim()) && !categories.some((category) => category.display_name === query.trim() || category.id === query.trim());
+  const create = () => {
+    if (!canCreate) return;
+    onAddCategory?.(query.trim());
+    setQuery("");
   };
 
   return (
-    <div style={CONTAINER}>
-      {/* 搜索与新增输入框 */}
-      <div style={{ padding: "8px 10px" }}>
+    <div className="review-category-panel">
+      {freshMode && categories.length === 0 ? <Alert type="info" showIcon message="请先创建至少一个树种类别，用于标注" /> : null}
+      <div className="review-category-panel__search">
         <Input
           size="small"
-          prefix={<SearchOutlined style={{ color: "#8c8c8c" }} />}
-          placeholder="搜索或输入创建新树种类别..."
+          prefix={<SearchOutlined />}
+          placeholder="搜索或输入新树种"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onPressEnter={handleCreate}
-          suffix={
-            canCreate ? (
-              <Tooltip title={`按 Enter 创建 "${query}"`}>
-                <Tag color="green" style={{ cursor: "pointer", margin: 0 }} onClick={handleCreate}>
-                  <PlusOutlined /> 创建
-                </Tag>
-              </Tooltip>
-            ) : null
-          }
+          onChange={(event) => setQuery(event.target.value)}
+          onPressEnter={create}
+          suffix={canCreate ? (
+            <Tooltip title={`创建“${query.trim()}”`}><Tag color="green" onClick={create} style={{ cursor: "pointer", margin: 0 }}><PlusOutlined /> 创建</Tag></Tooltip>
+          ) : null}
         />
       </div>
-
-      {/* 类别标签云/列表 */}
-      <div style={CAT_LIST}>
-        {filtered.map((cat) => {
-          const isSelected = activeCategory === cat.id || activeCategory === cat.display_name;
-          const count = counts.get(cat.id) || counts.get(cat.display_name) || 0;
-
+      <div className="review-category-panel__list">
+        {filtered.map((category, index) => {
+          const active = activeCategory === category.id;
+          const hidden = hiddenCategories.includes(category.id);
           return (
-            <div
-              key={cat.id}
-              style={{
-                ...CAT_ITEM,
-                backgroundColor: isSelected ? "rgba(14, 110, 99, 0.18)" : undefined,
-                borderColor: isSelected ? "#0e6e63" : "transparent",
-              }}
-              onClick={() => setActiveCategory(cat.id)}
-            >
-              <Space size={6}>
-                <ColorPicker
-                  value={cat.color}
-                  size="small"
-                  onChangeComplete={(color) => onChangeColor?.(cat.id, color.toHexString())}
-                />
-                <Text strong={isSelected} style={{ fontSize: 13 }}>
-                  {cat.display_name}
-                </Text>
-              </Space>
-              <Tag style={{ margin: 0, borderRadius: 10, fontSize: 11 }}>{count}</Tag>
+            <div key={category.id} className={`review-category-row${active ? " is-active" : ""}`} onClick={() => setActiveCategory(category.id)}>
+              <ColorPicker size="small" value={category.color} disabledAlpha onChangeComplete={(color) => onChangeColor?.(category.id, color.toHexString())} />
+              <div className="review-category-row__name">
+                <Text strong={active} ellipsis>{category.display_name}</Text>
+                {index < 9 ? <kbd>{index + 1}</kbd> : null}
+              </div>
+              <Tag bordered={false}>{counts.get(category.id) ?? counts.get(category.display_name) ?? 0}</Tag>
+              <Tooltip title={hidden ? "显示该类别" : "隐藏该类别"}>
+                <button className="review-icon-button" type="button" aria-label={hidden ? "显示类别" : "隐藏类别"} onClick={(event) => { event.stopPropagation(); toggleCategoryVisibility(category.id); }}>
+                  {hidden ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                </button>
+              </Tooltip>
+              <Dropdown
+                trigger={["click"]}
+                menu={{ items: [
+                  { key: "accept", label: "批量接受" },
+                  { key: "reject", label: "批量拒绝" },
+                  { type: "divider" },
+                  { key: "delete", label: "删除该类别可编辑框", danger: true },
+                ], onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onCategoryAction?.(category.id, key as "accept" | "reject" | "delete"); } }}
+              >
+                <button className="review-icon-button" type="button" aria-label="类别批量操作" onClick={(event) => event.stopPropagation()}><MoreOutlined /></button>
+              </Dropdown>
             </div>
           );
         })}
@@ -110,29 +86,3 @@ export function CategoryPanel({
     </div>
   );
 }
-
-const CONTAINER: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  borderBottom: "1px solid var(--border-color, rgba(125, 125, 125, 0.15))",
-};
-
-const CAT_LIST: CSSProperties = {
-  padding: "4px 8px 8px 8px",
-  maxHeight: 140,
-  overflowY: "auto",
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-};
-
-const CAT_ITEM: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "4px 8px",
-  borderRadius: 4,
-  cursor: "pointer",
-  border: "1px solid transparent",
-  transition: "all 0.2s",
-};

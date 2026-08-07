@@ -34,8 +34,8 @@ review:
   device: null            # null 继承 detect.device；也可设置 cuda:0 / cpu
   model_input: 1024       # YOLOE 模型输入边长（像素）
   conf_threshold: 0.25    # attempt 候选最低置信度
-  default_scope: viewport # viewport | full；前端新 attempt 默认范围，无需重启前端
-  default_merge_mode: append # append | replace_ai_in_scope；前端默认合并方式
+  default_scope: region   # region | full；前端新 attempt 默认范围，无需重启前端
+  default_merge_mode: append # append | replace_all；前端默认合并方式
   tile_size: 1024         # 视口/整图 attempt 的动态读取窗口边长（像素）
   batch_size: 4           # review_gpu 初始批大小；OOM 时仅减半重试一次
   viewport_max_windows: 256 # 单个视口 attempt 最大窗口数(>=1)；限制交互任务时延

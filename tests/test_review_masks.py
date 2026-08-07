@@ -76,7 +76,6 @@ def test_mask_edit_updates_geometry_and_participates_in_undo(
     assert item["mask_rle"]
     assert item["mask_geometry_px"]["type"] == "MultiPolygon"
     assert item["box_px"][2] > 25
-    assert item["crown_geom"] == item["geom_crown"]
     assert load_wkt(item["crown_geom"]).is_valid
 
     undone = service.undo(session.session_id, edited.revision, "undo-mask")
@@ -103,11 +102,11 @@ def test_publish_persists_edited_mask_crown_geometry(
     conn = sqlite3.connect(url.split("///", 1)[1])
     try:
         row = conn.execute(
-            "SELECT crown_geom, geom_crown, box_px FROM tree_observations WHERE run_id=?",
+            "SELECT crown_geom, box_px FROM tree_observations WHERE run_id=?",
             (result["run_id"],),
         ).fetchone()
     finally:
         conn.close()
     assert row is not None
-    assert row[0] == row[1] == expected
+    assert row[0] == expected
     assert load_wkt(row[0]).is_valid

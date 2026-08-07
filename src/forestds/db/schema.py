@@ -175,8 +175,6 @@ DDL: tuple[str, ...] = (
         crown_volume_geo_real  REAL,
         source_subimage_path   TEXT,
         slice_size             INTEGER,
-        geom_point             TEXT,
-        geom_crown             TEXT,
         created_at             TEXT NOT NULL,
         FOREIGN KEY (tiff_id, phase_id) REFERENCES tiffs(tiff_id, phase_id) ON DELETE SET NULL
     )

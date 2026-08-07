@@ -51,11 +51,28 @@ class _SpatialIndex:
         return result
 
 
+DUPLICATE_IOU = 0.7
+
+
 class ReviewMergeService:
-    def append(self, existing: Iterable[dict[str, Any]], incoming: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-        by_id = {str(item.get("id")): dict(item) for item in existing}
+    """AI 候选写入工作集的策略。
+
+    - ``append``: 冻结现有工作集, 仅并入与存量框不重复(IoU < DUPLICATE_IOU)的新候选;
+      冻结框不可删除, 几何与树种锁定, 只保留人工判定与备注两个自由度。
+    - ``replace_all``: 整体丢弃旧工作集, 以本次候选为唯一真相。
+    """
+
+    def append(
+        self,
+        existing: Iterable[dict[str, Any]],
+        incoming: Iterable[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """按 id 覆盖式并入; 存量项统一冻结, 新并入项保持可编辑。"""
+        by_id: dict[str, dict[str, Any]] = {
+            str(item.get("id")): {**dict(item), "frozen": True} for item in existing
+        }
         for item in incoming:
-            by_id[str(item.get("id"))] = dict(item)
+            by_id[str(item.get("id"))] = {**dict(item), "frozen": False}
         return list(by_id.values())
 
     def apply(
@@ -63,48 +80,31 @@ class ReviewMergeService:
         mode: str,
         existing: Iterable[dict[str, Any]],
         candidates: Iterable[dict[str, Any]],
-        scope: tuple[float, float, float, float] | None,
     ) -> list[dict[str, Any]]:
-        current = [dict(item) for item in existing]
-        if mode == "replace_ai_in_scope":
-            current = [
-                item for item in current
-                if not (
-                    item.get("source") == "ai"
-                    and not item.get("confirmed")
-                    and (scope is None or _center_in_scope(item.get("box_px"), scope))
-                )
-            ]
-        elif mode != "append":
+        if mode == "replace_all":
+            return mark_conflicts({**dict(item), "frozen": False} for item in candidates)
+        if mode != "append":
             raise ValueError(f"unknown merge mode: {mode}")
+
+        current = [{**dict(item), "frozen": True} for item in existing]
         indexes: dict[str, _SpatialIndex] = {}
         for index, item in enumerate(current):
             species = str(item.get("species") or "")
             indexes.setdefault(species, _SpatialIndex()).insert(index, item.get("box_px"))
+
+        # 冻结框不可被替换, 因此重复候选只做丢弃, 只取存量之外的差集。
         for candidate in candidates:
-            item = dict(candidate)
+            item = {**dict(candidate), "frozen": False}
+            box = item.get("box_px")
             species = str(item.get("species") or "")
             spatial = indexes.setdefault(species, _SpatialIndex())
-            duplicate_index = next(
-                (
-                    index
-                    for index in sorted(spatial.query(item.get("box_px")))
-                    if _iou(current[index].get("box_px"), item.get("box_px")) >= 0.7
-                ),
-                None,
-            )
-            if duplicate_index is None:
-                current.append(item)
-                spatial.insert(len(current) - 1, item.get("box_px"))
-            else:
-                duplicate = current[duplicate_index]
-                if (
-                    float(item.get("confidence") or 0) > float(duplicate.get("confidence") or 0)
-                    and duplicate.get("source") == "ai"
-                    and not duplicate.get("confirmed")
-                ):
-                    current[duplicate_index] = item
-                    spatial.insert(duplicate_index, item.get("box_px"))
+            if any(
+                _iou(current[index].get("box_px"), box) >= DUPLICATE_IOU
+                for index in spatial.query(box)
+            ):
+                continue
+            current.append(item)
+            spatial.insert(len(current) - 1, box)
         return mark_conflicts(current)
 
 

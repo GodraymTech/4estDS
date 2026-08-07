@@ -27,7 +27,7 @@ candidates = [
     for index in range(count)
 ]
 started = time.perf_counter()
-merged = ReviewMergeService().apply("append", [], candidates, None)
+merged = ReviewMergeService().apply("append", [], candidates)
 fused = weighted_box_fusion(candidates)
 print(json.dumps([len(merged), len(fused), time.perf_counter() - started]))
 """
@@ -56,7 +56,7 @@ def test_spatial_index_keeps_oversized_box_merge_semantics() -> None:
         "id": "new", "species": "红树", "confidence": 0.9,
         "box_px": [0, 0, 10_000, 10_000], "source": "ai", "confirmed": False,
     }]
-    result = ReviewMergeService().apply("append", existing, incoming, None)
+    result = ReviewMergeService().apply("append", existing, incoming)
     assert [item["id"] for item in result] == ["new"]
 
 

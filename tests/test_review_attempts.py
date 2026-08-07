@@ -78,7 +78,7 @@ def test_attempt_stays_out_of_runs_and_applies_candidates(review_db: tuple[str, 
         revision=0,
         prompt_type="text",
         prompts=[{"category_id": "红树", "display_name": "红树", "model_prompt": "mangrove crown"}],
-        scope={"type": "viewport", "bounds": [0.1, 0.1, 0.9, 0.9]},
+        scope={"type": "region", "center_px": [50, 50], "side_px": 80},
     )
     completed = service.run_attempt(session.session_id, attempt["attempt_id"], adapter=CandidateAdapter())
 
@@ -106,8 +106,8 @@ def test_cancel_and_expand_reuse_attempt_configuration(review_db: tuple[str, Pat
         revision=0,
         prompt_type="text",
         prompts=[{"category_id": "秋茄", "model_prompt": "kandelia crown"}],
-        scope={"type": "viewport", "bounds": [0, 0, 1, 1]},
-        merge_mode="replace_ai_in_scope",
+        scope={"type": "region", "center_px": [50, 50], "side_px": 100},
+        merge_mode="replace_all",
         threshold=0.4,
     )
     canceled = service.cancel_attempt(session.session_id, attempt["attempt_id"])
@@ -119,7 +119,7 @@ def test_cancel_and_expand_reuse_attempt_configuration(review_db: tuple[str, Pat
     assert canceled["status"] == "canceled"
     assert expanded["scope"] == {"type": "full"}
     assert expanded["prompts"] == attempt["prompts"]
-    assert expanded["merge_mode"] == "replace_ai_in_scope"
+    assert expanded["merge_mode"] == "replace_all"
     assert expanded["parent_attempt_id"] == attempt["attempt_id"]
 
 

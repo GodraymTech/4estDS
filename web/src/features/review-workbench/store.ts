@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import type { ReviewItem, ReviewPatch, ReviewWorkspace } from "../../entities/review";
+import type { ReviewMergeMode } from "../../shared/api/types";
 
-export type WorkbenchTool = "select" | "draw" | "ai_text" | "ai_visual";
+/** 选择与平移拆分为两个工具: 选择态下左键用于框选, 平移态下左键拖动地图。 */
+export type WorkbenchTool = "select" | "pan" | "draw" | "ai_text" | "ai_visual";
+
+/** AI 识别范围滑杆左端对应的最小边长(全局像素)。 */
+export const MIN_REGION_SIDE_PX = 1280;
 export type StatusFilterType = "all" | "accepted" | "pending" | "rejected" | "conflict";
 
 export interface ReviewWorkbenchState {
@@ -21,6 +26,15 @@ export interface ReviewWorkbenchState {
   isSyncing: boolean;
   maskEditingItemId: string | null;
 
+  // 类别可见性(驱动 MapLibre 图层 filter); 空数组表示全部可见
+  hiddenCategories: string[];
+
+  // AI 识别范围与写入策略(画布矩形图层与 AI 面板共享一份真相)
+  regionSidePx: number;
+  regionMetricsVisible: boolean;
+  mergeMode: ReviewMergeMode;
+  autoTrigger: boolean;
+
   // 方法
   hydrate: (workspace: ReviewWorkspace) => void;
   replaceItems: (revision: number, items: ReviewItem[]) => void;
@@ -36,6 +50,12 @@ export interface ReviewWorkbenchState {
   setCategoryFilter: (cat: string | null) => void;
   setIsSyncing: (syncing: boolean) => void;
   setMaskEditingItemId: (id: string | null) => void;
+  toggleCategoryVisibility: (categoryId: string) => void;
+  setHiddenCategories: (ids: string[]) => void;
+  setRegionSidePx: (side: number) => void;
+  setRegionMetricsVisible: (visible: boolean) => void;
+  setMergeMode: (mode: ReviewMergeMode) => void;
+  setAutoTrigger: (enabled: boolean) => void;
 }
 
 function indexItems(items: ReviewItem[]) {
@@ -58,6 +78,12 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
   isSyncing: false,
   maskEditingItemId: null,
 
+  hiddenCategories: [],
+  regionSidePx: MIN_REGION_SIDE_PX,
+  regionMetricsVisible: false,
+  mergeMode: "append",
+  autoTrigger: true,
+
   hydrate: (workspace) => set({
     revision: workspace.revision,
     itemsById: indexItems(workspace.items),
@@ -65,6 +91,12 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
     selectedIds: [],
     activeId: workspace.items[0]?.id ?? null,
     activeCategory: workspace.active_category ?? workspace.category_catalog[0]?.id ?? null,
+    // 后端给出显式可见列表时取其补集作为隐藏项, 未给出则视为全部可见。
+    hiddenCategories: workspace.visible_categories?.length
+      ? workspace.category_catalog
+          .filter((category) => !workspace.visible_categories.includes(category.id))
+          .map((category) => category.id)
+      : [],
   }),
   replaceItems: (revision, items) => set((state) => ({
     revision,
@@ -117,4 +149,14 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
   setCategoryFilter: (cat) => set({ categoryFilter: cat }),
   setIsSyncing: (isSyncing) => set({ isSyncing }),
   setMaskEditingItemId: (id) => set({ maskEditingItemId: id }),
+  toggleCategoryVisibility: (categoryId) => set((state) => ({
+    hiddenCategories: state.hiddenCategories.includes(categoryId)
+      ? state.hiddenCategories.filter((value) => value !== categoryId)
+      : [...state.hiddenCategories, categoryId],
+  })),
+  setHiddenCategories: (ids) => set({ hiddenCategories: ids }),
+  setRegionSidePx: (side) => set({ regionSidePx: Math.max(1, Math.round(side)) }),
+  setRegionMetricsVisible: (regionMetricsVisible) => set({ regionMetricsVisible }),
+  setMergeMode: (mergeMode) => set({ mergeMode }),
+  setAutoTrigger: (autoTrigger) => set({ autoTrigger }),
 }));

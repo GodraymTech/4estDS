@@ -288,7 +288,6 @@ def latest_run_for_tract(tract_id: str, *, url: str | None = None) -> str | None
 
 def _observation_row(row: dict) -> dict:
     out = dict(row)
-    out["geom_crown"] = out.get("geom_crown") or out.get("crown_geom")
     out["crown_area_geo"] = out.get("crown_area_geo_real") or out.get("crown_area_geo_est")
     out["crown_volume_geo"] = out.get("crown_volume_geo_real") or out.get("crown_volume_geo_est")
     return out

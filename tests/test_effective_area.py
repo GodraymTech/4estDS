@@ -280,12 +280,11 @@ def _seed_active_observations(effective_db: str) -> str:
         conn.execute(
             "INSERT INTO tree_observations "
             "(observation_id, run_id, tract_phase_pk, tiff_id, phase_id, species, confidence, "
-            "center_geom, geom_point, crown_geom, geom_crown, crown_area_geo_real, created_at) "
-            "VALUES (?, 'run001', 'phase-effective', 'tif01', '20260718', 'tree', 0.9, ?, ?, "
-            "'POLYGON ((113.001 22.004, 113.003 22.004, 113.003 22.006, 113.001 22.006, 113.001 22.004))', "
+            "center_geom, crown_geom, crown_area_geo_real, created_at) "
+            "VALUES (?, 'run001', 'phase-effective', 'tif01', '20260718', 'tree', 0.9, ?, "
             "'POLYGON ((113.001 22.004, 113.003 22.004, 113.003 22.006, 113.001 22.006, 113.001 22.004))', "
             "10, 'created')",
-            (observation_id, center, center),
+            (observation_id, center),
         )
     conn.execute(
         "UPDATE tiffs SET active_run_id='run001' WHERE tiff_id='tif01' AND phase_id='20260718'"

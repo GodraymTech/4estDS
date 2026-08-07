@@ -754,8 +754,8 @@ def write_observations(
                 " center_geom, crown_geom, box_px, box_px_sub, box_geo, crown_width_px, crown_height_px, "
                 " crown_width_geo, crown_height_geo, crown_area_px, crown_area_geo_est, crown_area_geo_real, "
                 " height, height_source, crown_volume_geo_est, crown_volume_geo_real, source_subimage_path, "
-                " slice_size, geom_point, geom_crown, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " slice_size, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     observation_id,
                     run_id,
@@ -782,8 +782,6 @@ def write_observations(
                     crown_volume_geo_real,
                     source_subimage_path,
                     slice_size,
-                    f"POINT({cx} {cy})",
-                    crown_geom,
                     now,
                 ),
             )

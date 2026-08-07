@@ -168,13 +168,14 @@ class ReviewPublishService:
             "INSERT INTO tree_observations "
             "(observation_id, individual_id, run_id, tract_phase_pk, tiff_id, phase_id, species, confidence, "
             "center_geom, crown_geom, box_px, box_geo, crown_width_px, crown_height_px, crown_area_px, "
-            "geom_point, geom_crown, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 observation_id, item.get("individual_id"), run_id, session["tract_phase_pk"],
                 session["tiff_id"], session["phase_id"], str(item["species"]).strip(),
-                float(item.get("confidence") or 1.0), item.get("center_geom"), item.get("crown_geom"),
+                float(item.get("confidence") or 1.0),
+                item.get("center_geom") or f"POINT({(x1 + x2) / 2} {(y1 + y2) / 2})",
+                item.get("crown_geom"),
                 json.dumps(box), json.dumps(item.get("box_geo")) if item.get("box_geo") is not None else None,
-                x2 - x1, y2 - y1, (x2 - x1) * (y2 - y1),
-                f"POINT({(x1 + x2) / 2} {(y1 + y2) / 2})", item.get("geom_crown") or item.get("crown_geom"), now,
+                x2 - x1, y2 - y1, (x2 - x1) * (y2 - y1), now,
             ),
         )

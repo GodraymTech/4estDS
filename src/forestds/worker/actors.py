@@ -123,6 +123,7 @@ def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) ->
         batch_size=int(settings.get("review.batch_size", 4)),
         viewport_max_windows=int(settings.get("review.viewport_max_windows", 256)),
         max_candidates=int(settings.get("review.max_candidates_per_attempt", 50_000)),
+        effective_area_cache_size=int(settings.get("effective_area.mask_cache_size", 32)),
     )
     try:
         result = service.run_attempt(session_id, attempt_id, adapter=build_review_adapter(settings))
@@ -137,8 +138,8 @@ def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) ->
 
 
 @dramatiq.actor(queue_name=REVIEW_GPU_QUEUE, priority=0, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
-def review_viewport_actor(session_id: str, attempt_id: str, db_url: str | None = None) -> None:
-    """短视口任务优先进入 review_gpu。"""
+def review_region_actor(session_id: str, attempt_id: str, db_url: str | None = None) -> None:
+    """局部范围任务优先进入 review_gpu。"""
     _run_review_attempt(session_id, attempt_id, db_url)
 
 

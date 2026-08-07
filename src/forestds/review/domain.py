@@ -5,6 +5,12 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
 ReviewMode = Literal["inherit", "fresh"]
+ReviewMergeMode = Literal["append", "replace_all"]
+
+#: 冻结框仅允许人工改动的字段。
+#: 冻结语义由 append 合并模式产生: 上一轮已并入工作集的存量框不可删除,
+#: 几何(box_px/box_geo)与树种(species)锁定, 只保留判定与备注两个自由度。
+FROZEN_EDITABLE_FIELDS: frozenset[str] = frozenset({"status", "note"})
 
 
 class ReviewError(RuntimeError):
@@ -80,6 +86,11 @@ class WorkspacePatch:
     replace_all: bool = False
 
 
+def is_frozen(item: Mapping[str, Any]) -> bool:
+    """是否为冻结框(不可删除、几何与树种锁定)。"""
+    return bool(item.get("frozen"))
+
+
 def workspace_summary(items: list[dict[str, Any]]) -> dict[str, int]:
     active = [item for item in items if item.get("status") != "rejected"]
     return {
@@ -87,4 +98,5 @@ def workspace_summary(items: list[dict[str, Any]]) -> dict[str, int]:
         "accepted": sum(item.get("status") == "accepted" for item in items),
         "rejected": sum(item.get("status") == "rejected" for item in items),
         "conflicts": sum(bool(item.get("conflict")) for item in active),
+        "frozen": sum(is_frozen(item) for item in active),
     }

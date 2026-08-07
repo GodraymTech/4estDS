@@ -172,7 +172,7 @@ def export_tract_to_file(
             "crown_width_geo", "crown_height_geo",
             "crown_area_px", "crown_area_geo_est", "crown_area_geo_real",
             "crown_volume_geo_est", "crown_volume_geo_real",
-            "height", "height_source", "geom_crown", "geom_point",
+            "height", "height_source", "crown_geom", "center_geom",
             "box_px_sub", "source_subimage_path", "run_id",
             "task_type", "parent_run_id", "tiff_id", "phase_id", "tract_id",
         ]
@@ -186,10 +186,10 @@ def export_tract_to_file(
         features = []
         for obs in observations:
             geom = None
-            if obs.get("geom_crown"):
-                geom = parse_wkt_polygon(obs["geom_crown"])
-            if geom is None and obs.get("geom_point"):
-                geom = parse_wkt_point(obs["geom_point"])
+            if obs.get("crown_geom"):
+                geom = parse_wkt_polygon(obs["crown_geom"])
+            if geom is None and obs.get("center_geom"):
+                geom = parse_wkt_point(obs["center_geom"])
                 
             properties = {
                 "layer": "observations",
@@ -277,14 +277,14 @@ def export_tract_to_file(
         data_list = []
         for obs in observations:
             geom = None
-            if obs.get("geom_crown"):
+            if obs.get("crown_geom"):
                 try:
-                    geom = shapely_wkt(obs["geom_crown"])
+                    geom = shapely_wkt(obs["crown_geom"])
                 except Exception:
                     pass
-            if geom is None and obs.get("geom_point"):
+            if geom is None and obs.get("center_geom"):
                 try:
-                    geom = shapely_wkt(obs["geom_point"])
+                    geom = shapely_wkt(obs["center_geom"])
                 except Exception:
                     pass
                     

@@ -161,5 +161,4 @@ def mask_item_fields(mask: Any, source_window: Iterable[float], transform: Affin
         "mask_geometry_px": mapping(result.pixel_geometry),
         "box_px": list(result.pixel_bounds),
         "crown_geom": result.geometry.wkt,
-        "geom_crown": result.geometry.wkt,
     }

@@ -36,14 +36,17 @@ import type {
   EffectiveAreaImportSource,
   EffectiveAreaPutRequest,
   EffectiveAreaResponse,
+  ReviewMergeMode,
   ReviewMode,
   ReviewPatch,
   ReviewPublishResult,
+  ReviewScope,
   ReviewSession,
   ReviewWorkspace,
   ReviewAttempt,
   ReviewMaskStroke,
   ReviewCapabilities,
+  ReviewMapContext,
   ServerFileBrowseOut,
 } from "./types";
 
@@ -82,6 +85,12 @@ export const endpoints = {
   getReviewWorkspace: (sessionId: string): Promise<ReviewWorkspace> =>
     apiGet(`/reviews/${encodeURIComponent(sessionId)}/workspace`),
 
+  getReviewMapContext: (sessionId: string): Promise<ReviewMapContext> =>
+    apiGet(`/reviews/${encodeURIComponent(sessionId)}/map-context`),
+
+  reviewTileUrl: (phaseId: string, tiffId: string): string =>
+    apiUrl(`/tiles/tiffs/${encodeURIComponent(phaseId)}/${encodeURIComponent(tiffId)}/{z}/{x}/{y}`),
+
   reviewPreviewUrl: (sessionId: string): string =>
     apiUrl(`/reviews/${encodeURIComponent(sessionId)}/preview`),
 
@@ -94,8 +103,8 @@ export const endpoints = {
       prompt_type: "text" | "visual";
       prompts: Array<Record<string, unknown>>;
       visual_exemplars: Array<Record<string, unknown>>;
-      scope: { type: "viewport" | "full"; bounds?: number[] };
-      merge_mode: "append" | "replace_ai_in_scope";
+      scope: ReviewScope;
+      merge_mode: ReviewMergeMode;
       threshold: number;
     },
   ): Promise<ReviewAttempt> => apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/attempts`, body),
@@ -110,7 +119,7 @@ export const endpoints = {
     sessionId: string,
     attemptId: string,
     revision: number,
-    mergeMode: "append" | "replace_ai_in_scope",
+    mergeMode: ReviewMergeMode,
   ): Promise<ReviewPatch> => apiPostJson(
     `/reviews/${encodeURIComponent(sessionId)}/attempts/${encodeURIComponent(attemptId)}/apply`,
     { revision, merge_mode: mergeMode },

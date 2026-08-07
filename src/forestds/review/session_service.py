@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from ..db.schema import init_db, resolve_db_path
 from .domain import (
+    FROZEN_EDITABLE_FIELDS,
     ReviewConflict,
     ReviewMode,
     ReviewNotFound,
@@ -17,9 +18,13 @@ from .domain import (
     ReviewValidationError,
     ReviewWorkspace,
     WorkspacePatch,
+    is_frozen,
     workspace_summary,
 )
 from .drafts import DraftStore
+
+
+_MODE_LABELS = {"inherit": "继承", "fresh": "从 0 开始"}
 
 
 def _now() -> str:
@@ -57,13 +62,55 @@ def _item_from_observation(row: sqlite3.Row) -> dict[str, Any]:
         "box_geo": _loads(row["box_geo"], None),
         "center_geom": row["center_geom"],
         "crown_geom": row["crown_geom"],
-        "geom_crown": row["geom_crown"],
         "source": "parent",
         "confirmed": True,
         "status": "accepted",
         "note": "",
         "conflict": False,
+        "frozen": False,
     }
+
+
+def _tiff_geo_reference(conn: sqlite3.Connection, phase_id: str, tiff_id: str):
+    """加载 TIFF 像素到原始 CRS / WGS84 的转换器。
+
+    返回 ``(Affine, to_wgs84)``；缺少地理参考时返回 ``None``。转换器仅在一次
+    会话命令内构造一次，避免批量编辑时重复初始化 pyproj。
+    """
+    row = conn.execute(
+        "SELECT geotransform, crs_epsg, crs_wkt FROM tiffs WHERE phase_id=? AND tiff_id=?",
+        (phase_id, tiff_id),
+    ).fetchone()
+    if row is None or not row["geotransform"] or not (row["crs_epsg"] or row["crs_wkt"]):
+        return None
+    from affine import Affine
+    from pyproj import CRS, Transformer
+
+    transform = Affine(*json.loads(row["geotransform"]))
+    crs = CRS.from_epsg(int(row["crs_epsg"])) if row["crs_epsg"] else CRS.from_wkt(row["crs_wkt"])
+    to_wgs84 = None if crs.to_epsg() == 4326 else Transformer.from_crs(crs, 4326, always_xy=True)
+    return transform, to_wgs84
+
+
+def _with_geography(item: Mapping[str, Any], geo_reference) -> dict[str, Any]:
+    """由事实源 ``box_px`` 派生原始 CRS 与 WGS84 框，供发布与地图渲染。"""
+    value = dict(item)
+    box = value.get("box_px")
+    if geo_reference is None or not isinstance(box, list) or len(box) != 4:
+        return value
+    transform, to_wgs84 = geo_reference
+    x1, y1, x2, y2 = (float(part) for part in box)
+    native = [transform * (x, y) for x, y in ((x1, y1), (x1, y2), (x2, y1), (x2, y2))]
+    wgs84 = [to_wgs84.transform(x, y) for x, y in native] if to_wgs84 else native
+    native_x = [point[0] for point in native]
+    native_y = [point[1] for point in native]
+    lng = [point[0] for point in wgs84]
+    lat = [point[1] for point in wgs84]
+    value["box_geo"] = [min(native_x), min(native_y), max(native_x), max(native_y)]
+    value["box_wgs84"] = [min(lng), min(lat), max(lng), max(lat)]
+    center_native = transform * ((x1 + x2) / 2, (y1 + y2) / 2)
+    value["center_geom"] = f"POINT({center_native[0]} {center_native[1]})"
+    return value
 
 
 _EDITABLE_METADATA = (
@@ -188,6 +235,29 @@ class ReviewSessionService:
             ).fetchone()
             if tiff is None:
                 raise ReviewNotFound("TIFF 不存在。", code="tiff_not_found", details={"phase_id": phase_id, "tiff_id": tiff_id})
+
+            # 同一 TIFF 同时只允许一个进行中的复核会话:
+            # 同模式幂等返回已有会话, 异模式直接拒绝, 避免两份草稿互相覆盖发布。
+            active = conn.execute(
+                "SELECT * FROM review_sessions WHERE phase_id=? AND tiff_id=? AND status='active' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (phase_id, tiff_id),
+            ).fetchone()
+            if active is not None:
+                if active["mode"] == mode:
+                    return _session(active)
+                raise ReviewConflict(
+                    f"该 TIFF 已有进行中的{_MODE_LABELS.get(active['mode'], active['mode'])}模式复核，"
+                    "请先完成或删除后再创建新模式会话。",
+                    code="review_session_exists",
+                    details={
+                        "session_id": active["session_id"],
+                        "mode": active["mode"],
+                        "phase_id": phase_id,
+                        "tiff_id": tiff_id,
+                    },
+                )
+
             expected_active = tiff["active_run_id"]
             resolved_base = base_run_id
             if mode == "inherit":
@@ -209,7 +279,8 @@ class ReviewSessionService:
                     "SELECT * FROM tree_observations WHERE run_id=? AND phase_id=? AND tiff_id=? ORDER BY observation_id",
                     (resolved_base, phase_id, tiff_id),
                 ).fetchall()
-            items = [_item_from_observation(row) for row in rows]
+            geo_reference = _tiff_geo_reference(conn, phase_id, tiff_id)
+            items = [_with_geography(_item_from_observation(row), geo_reference) for row in rows]
             species = sorted({item["species"] for item in items if item["species"]})
             catalog = [
                 {"id": name, "display_name": name, "model_prompt": name, "color": _category_color(index)}
@@ -271,8 +342,17 @@ class ReviewSessionService:
             conn.close()
 
     def workspace(self, session_id: str) -> ReviewWorkspace:
-        self.get(session_id)
-        return self.drafts.load(session_id)
+        session = self.get(session_id)
+        workspace = self.drafts.load(session_id)
+        missing = [item for item in workspace.items if item.get("box_px") and not item.get("box_wgs84")]
+        if missing:
+            conn = _connect(self.db_url)
+            try:
+                geo_reference = _tiff_geo_reference(conn, session.phase_id, session.tiff_id)
+            finally:
+                conn.close()
+            workspace.items = [_with_geography(item, geo_reference) for item in workspace.items]
+        return workspace
 
     def _assert_writable(self, session: ReviewSession) -> None:
         if session.status != "active":
@@ -366,6 +446,23 @@ class ReviewSessionService:
             workspace.redo_stack.clear()
         for operation in normalized:
             self._apply(workspace, operation)
+        # AI 候选与人工新增/缩放都只提交 box_px；在服务端集中派生地理坐标，
+        # 避免浏览器自行实现 CRS 投影并确保发布数据与地图显示一致。
+        needs_geography = any(
+            str(operation.get("type") or "") in {"add", "apply_attempt"}
+            or (
+                str(operation.get("type") or "") == "update"
+                and "box_px" in dict(operation.get("patch") or {})
+            )
+            for operation in normalized
+        ) or any(item.get("box_px") and not item.get("box_wgs84") for item in workspace.items)
+        if needs_geography:
+            conn = _connect(self.db_url)
+            try:
+                geo_reference = _tiff_geo_reference(conn, session.phase_id, session.tiff_id)
+            finally:
+                conn.close()
+            workspace.items = [_with_geography(item, geo_reference) for item in workspace.items]
         item_ids = {str(value) for value in scope.get("item_ids") or []}
         current_ids = {str(item.get("id")) for item in workspace.items}
         return self._persist(
@@ -502,7 +599,14 @@ class ReviewSessionService:
             index = next((i for i, item in enumerate(workspace.items) if item.get("id") == item_id), None)
             if index is None:
                 raise ReviewValidationError("复核对象不存在。", code="item_not_found", details={"item_id": item_id})
+            frozen = is_frozen(workspace.items[index])
             if kind == "delete":
+                if frozen:
+                    raise ReviewValidationError(
+                        "冻结框不可删除。",
+                        code="frozen_item_readonly",
+                        details={"item_id": item_id},
+                    )
                 workspace.items.pop(index)
                 return
             patch = dict(operation.get("patch") or {})
@@ -512,6 +616,14 @@ class ReviewSessionService:
                 patch = {"note": str(operation.get("note") or "")}
             elif kind == "set_status":
                 patch = {"status": operation.get("status")}
+            if frozen:
+                blocked = sorted(set(patch) - FROZEN_EDITABLE_FIELDS)
+                if blocked:
+                    raise ReviewValidationError(
+                        "冻结框仅可修改判定状态与备注。",
+                        code="frozen_item_readonly",
+                        details={"item_id": item_id, "fields": blocked},
+                    )
             if "box_px" in patch:
                 _validate_box(patch["box_px"])
             workspace.items[index] = {**workspace.items[index], **patch}

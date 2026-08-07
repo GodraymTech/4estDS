@@ -26,7 +26,7 @@ def _run_server(port: int, db_url: str, home: str) -> None:
     os.environ["forestds_HOME"] = home
     actor = types.SimpleNamespace(send=lambda *args, **kwargs: None)
     fake_actors = types.ModuleType("forestds.worker.actors")
-    fake_actors.review_viewport_actor = actor
+    fake_actors.review_region_actor = actor
     fake_actors.review_full_actor = actor
     sys.modules["forestds.worker.actors"] = fake_actors
     app = create_app()
@@ -94,7 +94,7 @@ def test_effective_area_to_multi_attempt_review_publish_http(
 
         status, capabilities = _request(base, "GET", "/api/v1/reviews/capabilities")
         assert status == 200, capabilities
-        assert capabilities["defaults"]["scope"] == "viewport"
+        assert capabilities["defaults"]["scope"] == "region"
         assert capabilities["limits"]["max_candidates_per_attempt"] == 50_000
 
         status, current = _request(base, "GET", "/api/v1/tracts/tract-1/effective-area")
@@ -138,7 +138,7 @@ def test_effective_area_to_multi_attempt_review_publish_http(
                 "revision": 0,
                 "prompt_type": "text",
                 "prompts": [{"category_id": "红树", "model_prompt": "mangrove crown"}],
-                "scope": {"type": "viewport", "bounds": [0, 0, 0.8, 0.8]},
+                "scope": {"type": "region", "center_px": [40, 40], "side_px": 80},
                 "merge_mode": "append",
                 "threshold": 0.25,
             },
@@ -172,7 +172,7 @@ def test_effective_area_to_multi_attempt_review_publish_http(
                 "prompt_type": "text",
                 "prompts": [{"category_id": "红树", "model_prompt": "mangrove canopy"}],
                 "scope": {"type": "full"},
-                "merge_mode": "replace_ai_in_scope",
+                "merge_mode": "replace_all",
                 "threshold": 0.3,
             },
         )
@@ -191,11 +191,10 @@ def test_effective_area_to_multi_attempt_review_publish_http(
             base,
             "POST",
             f"/api/v1/reviews/{session_id}/attempts/{second['attempt_id']}/apply",
-            {"revision": detail["revision"], "merge_mode": "replace_ai_in_scope"},
+            {"revision": detail["revision"], "merge_mode": "replace_all"},
         )
         assert status == 200
-        assert {item["id"] for item in replaced["items"]} >= {"parent-0", "parent-1", "ai-second"}
-        assert "ai-first" not in {item["id"] for item in replaced["items"]}
+        assert {item["id"] for item in replaced["items"]} == {"ai-second"}
 
         status, expanded = _request(
             base,
