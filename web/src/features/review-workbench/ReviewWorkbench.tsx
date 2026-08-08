@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Empty, Modal, Select, Spin, Tabs, Typography, message } from "antd";
-import { CheckOutlined, CloseOutlined, DeleteOutlined } from "@ant-design/icons";
+import { App, Button, Empty, Modal, Select, Spin, Tabs, Typography } from "antd";
+import { DeleteOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { operationId, useReview, useReviewCommand, useReviewWorkspace } from "../../entities/review";
@@ -14,7 +14,6 @@ import { CategoryPanel } from "./CategoryPanel";
 import { ObjectList } from "./ObjectList";
 import { ItemInspector } from "./ItemInspector";
 import { TiffInfoPanel } from "./TiffInfoPanel";
-import { ObjectThumbnailBar } from "./ObjectThumbnailBar";
 import { StatusBar } from "./StatusBar";
 import { PromptPanel } from "./PromptPanel";
 import { AttemptPanel } from "./AttemptPanel";
@@ -24,6 +23,7 @@ import "./ReviewWorkbench.css";
 const CATEGORY_COLORS = ["#72bc8f", "#5e9fe8", "#eac26b", "#bf8eda", "#de9255", "#df84a8", "#4fb9c9", "#e97366"];
 
 export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
+  const { modal, message } = App.useApp();
   const navigate = useNavigate();
   const client = useQueryClient();
   const session = useReview(sessionId);
@@ -37,8 +37,10 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
   const [editingMask, setEditingMask] = useState<ReviewItem | null>(null);
   const [helpModalOpen, setHelpModalOpen] = useState(false);
   const [effectiveAreaVisible, setEffectiveAreaVisible] = useState(false);
+  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
   const [basemapId, setBasemapId] = useState("satellite");
   const [roadOverlay, setRoadOverlay] = useState(false);
+  const [visualBoxSample, setVisualBoxSample] = useState<number[] | null>(null);
 
   useEffect(() => {
     if (!workspace.data) return;
@@ -53,26 +55,44 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
 
   const apply = useCallback(async (operations: Array<Record<string, unknown>>, prefix = "edit") => {
     if (!operations.length) return;
-    store.setIsSyncing(true);
+    const currentRev = useReviewWorkbenchStore.getState().revision;
     try {
-      const patch = await command.mutateAsync({ revision: store.revision, operation_id: operationId(prefix), operations });
-      store.applyPatch(patch);
+      const patch = await command.mutateAsync({ revision: currentRev, operation_id: operationId(prefix), operations });
+      useReviewWorkbenchStore.getState().applyPatch(patch);
     } catch (error) {
+      const msg = error instanceof Error ? error.message : "";
+      if (msg.includes("409") || msg.includes("版本冲突") || msg.includes("conflict")) {
+        try {
+          const latest = await endpoints.getReviewWorkspace(sessionId);
+          useReviewWorkbenchStore.getState().hydrate(latest);
+          const patch = await command.mutateAsync({ revision: latest.revision, operation_id: operationId(prefix), operations });
+          useReviewWorkbenchStore.getState().applyPatch(patch);
+          return;
+        } catch (retryErr) {
+          message.error(retryErr instanceof Error ? retryErr.message : "操作提交失败");
+          return;
+        }
+      }
       message.error(error instanceof Error ? error.message : "操作提交失败");
-    } finally {
-      store.setIsSyncing(false);
     }
-  }, [command, store.revision]);
+  }, [command, sessionId]);
 
   const editableIds = useCallback((ids: string[]) => ids.filter((id) => !store.itemsById[id]?.frozen), [store.itemsById]);
   const deleteItems = useCallback(async (ids: string[]) => {
     const editable = editableIds(ids);
-    if (editable.length < ids.length) message.warning("冻结框已保留；只能删除本轮可编辑框");
+    if (!editable.length) return;
+    if (editable.length < ids.length) message.warning("冻结框已保留；只能删除可编辑框");
     await apply(editable.map((id) => ({ type: "delete", item_id: id })), "delete");
+    useReviewWorkbenchStore.getState().clearSelection();
   }, [apply, editableIds]);
 
   const history = useMutation({
-    mutationFn: (kind: "undo" | "redo") => kind === "undo" ? endpoints.undoReview(sessionId, store.revision, operationId(kind)) : endpoints.redoReview(sessionId, store.revision, operationId(kind)),
+    mutationFn: (kind: "undo" | "redo") => {
+      const rev = useReviewWorkbenchStore.getState().revision;
+      return kind === "undo"
+        ? endpoints.undoReview(sessionId, rev, operationId(kind))
+        : endpoints.redoReview(sessionId, rev, operationId(kind));
+    },
     onSuccess: (patch) => {
       store.applyPatch(patch);
       client.setQueryData(queryKeys.reviewWorkspace(sessionId), (current: unknown) => ({ ...((current as Record<string, unknown>) ?? {}), revision: patch.revision, items: patch.items }));
@@ -90,7 +110,10 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
     onError: (error) => message.error(error instanceof Error ? error.message : "发布失败"),
   });
   const saveMask = useMutation({
-    mutationFn: ({ itemId, strokes }: { itemId: string; strokes: ReviewMaskStroke[] }) => endpoints.applyReviewMask(sessionId, { revision: store.revision, operation_id: operationId("mask"), item_id: itemId, strokes }),
+    mutationFn: ({ itemId, strokes }: { itemId: string; strokes: ReviewMaskStroke[] }) => {
+      const rev = useReviewWorkbenchStore.getState().revision;
+      return endpoints.applyReviewMask(sessionId, { revision: rev, operation_id: operationId("mask"), item_id: itemId, strokes });
+    },
     onSuccess: (patch) => { store.applyPatch(patch); setEditingMask(null); message.success("实例 Mask 已保存"); },
     onError: (error) => message.error(error instanceof Error ? error.message : "Mask 保存失败"),
   });
@@ -98,14 +121,34 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input,textarea,[contenteditable=true],.ant-select")) return;
+      const tagName = target?.tagName?.toLowerCase();
+      if (
+        tagName === "input" ||
+        tagName === "textarea" ||
+        target?.isContentEditable ||
+        target?.closest("input, textarea, [contenteditable=true], .ant-input, .ant-select, .ant-input-affix-wrapper")
+      ) {
+        return;
+      }
       const key = event.key.toLowerCase();
       if ((event.ctrlKey || event.metaKey) && key === "z") { event.preventDefault(); history.mutate(event.shiftKey ? "redo" : "undo"); return; }
       if ((event.ctrlKey || event.metaKey) && key === "y") { event.preventDefault(); history.mutate("redo"); return; }
-      if ((event.key === "Delete" || event.key === "Backspace") && store.selectedIds.length) { event.preventDefault(); void deleteItems(store.selectedIds); return; }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        const currentSelected = useReviewWorkbenchStore.getState().selectedIds;
+        if (currentSelected.length) {
+          event.preventDefault();
+          void deleteItems(currentSelected);
+          return;
+        }
+      }
       if (event.key === "Escape") { store.clearSelection(); return; }
-      if (key === "v") store.setActiveTool("select");
-      else if (key === "h") store.setActiveTool("pan");
+      if (key === "v") {
+        if (store.activeTool === "select") {
+          store.toggleSelectPanInversion();
+        } else {
+          store.setActiveTool("select");
+        }
+      }
       else if (key === "r") store.setActiveTool("draw");
       else if (key === "t") store.setActiveTool("ai_text");
       else if (key === "i") store.setActiveTool("ai_visual");
@@ -116,7 +159,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [categories, deleteItems, history, store.selectedIds]);
+  }, [categories, deleteItems, history, store.selectedIds, store.activeTool]);
 
   if (session.isLoading || workspace.isLoading || mapContext.isLoading) return <div className="review-loading"><Spin size="large" tip="加载与恢复单 TIFF 复核会话…" /></div>;
   if (!session.data || !workspace.data || !mapContext.data || session.isError || workspace.isError || mapContext.isError) {
@@ -129,8 +172,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
   };
   const categoryAction = (id: string, action: "accept" | "reject" | "delete") => {
     const targets = items.filter((item) => item.species === id).map((item) => item.id);
-    if (action === "delete") { void deleteItems(targets); return; }
-    void apply([{ type: "bulk_status", item_ids: targets, status: action === "accept" ? "accepted" : "rejected" }], "category-status");
+    if (action === "delete") { void deleteItems(targets); }
   };
   const updateSelectedCategory = (species: string) => {
     const targets = editableIds(store.selectedIds);
@@ -139,7 +181,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
   };
 
   return (
-    <div className="review-workbench-root">
+    <div className={`review-workbench-root${sidePanelCollapsed ? " is-panel-collapsed" : ""}`}>
       <div className="area-topbar"><TopBar session={session.data} onPublish={() => publish.mutate()} isPublishing={publish.isPending} /></div>
       <div className="area-toolrail">
         <ToolRail
@@ -150,7 +192,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
           onUndo={() => history.mutate("undo")}
           onRedo={() => history.mutate("redo")}
           onDeleteSelected={() => void deleteItems(store.selectedIds)}
-          onClearWorkspace={() => Modal.confirm({ title: "清空可编辑工作集？", content: "冻结框将保留，其余对象会被删除。", okText: "清空", okButtonProps: { danger: true }, cancelText: "取消", onOk: () => deleteItems(items.map((item) => item.id)) })}
+          onClearWorkspace={() => modal.confirm({ title: "清空可编辑工作集？", content: "冻结框将保留，其余对象会被删除。", okText: "清空", okButtonProps: { danger: true }, cancelText: "取消", onOk: () => deleteItems(items.map((item) => item.id)) })}
           onFitViewport={() => mapRef.current?.fitViewport()}
           onZoomIn={() => mapRef.current?.zoomIn()}
           onZoomOut={() => mapRef.current?.zoomOut()}
@@ -176,35 +218,114 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
             onAddBox={(boxPx) => {
               const species = store.activeCategory || categories[0]?.id;
               if (!species) { message.warning("请先创建并选择树种类别"); return; }
-              void apply([{ type: "add", item: { box_px: boxPx, species } }], "add");
+              void apply([{ type: "add", item: { box_px: boxPx, species, source: "manual", confidence: 1.0 } }], "add");
             }}
+            onVisualPromptBox={(boxPx) => setVisualBoxSample(boxPx)}
             onUpdateBox={(id, boxPx) => void apply([{ type: "update", item_id: id, patch: { box_px: boxPx } }], "resize")}
           />
+          {/* 右侧面板左侧居中微手柄：靠近出现，点击平滑折叠/展开 */}
+          <div
+            className={`review-panel-dock-handle${sidePanelCollapsed ? " is-collapsed" : ""}`}
+            onClick={() => setSidePanelCollapsed((prev) => !prev)}
+            title={sidePanelCollapsed ? "展开右侧面板" : "收拢右侧面板"}
+          >
+            <div className="review-panel-dock-handle__pill">
+              <span className="review-panel-dock-handle__icon">
+                {sidePanelCollapsed ? "‹" : "›"}
+              </span>
+            </div>
+          </div>
           {store.selectedIds.length ? (
             <div className="review-bulk-floating">
-              <Typography.Text strong>已选 {store.selectedIds.length} 个对象</Typography.Text>
+              <Typography.Text strong>已选 {store.selectedIds.length} 项</Typography.Text>
               <Select size="small" placeholder="修改类别" options={categories.map((category) => ({ value: category.id, label: category.display_name }))} onChange={updateSelectedCategory} style={{ width: 140 }} />
-              <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => void apply([{ type: "bulk_status", item_ids: store.selectedIds, status: "accepted" }], "bulk-status")}>接受</Button>
-              <Button size="small" icon={<CloseOutlined />} onClick={() => void apply([{ type: "bulk_status", item_ids: store.selectedIds, status: "rejected" }], "bulk-status")}>拒绝</Button>
               <Button size="small" danger icon={<DeleteOutlined />} onClick={() => void deleteItems(store.selectedIds)}>删除</Button>
             </div>
           ) : null}
-          <PromptPanel sessionId={sessionId} revision={store.revision} categories={categories} items={items} mapContext={mapContext.data} getCenterPx={() => mapRef.current?.getCenterPx() ?? null} onCreated={(attempt) => setAttempts((current) => [...current.filter((item) => item.attempt_id !== attempt.attempt_id), attempt])} />
+          <PromptPanel
+            sessionId={sessionId}
+            revision={store.revision}
+            categories={categories}
+            items={items}
+            mapContext={mapContext.data}
+            getCenterPx={() => mapRef.current?.getCenterPx() ?? null}
+            onCreated={(attempt) => setAttempts((current) => [...current.filter((item) => item.attempt_id !== attempt.attempt_id), attempt])}
+            visualBoxSample={visualBoxSample}
+            onClearVisualSample={() => setVisualBoxSample(null)}
+          />
           <AttemptPanel sessionId={sessionId} revision={store.revision} attempts={attempts} mergeMode={store.mergeMode} onChanged={(attempt) => setAttempts((current) => [...current.filter((item) => item.attempt_id !== attempt.attempt_id), attempt])} onPreview={setCandidateItems} onApplied={(revision, nextItems) => store.replaceItems(revision, nextItems)} />
         </div>
-        <ObjectThumbnailBar items={items} categories={categories} onSelect={(id) => store.select(id)} />
       </div>
       <div className="area-panel">
-        <Tabs defaultActiveKey="objects" size="small" className="review-side-tabs" items={[
-          { key: "objects", label: "标注对象", children: <div className="review-object-pane"><CategoryPanel categories={categories} items={items} freshMode={session.data.mode === "fresh"} onAddCategory={(name) => { const next = [...categories, { id: name, display_name: name, model_prompt: name, color: CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length] }]; void setCatalog(next, name); }} onChangeColor={(id, color) => void setCatalog(categories.map((category) => category.id === id ? { ...category, color } : category))} onCategoryAction={categoryAction} /><ObjectList items={items} categories={categories} onSelect={(id, additive) => store.select(id, additive)} onBulkStatus={(status) => void apply([{ type: "bulk_status", item_ids: store.selectedIds, status }], "bulk-status")} onBulkDelete={() => void deleteItems(store.selectedIds)} /></div> },
-          { key: "inspector", label: "属性编辑", children: active ? <ItemInspector item={active} categories={categories} busy={command.isPending} onUpdate={(patch) => apply([{ type: "update", item_id: active.id, patch }], "item")} onDelete={() => deleteItems([active.id])} onEditMask={active.mask_rle && !active.frozen ? () => setEditingMask(active) : undefined} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未选中任何对象" /> },
-          { key: "meta", label: "影像信息", children: <TiffInfoPanel session={session.data} /> },
-        ]} />
+        <div className="review-panel-inner">
+          <Tabs defaultActiveKey="objects" size="small" className="review-side-tabs" items={[
+            {
+              key: "objects",
+              label: "标注对象",
+              children: (
+                <div className="review-object-pane">
+                  <CategoryPanel
+                    categories={categories}
+                    items={items}
+                    freshMode={session.data.mode === "fresh"}
+                    onAddCategory={(name) => {
+                      const next = [...categories, { id: name, display_name: name, model_prompt: name, color: CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length] }];
+                      void setCatalog(next, name);
+                    }}
+                    onRenameCategory={(id, newName) => {
+                      const next = categories.map((cat) => (cat.id === id ? { ...cat, display_name: newName, model_prompt: newName } : cat));
+                      void setCatalog(next);
+                    }}
+                    onChangeColor={(id, color) => void setCatalog(categories.map((category) => (category.id === id ? { ...category, color } : category)))}
+                    onCategoryAction={categoryAction}
+                  />
+                  <ObjectList
+                    items={items}
+                    categories={categories}
+                    onSelect={(id, additive) => store.select(id, additive)}
+                    onDeleteSingle={(id) => void deleteItems([id])}
+                  />
+                </div>
+              ),
+            },
+            {
+              key: "inspector",
+              label: "属性编辑",
+              children: active ? (
+                <ItemInspector
+                  item={active}
+                  categories={categories}
+                  busy={command.isPending}
+                  onUpdate={(patch) => apply([{ type: "update", item_id: active.id, patch }], "item")}
+                  onDelete={() => deleteItems([active.id])}
+                  onEditMask={active.mask_rle && !active.frozen ? () => setEditingMask(active) : undefined}
+                />
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未选中任何对象" />
+              ),
+            },
+            {
+              key: "meta",
+              label: "影像信息",
+              children: <TiffInfoPanel session={session.data} mapContext={mapContext.data} />,
+            },
+          ]} />
+        </div>
       </div>
       <div className="area-statusbar"><StatusBar totalItems={items.length} visibleItems={visibleItems.length} /></div>
       <MaskEditor open={Boolean(editingMask)} item={editingMask} saving={saveMask.isPending} onCancel={() => setEditingMask(null)} onSave={async (strokes) => { if (editingMask) await saveMask.mutateAsync({ itemId: editingMask.id, strokes }); }} />
       <Modal title="工作台快捷键" open={helpModalOpen} footer={null} onCancel={() => setHelpModalOpen(false)}>
-        <div className="review-shortcuts"><span><kbd>V</kbd> 选择 / 框选</span><span><kbd>H</kbd> 平移地图</span><span><kbd>R</kbd> 手动画框</span><span><kbd>T</kbd> AI 文本</span><span><kbd>I</kbd> AI 视觉</span><span><kbd>1–9</kbd> 切换树种</span><span><kbd>Ctrl/⌘ Z</kbd> 撤销</span><span><kbd>Delete</kbd> 删除可编辑框</span></div>
+        <div className="review-shortcuts">
+          <span><kbd>V</kbd> 选择与拖拽 (交替反转左右键)</span>
+          <span><kbd>Space</kbd> 临时按住空格抓手平移</span>
+          <span><kbd>鼠标中键</kbd> 按住拖拽旋转地图 (Rotate)</span>
+          <span><kbd>R</kbd> 手动画框</span>
+          <span><kbd>T</kbd> AI 文本</span>
+          <span><kbd>I</kbd> AI 视觉</span>
+          <span><kbd>1–9</kbd> 切换树种</span>
+          <span><kbd>Ctrl/⌘ Z</kbd> 撤销</span>
+          <span><kbd>Delete</kbd> 删除可编辑框</span>
+        </div>
       </Modal>
     </div>
   );

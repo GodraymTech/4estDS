@@ -70,6 +70,7 @@ def test_publish_rejects_missing_category_and_outside_effective_area(review_db: 
     with pytest.raises(ReviewValidationError) as missing:
         ReviewPublishService(url, session_service=sessions).publish(empty.session_id)
     assert missing.value.code == "category_required"
+    sessions.discard(empty.session_id)
 
     based = sessions.create(PHASE, TIFF, "inherit")
     item_id = sessions.workspace(based.session_id).items[0]["id"]

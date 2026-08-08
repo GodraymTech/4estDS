@@ -328,6 +328,17 @@ class ReviewSessionService:
             raise ReviewNotFound("复核会话不存在。", code="session_not_found", details={"session_id": session_id})
         return _session(row)
 
+    def discard(self, session_id: str) -> None:
+        conn = _connect(self.db_url)
+        try:
+            conn.execute(
+                "UPDATE review_sessions SET status='discarded', updated_at=? WHERE session_id=?",
+                (_now(), session_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def list(self, *, status: str | None = None) -> list[ReviewSession]:
         conn = _connect(self.db_url)
         try:
@@ -344,6 +355,7 @@ class ReviewSessionService:
     def workspace(self, session_id: str) -> ReviewWorkspace:
         session = self.get(session_id)
         workspace = self.drafts.load(session_id)
+        workspace.revision = session.revision
         missing = [item for item in workspace.items if item.get("box_px") and not item.get("box_wgs84")]
         if missing:
             conn = _connect(self.db_url)
@@ -368,11 +380,11 @@ class ReviewSessionService:
         deleted_item_ids: Sequence[str] = (),
         replace_all: bool = False,
     ) -> WorkspacePatch:
-        workspace.revision += 1
+        new_revision = session.revision + 1
+        workspace.revision = new_revision
         workspace.applied_operations[operation_id] = workspace.revision
         if len(workspace.applied_operations) > 2000:
             workspace.applied_operations = dict(list(workspace.applied_operations.items())[-1000:])
-        self.drafts.save(session.session_id, workspace)
         summary = workspace_summary(workspace.items)
         conn = _connect(self.db_url)
         try:
@@ -380,7 +392,7 @@ class ReviewSessionService:
                 "UPDATE review_sessions SET revision=?, summary_json=?, updated_at=? "
                 "WHERE session_id=? AND revision=? AND status='active'",
                 (
-                    workspace.revision,
+                    new_revision,
                     json.dumps(summary, ensure_ascii=False),
                     _now(),
                     session.session_id,
@@ -395,6 +407,7 @@ class ReviewSessionService:
             raise
         finally:
             conn.close()
+        self.drafts.save(session.session_id, workspace)
         changed = {str(value) for value in changed_item_ids}
         changed_items = tuple(item for item in workspace.items if str(item.get("id")) in changed)
         return WorkspacePatch(
@@ -424,11 +437,13 @@ class ReviewSessionService:
         workspace = self.drafts.load(session_id)
         if operation_id in workspace.applied_operations:
             return self._existing_patch(session_id, workspace)
-        if revision != session.revision or revision != workspace.revision:
+        if workspace.revision != session.revision:
+            workspace.revision = session.revision
+        if revision != session.revision:
             raise ReviewConflict(
                 "复核草稿版本冲突，请重新加载。",
                 code="revision_conflict",
-                details={"expected": workspace.revision, "received": revision},
+                details={"expected": session.revision, "received": revision},
             )
         if not operations:
             raise ReviewValidationError("operations 不能为空。", code="operations_required")
@@ -504,8 +519,14 @@ class ReviewSessionService:
 
     @staticmethod
     def _check_revision(session: ReviewSession, workspace: ReviewWorkspace, revision: int) -> None:
-        if revision != session.revision or revision != workspace.revision:
-            raise ReviewConflict("复核草稿版本冲突，请重新加载。", code="revision_conflict")
+        if workspace.revision != session.revision:
+            workspace.revision = session.revision
+        if revision != session.revision:
+            raise ReviewConflict(
+                "复核草稿版本冲突，请重新加载。",
+                code="revision_conflict",
+                details={"expected": session.revision, "received": revision},
+            )
 
     def cancel(self, session_id: str, revision: int) -> ReviewSession:
         session = self.get(session_id)

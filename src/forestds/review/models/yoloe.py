@@ -10,6 +10,44 @@ from ..domain import ReviewValidationError
 from .base import PromptContext, RasterWindow, ReviewPrediction
 
 
+def _clean_rgb(img: Any) -> Any:
+    """确保送入 Ultralytics / YOLOE / PyTorch 的图像恒为标准 (H, W, 3) uint8 连续 RGB。"""
+    import numpy as np
+    if not isinstance(img, np.ndarray):
+        img = np.asarray(img)
+    if img.ndim == 4:
+        img = img[0]
+    if img.ndim == 2:
+        img = np.repeat(img[:, :, None], 3, axis=2)
+    elif img.ndim == 3:
+        if img.shape[0] in (1, 2, 3, 4, 5, 8) and img.shape[0] < min(img.shape[1], img.shape[2]):
+            img = img.transpose(1, 2, 0)
+        if img.shape[2] == 1:
+            img = np.repeat(img, 3, axis=2)
+        elif img.shape[2] >= 4:
+            img = img[:, :, :3]
+        elif img.shape[2] == 2:
+            img = np.pad(img, ((0, 0), (0, 0), (0, 1)), mode="edge")
+
+    if img.dtype != np.uint8:
+        if np.issubdtype(img.dtype, np.floating):
+            max_val = float(np.nanmax(img)) if img.size else 1.0
+            if max_val <= 1.0:
+                img = (np.clip(img, 0, 1) * 255.0).astype(np.uint8)
+            else:
+                img = np.clip(img, 0, 255).astype(np.uint8)
+        elif img.dtype in (np.uint16, np.int16, np.uint32, np.int32):
+            max_val = float(np.max(img)) if img.size else 255.0
+            if max_val > 255.0:
+                img = np.clip(img / (max_val / 255.0), 0, 255).astype(np.uint8)
+            else:
+                img = np.clip(img, 0, 255).astype(np.uint8)
+        else:
+            img = np.clip(img, 0, 255).astype(np.uint8)
+
+    return np.ascontiguousarray(img)
+
+
 class YOLOEReviewAdapter:
     def __init__(
         self,
@@ -100,22 +138,29 @@ class YOLOEReviewAdapter:
         return PromptContext(
             mode="visual",
             class_ids=class_ids,
-            reference_image=reference_image,
+            reference_image=_clean_rgb(reference_image),
             reference_boxes=boxes.tolist(),
-            reference_classes=labels.tolist(),
+            reference_classes=[int(x) for x in labels.tolist()],
         )
 
     def predict_batch(self, windows: Sequence[RasterWindow], prompt_context: PromptContext) -> list[ReviewPrediction]:
         if not windows:
             return []
         self.load()
-        sources = [window.pixels for window in windows]
+        sources = [_clean_rgb(window.pixels) for window in windows]
         kwargs = {"conf": self.conf, "imgsz": self.imgsz, "device": self.device, "verbose": False}
         if prompt_context.mode == "visual" and not prompt_context.encoded:
+            from ultralytics.models.yolo.yoloe import YOLOEVPDetectPredictor, YOLOEVPSegPredictor
+            is_seg = "seg" in str(self.weights).lower() or getattr(self.model, "task", "") == "segment"
+            predictor_cls = YOLOEVPSegPredictor if is_seg else YOLOEVPDetectPredictor
             results = self.model.predict(
                 sources,
-                visual_prompts={"bboxes": prompt_context.reference_boxes, "cls": prompt_context.reference_classes},
-                refer_image=prompt_context.reference_image,
+                visual_prompts={
+                    "bboxes": prompt_context.reference_boxes,
+                    "cls": [int(x) for x in prompt_context.reference_classes],
+                },
+                refer_image=_clean_rgb(prompt_context.reference_image),
+                predictor=predictor_cls,
                 **kwargs,
             )
             prompt_context.encoded = True

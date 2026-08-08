@@ -164,15 +164,17 @@ class ReviewPublishService:
         box = [float(value) for value in item["box_px"]]
         x1, y1, x2, y2 = box
         observation_id = f"obs_{uuid.uuid4().hex[:12]}"
+        source = str(item.get("source") or ("manual" if float(item.get("confidence") or 1.0) >= 0.999 and not item.get("source") else "infer")).strip()
         conn.execute(
             "INSERT INTO tree_observations "
             "(observation_id, individual_id, run_id, tract_phase_pk, tiff_id, phase_id, species, confidence, "
-            "center_geom, crown_geom, box_px, box_geo, crown_width_px, crown_height_px, crown_area_px, "
-            "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "source, center_geom, crown_geom, box_px, box_geo, crown_width_px, crown_height_px, crown_area_px, "
+            "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 observation_id, item.get("individual_id"), run_id, session["tract_phase_pk"],
                 session["tiff_id"], session["phase_id"], str(item["species"]).strip(),
                 float(item.get("confidence") or 1.0),
+                source,
                 item.get("center_geom") or f"POINT({(x1 + x2) / 2} {(y1 + y2) / 2})",
                 item.get("crown_geom"),
                 json.dumps(box), json.dumps(item.get("box_geo")) if item.get("box_geo") is not None else None,

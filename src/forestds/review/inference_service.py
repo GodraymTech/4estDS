@@ -91,6 +91,48 @@ def viewport_to_pixel_window(
     return x1, y1, x2 - x1, y2 - y1
 
 
+def _ensure_rgb(img: Any) -> Any:
+    """确保输入图像像素数组恒为连续的 (H, W, 3) 标准三通道 RGB uint8 数组。
+    安全兼容 (C, H, W)、(H, W, C)、(H, W)、uint16、float32、单通道、4 通道 (RGBA/NIR) 等任意形态。
+    """
+    import numpy as np
+    if not isinstance(img, np.ndarray):
+        img = np.asarray(img)
+    if img.ndim == 4:
+        img = img[0]
+    if img.ndim == 2:
+        img = np.repeat(img[:, :, None], 3, axis=2)
+    elif img.ndim == 3:
+        # 若为 (C, H, W) 格式，先转为 (H, W, C)
+        if img.shape[0] in (1, 2, 3, 4, 5, 8) and img.shape[0] < min(img.shape[1], img.shape[2]):
+            img = img.transpose(1, 2, 0)
+        if img.shape[2] == 1:
+            img = np.repeat(img, 3, axis=2)
+        elif img.shape[2] >= 4:
+            img = img[:, :, :3]
+        elif img.shape[2] == 2:
+            img = np.pad(img, ((0, 0), (0, 0), (0, 1)), mode="edge")
+
+    # 规范化像素值到 uint8 (0~255)
+    if img.dtype != np.uint8:
+        if np.issubdtype(img.dtype, np.floating):
+            max_val = float(np.nanmax(img)) if img.size else 1.0
+            if max_val <= 1.0:
+                img = (np.clip(img, 0, 1) * 255.0).astype(np.uint8)
+            else:
+                img = np.clip(img, 0, 255).astype(np.uint8)
+        elif img.dtype in (np.uint16, np.int16, np.uint32, np.int32):
+            max_val = float(np.max(img)) if img.size else 255.0
+            if max_val > 255.0:
+                img = np.clip(img / (max_val / 255.0), 0, 255).astype(np.uint8)
+            else:
+                img = np.clip(img, 0, 255).astype(np.uint8)
+        else:
+            img = np.clip(img, 0, 255).astype(np.uint8)
+
+    return np.ascontiguousarray(img)
+
+
 class ReviewInferenceService:
     def __init__(
         self,
@@ -155,9 +197,12 @@ class ReviewInferenceService:
             "updated_at": _now(),
             "error": None,
         }
+        # 使用当前最新草稿 revision，避免上一次尝试失败递增 revision 后导致 409 冲突
+        workspace = self.sessions.drafts.load(session_id)
+        effective_revision = workspace.revision if workspace is not None else revision
         self.sessions.apply_operations(
             session_id,
-            revision,
+            effective_revision,
             f"create-{attempt['attempt_id']}",
             [{"type": "upsert_attempt", "attempt": attempt}],
         )
@@ -251,7 +296,8 @@ class ReviewInferenceService:
                     batch_specs = windows[index:index + batch_size]
                     batch = []
                     for x, y, w, h in batch_specs:
-                        pixels = source.read(window=Window(x, y, w, h)).transpose(1, 2, 0)
+                        raw_pixels = source.read(window=Window(x, y, w, h)).transpose(1, 2, 0)
+                        pixels = _ensure_rgb(raw_pixels)
                         if window_filter is not None:
                             local_mask = window_filter.local_mask((x, y, w, h))
                             if local_mask is not None:
@@ -452,11 +498,12 @@ class ReviewInferenceService:
         width, height = right - left, bottom - top
         scale = min(1.0, 4096 / max(width, height))
         out_width, out_height = max(1, round(width * scale)), max(1, round(height * scale))
-        reference = source.read(
+        raw_reference = source.read(
             window=Window(left, top, width, height),
             out_shape=(source.count, out_height, out_width),
             resampling=Resampling.bilinear,
         ).transpose(1, 2, 0)
+        reference = _ensure_rgb(raw_reference)
         local_boxes = [[
             (box[0] - left) * scale,
             (box[1] - top) * scale,

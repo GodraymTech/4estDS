@@ -49,7 +49,7 @@ DDL: tuple[str, ...] = (
         base_run_id         TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
         expected_active_run_id TEXT REFERENCES runs(run_id) ON DELETE SET NULL,
         status              TEXT NOT NULL DEFAULT 'active'
-            CHECK (status IN ('active', 'published', 'canceled')),
+            CHECK (status IN ('active', 'published', 'canceled', 'discarded')),
         revision            INTEGER NOT NULL DEFAULT 0,
         draft_path          TEXT NOT NULL,
         summary_json        TEXT,
@@ -171,6 +171,7 @@ DDL: tuple[str, ...] = (
         crown_area_geo_real    REAL,
         height                 REAL,
         height_source          TEXT,
+        source                 TEXT NOT NULL DEFAULT 'infer',
         crown_volume_geo_est   REAL,
         crown_volume_geo_real  REAL,
         source_subimage_path   TEXT,

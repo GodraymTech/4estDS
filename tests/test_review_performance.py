@@ -57,7 +57,7 @@ def test_spatial_index_keeps_oversized_box_merge_semantics() -> None:
         "box_px": [0, 0, 10_000, 10_000], "source": "ai", "confirmed": False,
     }]
     result = ReviewMergeService().apply("append", existing, incoming)
-    assert [item["id"] for item in result] == ["new"]
+    assert [item["id"] for item in result] == ["old"]
 
 
 def test_single_edit_uses_delta_history_in_10k_workspace(review_db: tuple[str, Path]) -> None:

@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { App, Button, Card, Empty, Popconfirm, Segmented, Select, Space, Spin, Table, Tag, Tooltip, Typography } from "antd";
-import { DeleteOutlined, PlayCircleOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import { DeleteOutlined, PlayCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { useCreateReview, useDeleteReview, useReviews } from "../entities/review";
 import type { ReviewMode, ReviewSession } from "../entities/review";
 import { ReviewWorkbench } from "../features/review-workbench";
 import { endpoints, queryKeys } from "../shared/api";
+import "./ReviewPage.css";
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -69,7 +70,7 @@ function ReviewHome() {
     <div style={{ padding: 24, overflow: "auto" }}>
       <Title level={2}>智能复核</Title>
       <Paragraph type="secondary">
-        每个会话处理单张大 TIFF。草稿实时保存于服务端，发布后将原子提交生成 review run。
+        依托先进的AI辅助标注功能，实现已推理资产的深度核查。
       </Paragraph>
 
       <Card title="新建复核会话" style={{ marginBottom: 20 }}>
@@ -89,31 +90,36 @@ function ReviewHome() {
               onChange={setAssetKey}
             />
 
-            <Space size={6}>
-              <Text type="secondary" style={{ fontSize: 13 }}>模式:</Text>
+            <div className="apple-capsule-wrapper">
+              <span className="apple-capsule-label">模式:</span>
               <Segmented
+                className="apple-capsule-segmented"
                 value={mode}
                 options={[
                   {
                     value: "inherit",
                     label: (
-                      <Tooltip title="基于当前正式检测结果，继承已确认标注并继续修正">
-                        <span>继承 <InfoCircleOutlined style={{ fontSize: 12, opacity: 0.7 }} /></span>
+                      <Tooltip title="对已有的推理结果进行增删查改">
+                        <span className="apple-pill-item">
+                          <span>继承</span>
+                        </span>
                       </Tooltip>
                     ),
                   },
                   {
                     value: "fresh",
                     label: (
-                      <Tooltip title="从空白画布开始，不加载已有检测结果">
-                        <span>新启 <InfoCircleOutlined style={{ fontSize: 12, opacity: 0.7 }} /></span>
+                      <Tooltip title="不加载已有推理结果，从空白画布开始">
+                        <span className="apple-pill-item">
+                          <span>新启</span>
+                        </span>
                       </Tooltip>
                     ),
                   },
                 ]}
                 onChange={(val) => setMode(val as ReviewMode)}
               />
-            </Space>
+            </div>
 
             <Button
               type="primary"
@@ -123,13 +129,13 @@ function ReviewHome() {
               loading={create.isPending}
               onClick={start}
             >
-              创建复核会话
+              创建会话
             </Button>
           </Space>
 
           {selected && mode === "inherit" && !selected.active_run_id && (
-            <Text type="warning" style={{ fontSize: 13 }}>
-              ⚠️ 该 TIFF 尚无正式检测结果，请切换模式为“新启”以从空白画布开始。
+            <Text type="warning" style={{ fontSize: 11 }}>
+              ⚠️ 该 TIFF 尚无正式检测结果，请切换模式为“新启”。
             </Text>
           )}
         </Space>

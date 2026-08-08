@@ -62,6 +62,28 @@ export function LedgerTable() {
   const [sortList, setSortList] = useState<Array<{ columnKey: string; order: "ascend" | "descend" }>>([]);
   const [serverFileBrowserOpen, setServerFileBrowserOpen] = useState(false);
 
+  // 本地最近使用的 TIFF 路径记忆
+  const [recentPaths, setRecentPaths] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem("4estds_recent_tiff_paths");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const addRecentPath = (path: string) => {
+    const trimmed = (path || "").trim();
+    if (!trimmed) return;
+    setRecentPaths((prev) => {
+      const next = [trimmed, ...prev.filter((p) => p !== trimmed)].slice(0, 20);
+      try {
+        localStorage.setItem("4estds_recent_tiff_paths", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
   const handleHeaderClick = (key: string) => (e: React.MouseEvent) => {
     e.stopPropagation();
     setSortList((prev) => {
@@ -718,8 +740,32 @@ export function LedgerTable() {
     return statusTag(row.status);
   }
 
+  // 组合智能路径提示候选项（最近使用 + 现有台账已导入路径）
+  const pathOptions = useMemo(() => {
+    const existing = Array.from(new Set((assets.data?.map((a) => a.source_path).filter(Boolean) as string[]) || []));
+    const groups: Array<{ label: string; options: Array<{ value: string; label: string }> }> = [];
+
+    if (recentPaths.length) {
+      groups.push({
+        label: "🕒 最近输入与选择历史",
+        options: recentPaths.map((p) => ({ value: p, label: p })),
+      });
+    }
+
+    const otherExisting = existing.filter((p) => !recentPaths.includes(p));
+    if (otherExisting.length) {
+      groups.push({
+        label: "📁 已入库 TIFF 路径",
+        options: otherExisting.map((p) => ({ value: p, label: p })),
+      });
+    }
+
+    return groups;
+  }, [assets.data, recentPaths]);
+
   return (
-    <Space direction="vertical" size={12} style={FULL}>
+    <Space direction="vertical" size={16} style={FULL}>
+      {/* 顶部搜索与操作栏 */}
       <style>{`
         .ant-table-thead th .ant-table-column-sorter {
           order: -1;
@@ -833,10 +879,23 @@ export function LedgerTable() {
                   rules={[{ required: true, message: "请输入 TIFF 路径" }]}
                   style={{ flex: 1 }}
                 >
-                  <Input
-                    placeholder="输入本机 TIFF 路径"
+                  <AutoComplete
+                    options={pathOptions}
+                    placeholder="输入、粘贴或从历史记录中选择 TIFF 路径"
                     disabled={inspect.isPending}
-                  />
+                    filterOption={(inputValue, option) => {
+                      const v = (option as { value?: string })?.value;
+                      return v ? v.toLowerCase().includes(inputValue.toLowerCase()) : true;
+                    }}
+                    onSelect={(val: string) => {
+                      form.setFieldsValue({ input_path: val });
+                      addRecentPath(val);
+                      lastInspectedPath.current = val;
+                      inspect.mutate({ input_path: val });
+                    }}
+                  >
+                    <Input placeholder="输入、粘贴或从历史记录中选择 TIFF 路径" />
+                  </AutoComplete>
                 </Form.Item>
                 <div style={{ marginTop: 29 }}>
                   <Space size={8}>
@@ -854,6 +913,7 @@ export function LedgerTable() {
                         const val = form.getFieldValue("input_path");
                         const trimmed = (val || "").trim();
                         if (!trimmed) return;
+                        addRecentPath(trimmed);
                         lastInspectedPath.current = trimmed;
                         inspect.mutate({ input_path: trimmed });
                       }}
@@ -876,7 +936,10 @@ export function LedgerTable() {
                           loading={convertCog.isPending}
                           onClick={() => {
                             const path = form.getFieldValue("input_path");
-                            if (path) convertCog.mutate(String(path));
+                            if (path) {
+                              addRecentPath(String(path));
+                              convertCog.mutate(String(path));
+                            }
                           }}
                         >
                           转为 COG
@@ -939,7 +1002,12 @@ export function LedgerTable() {
       <ServerFileBrowserModal
         open={serverFileBrowserOpen}
         onClose={() => setServerFileBrowserOpen(false)}
-        onSelect={(path) => form.setFieldsValue({ input_path: path })}
+        onSelect={(path) => {
+          form.setFieldsValue({ input_path: path });
+          addRecentPath(path);
+          lastInspectedPath.current = path;
+          inspect.mutate({ input_path: path });
+        }}
         selectType="file"
         title="选择服务端.tif图像"
         defaultPath={form.getFieldValue("input_path")}

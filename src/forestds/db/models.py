@@ -175,6 +175,7 @@ class TreeObservation(Base):
     crown_area_geo_real: Mapped[float | None] = mapped_column(Float)                                                   # 树冠地理精确面积 (m²，由多边形/Mask精确计算)
     height: Mapped[float | None] = mapped_column(Float)                                                                # 树高 (米)
     height_source: Mapped[str | None] = mapped_column(String)                                                          # 树高计算来源 (chm / dsm_dem / manual / unknown)
+    source: Mapped[str] = mapped_column(String, default="infer")                                                       # 框来源 (infer: 模型离线批处理 / manual: review人工手绘 / review: 开放世界prompt)
     crown_volume_geo_est: Mapped[float | None] = mapped_column(Float)                                                   # 树冠估算体积 (m³)
     crown_volume_geo_real: Mapped[float | None] = mapped_column(Float)                                                  # 树冠真实/精确体积 (m³)
     source_subimage_path: Mapped[str | None] = mapped_column(Text)                                                      # 来源单木切片小图相对/绝对路径

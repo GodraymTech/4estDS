@@ -2,8 +2,8 @@ import { create } from "zustand";
 import type { ReviewItem, ReviewPatch, ReviewWorkspace } from "../../entities/review";
 import type { ReviewMergeMode } from "../../shared/api/types";
 
-/** 选择与平移拆分为两个工具: 选择态下左键用于框选, 平移态下左键拖动地图。 */
-export type WorkbenchTool = "select" | "pan" | "draw" | "ai_text" | "ai_visual";
+/** 选择与平移、手动画框、AI 交互工具 */
+export type WorkbenchTool = "select" | "draw" | "ai_text" | "ai_visual";
 
 /** AI 识别范围滑杆左端对应的最小边长(全局像素)。 */
 export const MIN_REGION_SIDE_PX = 1280;
@@ -18,6 +18,8 @@ export interface ReviewWorkbenchState {
   
   // 画布与工具状态
   activeTool: WorkbenchTool;
+  /** 选择与平移的交替开关: false 为默认[左键选择/框选, 右键平移]; true 为反转[左键平移, 右键选择/框选] */
+  selectPanInverted: boolean;
   zoom: number;
   pan: { x: number; y: number };
   activeCategory: string | null;
@@ -26,8 +28,9 @@ export interface ReviewWorkbenchState {
   isSyncing: boolean;
   maskEditingItemId: string | null;
 
-  // 类别可见性(驱动 MapLibre 图层 filter); 空数组表示全部可见
+  // 类别与单个对象可见性
   hiddenCategories: string[];
+  hiddenItemIds: string[];
 
   // AI 识别范围与写入策略(画布矩形图层与 AI 面板共享一份真相)
   regionSidePx: number;
@@ -43,6 +46,8 @@ export interface ReviewWorkbenchState {
   setSelectedIds: (ids: string[]) => void;
   clearSelection: () => void;
   setActiveTool: (tool: WorkbenchTool) => void;
+  toggleSelectPanInversion: () => void;
+  setSelectPanInverted: (inverted: boolean) => void;
   setZoom: (zoom: number | ((prev: number) => number)) => void;
   setPan: (pan: { x: number; y: number } | ((prev: { x: number; y: number }) => { x: number; y: number })) => void;
   setActiveCategory: (cat: string | null) => void;
@@ -52,6 +57,8 @@ export interface ReviewWorkbenchState {
   setMaskEditingItemId: (id: string | null) => void;
   toggleCategoryVisibility: (categoryId: string) => void;
   setHiddenCategories: (ids: string[]) => void;
+  toggleItemVisibility: (itemId: string) => void;
+  setHiddenItemIds: (ids: string[]) => void;
   setRegionSidePx: (side: number) => void;
   setRegionMetricsVisible: (visible: boolean) => void;
   setMergeMode: (mode: ReviewMergeMode) => void;
@@ -70,6 +77,7 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
   activeId: null,
 
   activeTool: "select",
+  selectPanInverted: false,
   zoom: 1,
   pan: { x: 0, y: 0 },
   activeCategory: null,
@@ -79,6 +87,7 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
   maskEditingItemId: null,
 
   hiddenCategories: [],
+  hiddenItemIds: [],
   regionSidePx: MIN_REGION_SIDE_PX,
   regionMetricsVisible: false,
   mergeMode: "append",
@@ -91,6 +100,7 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
     selectedIds: [],
     activeId: workspace.items[0]?.id ?? null,
     activeCategory: workspace.active_category ?? workspace.category_catalog[0]?.id ?? null,
+    hiddenItemIds: [],
     // 后端给出显式可见列表时取其补集作为隐藏项, 未给出则视为全部可见。
     hiddenCategories: workspace.visible_categories?.length
       ? workspace.category_catalog
@@ -142,6 +152,8 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
   setSelectedIds: (ids) => set({ selectedIds: ids, activeId: ids[0] ?? null }),
   clearSelection: () => set({ selectedIds: [], activeId: null }),
   setActiveTool: (tool) => set({ activeTool: tool }),
+  toggleSelectPanInversion: () => set((state) => ({ selectPanInverted: !state.selectPanInverted })),
+  setSelectPanInverted: (selectPanInverted) => set({ selectPanInverted }),
   setZoom: (zoom) => set((state) => ({ zoom: typeof zoom === "function" ? zoom(state.zoom) : zoom })),
   setPan: (pan) => set((state) => ({ pan: typeof pan === "function" ? pan(state.pan) : pan })),
   setActiveCategory: (cat) => set({ activeCategory: cat }),
@@ -155,6 +167,12 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
       : [...state.hiddenCategories, categoryId],
   })),
   setHiddenCategories: (ids) => set({ hiddenCategories: ids }),
+  toggleItemVisibility: (itemId) => set((state) => ({
+    hiddenItemIds: state.hiddenItemIds.includes(itemId)
+      ? state.hiddenItemIds.filter((value) => value !== itemId)
+      : [...state.hiddenItemIds, itemId],
+  })),
+  setHiddenItemIds: (ids) => set({ hiddenItemIds: ids }),
   setRegionSidePx: (side) => set({ regionSidePx: Math.max(1, Math.round(side)) }),
   setRegionMetricsVisible: (regionMetricsVisible) => set({ regionMetricsVisible }),
   setMergeMode: (mergeMode) => set({ mergeMode }),

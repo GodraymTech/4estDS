@@ -1,12 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Checkbox, InputNumber, Segmented, Select, Slider, Space, Switch, Tag, Tooltip, Typography, message } from "antd";
-import { InfoCircleOutlined, ThunderboltOutlined } from "@ant-design/icons";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { Button, Input, Segmented, Select, Slider, Space, Switch, Tag, Tooltip, message } from "antd";
+import {
+  AimOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
+  InfoCircleOutlined,
+  PlusOutlined,
+  ThunderboltOutlined,
+} from "@ant-design/icons";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ReviewAttempt, ReviewCategory, ReviewItem } from "../../entities/review";
-import { endpoints, type ReviewMapContext } from "../../shared/api";
+import { endpoints, queryKeys, type ReviewMapContext } from "../../shared/api";
 import { useReviewWorkbenchStore, MIN_REGION_SIDE_PX } from "./store";
 
-export function PromptPanel({ sessionId, revision, categories, items, mapContext, getCenterPx, onCreated }: {
+export function PromptPanel({
+  sessionId,
+  revision,
+  categories,
+  items,
+  mapContext,
+  getCenterPx,
+  onCreated,
+  visualBoxSample,
+  onClearVisualSample,
+}: {
   sessionId: string;
   revision: number;
   categories: ReviewCategory[];
@@ -14,9 +31,12 @@ export function PromptPanel({ sessionId, revision, categories, items, mapContext
   mapContext: ReviewMapContext;
   getCenterPx: () => [number, number] | null;
   onCreated: (attempt: ReviewAttempt) => void;
+  visualBoxSample?: number[] | null;
+  onClearVisualSample?: () => void;
 }) {
-  const capabilities = useQuery({ queryKey: ["review-capabilities"], queryFn: endpoints.getReviewCapabilities });
+  const client = useQueryClient();
   const activeTool = useReviewWorkbenchStore((state) => state.activeTool);
+  const selectedIds = useReviewWorkbenchStore((state) => state.selectedIds);
   const regionSidePx = useReviewWorkbenchStore((state) => state.regionSidePx);
   const setRegionSidePx = useReviewWorkbenchStore((state) => state.setRegionSidePx);
   const regionMetricsVisible = useReviewWorkbenchStore((state) => state.regionMetricsVisible);
@@ -25,43 +45,105 @@ export function PromptPanel({ sessionId, revision, categories, items, mapContext
   const setMergeMode = useReviewWorkbenchStore((state) => state.setMergeMode);
   const autoTrigger = useReviewWorkbenchStore((state) => state.autoTrigger);
   const setAutoTrigger = useReviewWorkbenchStore((state) => state.setAutoTrigger);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [exemplarIds, setExemplarIds] = useState<string[]>([]);
+  const latestRevision = useReviewWorkbenchStore((state) => state.revision);
+
+  // 文本 Prompt: 自定义输入项 + 勾选的已有树种（默认全不选）
+  const [customTextPrompts, setCustomTextPrompts] = useState<string[]>([]);
+  const [customInputText, setCustomInputText] = useState("");
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+
+  // 视觉 Prompt: 选中的已有框 ID 或直接在地图上手绘的样例框
+  const [visualExemplarIds, setVisualExemplarIds] = useState<string[]>([]);
+  const [targetSpecies, setTargetSpecies] = useState<string>(categories[0]?.id || "");
+  const [drawnSampleBoxes, setDrawnSampleBoxes] = useState<Array<{ id: string; box_px: number[] }>>([]);
+
   const [threshold, setThreshold] = useState(0.25);
-  const [manualInput, setManualInput] = useState(false);
-  const configured = useRef(false);
-  const autoSignature = useRef("");
 
   const promptType = activeTool === "ai_visual" ? "visual" : "text";
   const open = activeTool === "ai_text" || activeTool === "ai_visual";
   const maxSide = Math.max(MIN_REGION_SIDE_PX, mapContext.pixel_width, mapContext.pixel_height);
   const sliderPosition = regionSidePx >= maxSide ? 100 : sideToSlider(regionSidePx, maxSide);
   const isFull = sliderPosition >= 99.8;
-  const selected = useMemo(() => categories.filter((item) => selectedCategories.includes(item.id)), [categories, selectedCategories]);
-  const exemplars = useMemo(() => items.filter((item) => exemplarIds.includes(item.id)), [items, exemplarIds]);
-  const valid = promptType === "text" ? selected.length > 0 : exemplars.length > 0;
+
+  // 捕获外部在地图上直接画下的视觉 Prompt 框
+  useEffect(() => {
+    if (visualBoxSample && visualBoxSample.length === 4) {
+      const sampleId = `sample_${Date.now()}`;
+      setDrawnSampleBoxes((prev) => [...prev, { id: sampleId, box_px: visualBoxSample }]);
+      onClearVisualSample?.();
+      message.success("已捕获地图手绘样例框");
+    }
+  }, [visualBoxSample, onClearVisualSample]);
 
   useEffect(() => {
-    if (!categories.length) return;
-    setSelectedCategories((current) => current.length ? current.filter((id) => categories.some((category) => category.id === id)) : categories.map((category) => category.id));
-  }, [categories]);
+    if (categories.length && (!targetSpecies || !categories.some((c) => c.id === targetSpecies))) {
+      setTargetSpecies(categories[0]?.id || "");
+    }
+  }, [categories, targetSpecies]);
 
-  useEffect(() => {
-    if (!capabilities.data || configured.current) return;
-    configured.current = true;
-    setMergeMode(capabilities.data.defaults.merge_mode);
-    setThreshold(capabilities.data.defaults.threshold);
-  }, [capabilities.data, setMergeMode]);
+  // 组合文本 Prompts
+  const combinedTextPrompts = useMemo(() => {
+    const fromCategories = categories
+      .filter((c) => selectedCategoryIds.includes(c.id))
+      .map((c) => ({ category_id: c.id, display_name: c.display_name, model_prompt: c.model_prompt || c.display_name }));
+    const fromCustom = customTextPrompts.map((text) => ({
+      category_id: text,
+      display_name: text,
+      model_prompt: text,
+    }));
+    return [...fromCategories, ...fromCustom];
+  }, [categories, selectedCategoryIds, customTextPrompts]);
+
+  // 组合视觉样例：已有选中的检测框 + 地图上手绘的样例框
+  const allVisualExemplars = useMemo(() => {
+    const fromExisting = items
+      .filter((item) => visualExemplarIds.includes(item.id) && item.box_px?.length === 4)
+      .map((item) => ({
+        item_id: item.id,
+        category_id: targetSpecies || item.species,
+        box_px: item.box_px,
+      }));
+    const fromDrawn = drawnSampleBoxes.map((sample) => ({
+      item_id: sample.id,
+      category_id: targetSpecies || categories[0]?.id || "tree",
+      box_px: sample.box_px,
+    }));
+    return [...fromExisting, ...fromDrawn];
+  }, [items, visualExemplarIds, drawnSampleBoxes, targetSpecies, categories]);
+
+  const hasValidInputs = promptType === "text" ? combinedTextPrompts.length > 0 : allVisualExemplars.length > 0;
+
+  const handleAddCustomText = () => {
+    const trimmed = customInputText.trim();
+    if (trimmed && !customTextPrompts.includes(trimmed)) {
+      setCustomTextPrompts((prev) => [...prev, trimmed]);
+      setCustomInputText("");
+    }
+  };
+
+  const handleAdoptSelectedBox = () => {
+    if (!selectedIds.length) {
+      message.info("请先在画布上选中一个检测框");
+      return;
+    }
+    const validBoxes = items.filter((item) => selectedIds.includes(item.id) && item.box_px?.length === 4);
+    if (!validBoxes.length) {
+      message.warning("选中的对象缺少矩形几何");
+      return;
+    }
+    setVisualExemplarIds((prev) => Array.from(new Set([...prev, ...validBoxes.map((b) => b.id)])));
+    message.success(`已采纳 ${validBoxes.length} 个视觉样例`);
+  };
 
   const create = useMutation({
     mutationFn: () => {
       const center = getCenterPx();
-      if (!center && !isFull) throw new Error("地图尚未准备完成，请稍后再试");
+      if (!center && !isFull) throw new Error("地图正在准备中，请稍候");
       return endpoints.createReviewAttempt(sessionId, {
-        revision,
+        revision: latestRevision ?? revision,
         prompt_type: promptType,
-        prompts: selected.map((item) => ({ category_id: item.id, display_name: item.display_name, model_prompt: item.model_prompt })),
-        visual_exemplars: exemplars.map((item) => ({ item_id: item.id, category_id: item.species, box_px: item.box_px })),
+        prompts: combinedTextPrompts,
+        visual_exemplars: allVisualExemplars,
         scope: isFull ? { type: "full" } : { type: "region", center_px: center as [number, number], side_px: regionSidePx },
         merge_mode: mergeMode,
         threshold,
@@ -69,121 +151,250 @@ export function PromptPanel({ sessionId, revision, categories, items, mapContext
     },
     onSuccess: (attempt) => {
       onCreated(attempt);
-      message.success("AI 识别任务已排队");
+      message.success("AI 识别已启动");
     },
-    onError: (error) => message.error(error instanceof Error ? error.message : "创建识别任务失败"),
+    onError: (error) => {
+      void client.invalidateQueries({ queryKey: queryKeys.reviewWorkspace(sessionId) });
+      message.error(error instanceof Error ? error.message : "创建任务失败");
+    },
   });
 
+  // 视觉画框或参数变更后自动触发（若开启了 autoTrigger）
   useEffect(() => {
-    if (!open || !autoTrigger || !valid || create.isPending) return;
-    const signature = JSON.stringify([promptType, selectedCategories, exemplarIds, isFull, Math.round(regionSidePx), mergeMode, threshold]);
-    if (signature === autoSignature.current) return;
+    if (!open || !autoTrigger || !hasValidInputs || create.isPending) return;
     const timer = window.setTimeout(() => {
-      autoSignature.current = signature;
       create.mutate();
-    }, 850);
+    }, 600);
     return () => window.clearTimeout(timer);
-  }, [open, autoTrigger, valid, promptType, selectedCategories, exemplarIds, isFull, regionSidePx, mergeMode, threshold]);
+  }, [open, autoTrigger, hasValidInputs, promptType, combinedTextPrompts.length, allVisualExemplars.length, regionSidePx, threshold, mergeMode]);
+
+  const [isComposing, setIsComposing] = useState(false);
 
   if (!open) return null;
 
   const meterSide = regionSidePx * mapContext.gsd;
+
   return (
-    <section className="review-ai-panel" aria-label="AI 辅助设置">
-      <header className="review-ai-panel__header">
-        <div>
-          <Typography.Text strong>{promptType === "text" ? "文本 Prompt" : "视觉 Prompt"}</Typography.Text>
-          <Typography.Text type="secondary">AI 辅助设置</Typography.Text>
-        </div>
-        <Space size={6}>
-          {capabilities.data?.segmentation ? <Tag bordered={false}>实例分割</Tag> : null}
-          <Tooltip title="开启后，Prompt 或识别范围变化会自动提交；关闭后使用底部执行按钮。">
-            <InfoCircleOutlined />
-          </Tooltip>
-          <Switch size="small" checked={autoTrigger} onChange={setAutoTrigger} />
-          <Typography.Text style={{ fontSize: 12 }}>自动触发</Typography.Text>
-        </Space>
-      </header>
-
-      {capabilities.data?.available === false ? <Alert type="warning" showIcon message="模型文件不可用" /> : null}
-
+    <div
+      className="review-ai-dock"
+      role="region"
+      aria-label="AI辅助控制面板"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* 文本模式：无 title，输入树种在输入框左侧，无 placeholder */}
       {promptType === "text" ? (
-        <Checkbox.Group
-          className="review-prompt-options"
-          value={selectedCategories}
-          options={categories.map((item) => ({ value: item.id, label: item.display_name }))}
-          onChange={(value) => setSelectedCategories(value as string[])}
-        />
+        <div className="review-ai-block">
+          <div className="review-ai-row">
+            <div className="review-ai-inline-label">
+              <span>输入树种</span>
+              <Tooltip title="可任意指定树种">
+                <InfoCircleOutlined style={{ color: "var(--review-muted)" }} />
+              </Tooltip>
+            </div>
+            <Input
+              size="middle"
+              className="review-ai-main-input"
+              value={customInputText}
+              onChange={(e) => setCustomInputText(e.target.value)}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={(e) => {
+                setIsComposing(false);
+                setCustomInputText(e.currentTarget.value);
+              }}
+              onPressEnter={(e) => {
+                if (isComposing) return;
+                e.preventDefault();
+                handleAddCustomText();
+              }}
+              style={{ flex: 1 }}
+            />
+            <Button
+              type="primary"
+              size="middle"
+              icon={<PlusOutlined />}
+              disabled={!customInputText.trim()}
+              onClick={handleAddCustomText}
+              style={{ flexShrink: 0 }}
+              title="添加树种"
+            />
+          </div>
+
+          {/* 快捷点选已有树种（默认全不选，点选即发光） */}
+          {categories.length ? (
+            <div className="review-ai-chip-group">
+              <div className="review-ai-chip-group__list">
+                {categories.map((cat) => {
+                  const isChecked = selectedCategoryIds.includes(cat.id);
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      className={`review-ai-chip${isChecked ? " is-checked" : ""}`}
+                      onClick={() => {
+                        setSelectedCategoryIds((prev) =>
+                          isChecked ? prev.filter((id) => id !== cat.id) : [...prev, cat.id],
+                        );
+                      }}
+                    >
+                      <span className="review-ai-chip__dot" style={{ backgroundColor: cat.color }} />
+                      <span>{cat.display_name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {/* 已添加的目标 Tag 徽章 */}
+          {combinedTextPrompts.length ? (
+            <div className="review-ai-tags-box">
+              <Space size={[4, 4]} wrap>
+                {combinedTextPrompts.map((p) => (
+                  <Tag
+                    key={p.display_name}
+                    closable
+                    color="cyan"
+                    onClose={() => {
+                      setSelectedCategoryIds((prev) => prev.filter((id) => id !== p.category_id));
+                      setCustomTextPrompts((prev) => prev.filter((t) => t !== p.display_name));
+                    }}
+                  >
+                    {p.display_name}
+                  </Tag>
+                ))}
+              </Space>
+            </div>
+          ) : null}
+        </div>
       ) : (
-        <Select
-          mode="multiple"
-          value={exemplarIds}
-          placeholder="选择已接受的参考框"
-          options={items.filter((item) => item.status === "accepted" && item.species).map((item) => ({ value: item.id, label: `${item.species} · #${item.id.slice(-6)}` }))}
-          onChange={setExemplarIds}
-          style={{ width: "100%" }}
-        />
+        /* 视觉模式：直接在地图上手绘样例框或采纳当前选中框 */
+        <div className="review-ai-block">
+          <div className="review-ai-visual-prompt-guide">
+            <span>💡 <strong>直接在地图上拖拽画框</strong>，即刻捕获为视觉样例</span>
+            <Button
+              size="small"
+              icon={<AimOutlined />}
+              disabled={!selectedIds.length}
+              onClick={handleAdoptSelectedBox}
+              style={{ width: "100%", marginTop: 6 }}
+            >
+              采纳当前选中的框
+            </Button>
+          </div>
+
+          <div className="review-ai-row" style={{ marginTop: 4 }}>
+            <span className="review-ai-label">归属树种</span>
+            <Select
+              size="small"
+              value={targetSpecies}
+              options={categories.map((c) => ({ value: c.id, label: c.display_name }))}
+              onChange={setTargetSpecies}
+              style={{ flex: 1 }}
+            />
+          </div>
+
+          {allVisualExemplars.length ? (
+            <div className="review-ai-tags-box">
+              <Space size={[4, 4]} wrap>
+                {allVisualExemplars.map((ex, idx) => (
+                  <Tag
+                    key={ex.item_id}
+                    closable
+                    color="purple"
+                    onClose={() => {
+                      setVisualExemplarIds((prev) => prev.filter((id) => id !== ex.item_id));
+                      setDrawnSampleBoxes((prev) => prev.filter((s) => s.id !== ex.item_id));
+                    }}
+                  >
+                    样例 #{idx + 1}
+                  </Tag>
+                ))}
+              </Space>
+            </div>
+          ) : null}
+        </div>
       )}
 
-      <div className="review-ai-panel__row">
-        <div className="review-ai-panel__label">
-          <span>写入模式</span>
-          <Tooltip title="推理检测框写入工作集的方式：只追加新识别到的，或全量替换旧工作集。"><InfoCircleOutlined /></Tooltip>
+      {/* 参数微调与单行滑轨 */}
+      <div className="review-ai-sliders">
+        <div className="review-ai-row">
+          <span className="review-ai-label">写入策略</span>
+          <Segmented
+            size="small"
+            className="apple-capsule-segmented"
+            value={mergeMode}
+            options={[
+              { value: "append", label: "追加" },
+              { value: "replace_all", label: "替换" },
+            ]}
+            onChange={(val) => setMergeMode(val as "append" | "replace_all")}
+          />
+          <div className="review-ai-switch-row" style={{ marginLeft: "auto" }}>
+            <span style={{ fontSize: 12, color: "var(--review-muted)" }}>自动触发</span>
+            <Switch size="small" checked={autoTrigger} onChange={setAutoTrigger} />
+          </div>
         </div>
-        <Segmented
-          className="review-merge-segmented"
-          size="small"
-          value={mergeMode}
-          options={[{ value: "append", label: "追加" }, { value: "replace_all", label: "替换" }]}
-          onChange={(value) => setMergeMode(value as "append" | "replace_all")}
-        />
-      </div>
 
-      <div className="review-scope-control">
-        <div className="review-ai-panel__label">
-          <span>识别范围</span>
-          <Button type="text" size="small" onClick={() => setManualInput((value) => !value)}>输入</Button>
-          <Button type="text" size="small" onClick={() => setRegionMetricsVisible(!regionMetricsVisible)}>{regionMetricsVisible ? "隐藏框" : "显示框"}</Button>
+        {/* 置信度：文字 [置信度] ===[滑杆]=== [0.25] 同一行 */}
+        <div className="review-ai-inline-slider">
+          <span className="review-ai-label">置信度</span>
+          <Slider
+            min={0.05}
+            max={0.95}
+            step={0.05}
+            value={threshold}
+            tooltip={{ formatter: (v) => `${Number(v).toFixed(2)}` }}
+            onChange={(v) => setThreshold(Number(v))}
+            className="review-inline-slider-control"
+          />
+          <span className="review-ai-val-text">{threshold.toFixed(2)}</span>
         </div>
-        <div className="review-scope-control__slider">
-          <span>{(MIN_REGION_SIDE_PX * mapContext.gsd).toFixed(1)} m</span>
+
+        {/* 范围：文字 [范围👁️] ===[滑杆]=== [14.7m/全图] 同一行 */}
+        <div className="review-ai-inline-slider">
+          <div className="review-ai-label-with-eye">
+            <span className="review-ai-label" style={{ width: "auto" }}>范围</span>
+            <button
+              type="button"
+              className="review-ai-eye-mini"
+              title={regionMetricsVisible ? "隐藏范围虚线框" : "显示范围虚线框"}
+              onClick={() => setRegionMetricsVisible(!regionMetricsVisible)}
+            >
+              {regionMetricsVisible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+            </button>
+          </div>
           <Slider
             min={0}
             max={100}
             step={0.1}
             value={sliderPosition}
-            tooltip={{ formatter: (value) => Number(value) >= 99.8 ? "全图" : `${meterSide.toFixed(1)} m` }}
+            tooltip={{ formatter: (value) => (Number(value) >= 99.8 ? "全图" : `${meterSide.toFixed(1)} m`) }}
             onChange={(value) => setRegionSidePx(value >= 99.8 ? maxSide : sliderToSide(value, maxSide))}
+            className="review-inline-slider-control"
           />
-          <span>全图</span>
+          <span className="review-ai-val-text">
+            {isFull ? "全图" : `${meterSide.toFixed(1)} m`}
+          </span>
         </div>
-        {manualInput ? (
-          <InputNumber
-            min={MIN_REGION_SIDE_PX * mapContext.gsd}
-            max={maxSide * mapContext.gsd}
-            precision={1}
-            addonAfter="m"
-            value={Number(meterSide.toFixed(1))}
-            onChange={(value) => setRegionSidePx(Math.min(maxSide, Math.max(MIN_REGION_SIDE_PX, Number(value ?? meterSide) / Math.max(mapContext.gsd, 1e-9))))}
-            style={{ width: 160 }}
-          />
-        ) : null}
       </div>
 
-      {regionSidePx > 2048 && !isFull ? (
-        <Alert type="warning" showIcon message={`当前识别范围较大（${meterSide.toFixed(1)} m），推理耗时将显著增加`} />
+      {/* 当开启了自动触发就隐匿“开始”按钮，未开启时才显示 */}
+      {!autoTrigger ? (
+        <Button
+          type="primary"
+          block
+          size="middle"
+          icon={<ThunderboltOutlined />}
+          loading={create.isPending}
+          disabled={!hasValidInputs}
+          onClick={() => create.mutate()}
+          className="review-ai-launch-btn"
+        >
+          {create.isPending ? "正在启动识别…" : "开始 AI 探测"}
+        </Button>
       ) : null}
-
-      <div className="review-ai-panel__footer">
-        <Space size={8}>
-          <Typography.Text type="secondary">置信度</Typography.Text>
-          <InputNumber min={0} max={1} step={0.05} precision={2} value={threshold} onChange={(value) => setThreshold(Number(value ?? 0.25))} />
-        </Space>
-        {!autoTrigger ? (
-          <Button type="primary" icon={<ThunderboltOutlined />} loading={create.isPending} disabled={!valid} onClick={() => create.mutate()}>执行识别</Button>
-        ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>{create.isPending ? "正在提交…" : "配置变更后自动执行"}</Typography.Text>}
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -193,5 +404,5 @@ function sliderToSide(position: number, maxSide: number) {
 
 function sideToSlider(side: number, maxSide: number) {
   if (maxSide <= MIN_REGION_SIDE_PX) return 100;
-  return Math.max(0, Math.min(100, Math.log(side / MIN_REGION_SIDE_PX) / Math.log(maxSide / MIN_REGION_SIDE_PX) * 100));
+  return Math.max(0, Math.min(100, (Math.log(side / MIN_REGION_SIDE_PX) / Math.log(maxSide / MIN_REGION_SIDE_PX)) * 100));
 }

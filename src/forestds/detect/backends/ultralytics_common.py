@@ -9,20 +9,44 @@ from ..base import Detection, Detections
 
 
 def ensure_bgr(pixels):
-    """把 RGB (H,W,3) 数组转 BGR 供 ultralytics(cv2 习惯)使用。
-
-    约定 image_source 读出的窗口像素为 RGB;ultralytics 对 numpy 输入按 BGR 处理,
-    故此处反转通道。非 3 通道(灰度/多光谱)原样返回;None 返回 None。
-    """
+    """把输入图像（无论 4 通道 RGBA/NIR、单通道、2 维灰度等）统一转换为连续的 (H, W, 3) BGR uint8 数组供 ultralytics 使用。"""
     if pixels is None:
         return None
-    arr = pixels
-    try:
-        if getattr(arr, "ndim", None) == 3 and arr.shape[2] == 3:
-            return arr[:, :, ::-1]
-    except Exception:
-        pass
-    return arr
+    import numpy as np
+    arr = pixels if isinstance(pixels, np.ndarray) else np.asarray(pixels)
+    if arr.ndim == 4:
+        arr = arr[0]
+    if arr.ndim == 2:
+        arr = np.repeat(arr[:, :, None], 3, axis=2)
+    elif arr.ndim == 3:
+        if arr.shape[0] in (1, 2, 3, 4, 5, 8) and arr.shape[0] < min(arr.shape[1], arr.shape[2]):
+            arr = arr.transpose(1, 2, 0)
+        if arr.shape[2] == 1:
+            arr = np.repeat(arr, 3, axis=2)
+        elif arr.shape[2] >= 4:
+            arr = arr[:, :, :3]
+        elif arr.shape[2] == 2:
+            arr = np.pad(arr, ((0, 0), (0, 0), (0, 1)), mode="edge")
+        # RGB to BGR
+        arr = arr[:, :, ::-1]
+
+    if arr.dtype != np.uint8:
+        if np.issubdtype(arr.dtype, np.floating):
+            max_val = float(np.nanmax(arr)) if arr.size else 1.0
+            if max_val <= 1.0:
+                arr = (np.clip(arr, 0, 1) * 255.0).astype(np.uint8)
+            else:
+                arr = np.clip(arr, 0, 255).astype(np.uint8)
+        elif arr.dtype in (np.uint16, np.int16, np.uint32, np.int32):
+            max_val = float(np.max(arr)) if arr.size else 255.0
+            if max_val > 255.0:
+                arr = np.clip(arr / (max_val / 255.0), 0, 255).astype(np.uint8)
+            else:
+                arr = np.clip(arr, 0, 255).astype(np.uint8)
+        else:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+
+    return np.ascontiguousarray(arr)
 
 
 def _to_numpy(t):

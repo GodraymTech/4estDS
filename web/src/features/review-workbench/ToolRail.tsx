@@ -7,7 +7,6 @@ import {
   EffectiveAreaIcon,
   FitViewIcon,
   FrameIcon,
-  HandIcon,
   HelpIcon,
   LayersIcon,
   RedoIcon,
@@ -48,11 +47,10 @@ interface ToolSpec {
 }
 
 const TOOLS: ToolSpec[] = [
-  { id: "select", icon: <CursorIcon />, title: "选择与框选", shortcut: "V" },
-  { id: "pan", icon: <HandIcon />, title: "平移地图", shortcut: "H" },
-  { id: "draw", icon: <FrameIcon />, title: "手动画框", shortcut: "R" },
-  { id: "ai_text", icon: <SparkleIcon />, title: "AI 文本提示检测", shortcut: "T" },
-  { id: "ai_visual", icon: <SparkleFrameIcon />, title: "AI 视觉样例检测", shortcut: "I" },
+  { id: "select", icon: <CursorIcon />, title: "选择与拖拽", shortcut: "V" },
+  { id: "draw", icon: <FrameIcon />, title: "手绘", shortcut: "R" },
+  { id: "ai_text", icon: <SparkleIcon />, title: "AI文本辅助", shortcut: "T" },
+  { id: "ai_visual", icon: <SparkleFrameIcon />, title: "AI视觉辅助", shortcut: "I" },
 ];
 
 export function ToolRail({
@@ -75,6 +73,8 @@ export function ToolRail({
 }: ToolRailProps) {
   const activeTool = useReviewWorkbenchStore((s) => s.activeTool);
   const setActiveTool = useReviewWorkbenchStore((s) => s.setActiveTool);
+  const selectPanInverted = useReviewWorkbenchStore((s) => s.selectPanInverted);
+  const toggleSelectPanInversion = useReviewWorkbenchStore((s) => s.toggleSelectPanInversion);
   const selectedIds = useReviewWorkbenchStore((s) => s.selectedIds);
   const hasItems = useReviewWorkbenchStore((s) => s.order.length > 0);
 
@@ -104,16 +104,55 @@ export function ToolRail({
       <Space direction="vertical" size={6} style={STACK}>
         {TOOLS.map((tool) => {
           const isActive = activeTool === tool.id;
+          const isSelectTool = tool.id === "select";
+
+          // 选择与平移工具详细的 Tooltip 模式提示
+          const tooltipTitle = isSelectTool && isActive
+            ? `${tool.title} (${tool.shortcut})\n当前：${selectPanInverted ? "左键拖拽，右键选择" : "左键选择，右键拖拽"} \n(点击交替切换)`
+            : `${tool.title} (${tool.shortcut})`;
+
           return (
-            <Tooltip key={tool.id} title={`${tool.title} (${tool.shortcut})`} placement="right">
+            <Tooltip
+              key={tool.id}
+              title={<span style={{ whiteSpace: "pre-line" }}>{tooltipTitle}</span>}
+              placement="right"
+            >
               <Button
                 type={isActive ? "primary" : "text"}
                 icon={tool.icon}
                 aria-label={tool.title}
                 aria-pressed={isActive}
-                onClick={() => setActiveTool(tool.id)}
-                style={isActive ? ACTIVE_BTN : ACTION_BTN}
-              />
+                onClick={() => {
+                  if (isSelectTool && isActive) {
+                    toggleSelectPanInversion();
+                  } else {
+                    setActiveTool(tool.id);
+                  }
+                }}
+                style={{
+                  ...(isActive ? ACTIVE_BTN : ACTION_BTN),
+                  position: "relative",
+                  ...(isSelectTool && isActive && selectPanInverted
+                    ? { backgroundColor: "#1e88e5", borderColor: "#1e88e5" }
+                    : {}),
+                }}
+              >
+                {isSelectTool && isActive ? (
+                  <span
+                    style={{
+                      position: "absolute",
+                      bottom: 1,
+                      right: 2,
+                      fontSize: 8,
+                      lineHeight: "8px",
+                      opacity: 0.85,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {selectPanInverted ? "⇄" : ""}
+                  </span>
+                ) : null}
+              </Button>
             </Tooltip>
           );
         })}

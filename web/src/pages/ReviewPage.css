@@ -1,0 +1,106 @@
+/* Apple-style Capsule Segmented Pill Controls */
+.apple-capsule-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.apple-capsule-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--review-muted, rgba(255, 255, 255, 0.55));
+  user-select: none;
+  letter-spacing: 0.2px;
+}
+
+.apple-capsule-segmented.ant-segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.apple-capsule-segmented .ant-segmented-group {
+  display: flex;
+  gap: 2px;
+}
+
+.apple-capsule-segmented .ant-segmented-item {
+  border-radius: 9999px;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--review-muted, rgba(255, 255, 255, 0.65));
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.apple-capsule-segmented .ant-segmented-item:hover:not(.ant-segmented-item-selected) {
+  color: #ffffff;
+}
+
+.apple-capsule-segmented .ant-segmented-item-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 14px;
+  line-height: 28px;
+}
+
+.apple-capsule-segmented .ant-segmented-thumb {
+  border-radius: 9999px !important;
+  background: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.apple-capsule-segmented .ant-segmented-item-selected {
+  border-radius: 9999px;
+  color: #121514 !important;
+  font-weight: 600;
+}
+
+.apple-capsule-segmented .ant-segmented-item-selected .apple-pill-item {
+  color: #121514 !important;
+}
+
+.apple-pill-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.3px;
+}
+
+.apple-pill-item__icon {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+/* Light Theme overrides */
+[data-theme="light"] .apple-capsule-segmented.ant-segmented {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .apple-capsule-segmented .ant-segmented-item {
+  color: rgba(0, 0, 0, 0.65);
+}
+
+[data-theme="light"] .apple-capsule-segmented .ant-segmented-item:hover:not(.ant-segmented-item-selected) {
+  color: rgba(0, 0, 0, 0.95);
+}
+
+[data-theme="light"] .apple-capsule-segmented .ant-segmented-thumb {
+  background: #ffffff !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-theme="light"] .apple-capsule-segmented .ant-segmented-item-selected .apple-pill-item {
+  color: #1a1d1c !important;
+}

@@ -1,9 +1,10 @@
 import type { CSSProperties } from "react";
-import { Button, Popconfirm, Space, Tag, Typography } from "antd";
-import { ArrowLeftOutlined, SendOutlined } from "@ant-design/icons";
+import { Button, Popconfirm, Space, Tag, Tooltip, Typography } from "antd";
+import { ArrowLeftOutlined, MoonOutlined, SendOutlined, SunOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import type { ReviewSession } from "../../entities/review";
 import { ConnectionStatus } from "../../shared/ui/ConnectionStatus";
+import { useAppTheme } from "../../app/providers";
 
 const { Text } = Typography;
 
@@ -13,7 +14,9 @@ export function TopBar({ session, onPublish, isPublishing = false }: {
   isPublishing?: boolean;
 }) {
   const navigate = useNavigate();
+  const { dark, toggleMode } = useAppTheme();
   const title = session ? `${session.image_name ?? session.tiff_id} · ${formatPhase(session.phase_id)}` : "单 TIFF 智能复核";
+
   return (
     <div style={CONTAINER}>
       <Space size={12}>
@@ -28,6 +31,14 @@ export function TopBar({ session, onPublish, isPublishing = false }: {
       </Space>
       <Space size={12}>
         <ConnectionStatus />
+        <Tooltip title={dark ? "切换为明亮模式" : "切换为暗黑模式"}>
+          <Button
+            type="text"
+            icon={dark ? <SunOutlined /> : <MoonOutlined />}
+            onClick={toggleMode}
+            aria-label="切换亮暗主题"
+          />
+        </Tooltip>
         {session?.status === "active" ? (
           <Popconfirm title="发布复核结果" description="发布后将生成 review run，并原子替换该 TIFF 的正式结果。" onConfirm={onPublish} okText="确认发布" cancelText="取消">
             <Button type="primary" icon={<SendOutlined />} loading={isPublishing}>发布结果</Button>
