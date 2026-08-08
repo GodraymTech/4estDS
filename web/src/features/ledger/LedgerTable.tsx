@@ -563,7 +563,20 @@ export function LedgerTable() {
       dataIndex: "observation_count",
       key: "observation_count",
       width: 90,
-      render: (v?: number) => (v ? v.toLocaleString() : ""),
+      render: (value: number | undefined, row: AssetRow) => {
+        const count = value ?? 0;
+        if (!count) return "";
+        return (
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0, height: "auto", fontWeight: 500 }}
+            onClick={() => openObservations(row)}
+          >
+            {count.toLocaleString()}
+          </Button>
+        );
+      },
       sorter: true,
       sortOrder: sortList.find((s) => s.columnKey === "observation_count")?.order || null,
       onHeaderCell: () => ({ onClick: handleHeaderClick("observation_count") }),
@@ -639,6 +652,18 @@ export function LedgerTable() {
     if (!row.phase_id || !row.tiff_id) return;
     const query = new URLSearchParams({ phase_id: row.phase_id, tiff_id: row.tiff_id });
     navigate(`/tasks?${query.toString()}`);
+  }
+
+  function openObservations(row: AssetRow) {
+    const sp = new URLSearchParams();
+    if (row.tiff_id) sp.set("tiff_id", row.tiff_id);
+    const runId = row.run_id || row.active_run_id;
+    if (runId) sp.set("run_id", runId);
+    if (row.phase_id) sp.set("phase_id", row.phase_id);
+    if (row.tract_id) sp.set("tract_id", row.tract_id);
+    if (row.tract_phase_pk) sp.set("tract_phase_pk", row.tract_phase_pk);
+    const qs = sp.toString();
+    navigate(qs ? `/db/treeobservations?${qs}` : "/db/treeobservations");
   }
 
   function openEffectiveArea(row: AssetRow) {
@@ -842,7 +867,7 @@ export function LedgerTable() {
         />
       ) : (
         <div style={TREE_PANEL}>
-          {rows.length ? <Tree showLine defaultExpandAll treeData={buildAssetTree(rows, openMap, openTractMap, openEdit)} /> : <Empty description="暂无资产" />}
+          {rows.length ? <Tree showLine defaultExpandAll treeData={buildAssetTree(rows, openMap, openTractMap, openEdit, openObservations)} /> : <Empty description="暂无资产" />}
         </div>
       )}
 
@@ -1171,6 +1196,7 @@ function buildAssetTree(
   openMap: (row: AssetRow) => void,
   openTractMap: (row: AssetRow) => void,
   openEdit: (row: AssetRow) => void,
+  openObservations: (row: AssetRow) => void,
 ): DataNode[] {
   const root = new Map<string, Map<string, Map<string, Map<string, AssetRow[]>>>>();
   for (const row of rows) {
@@ -1202,7 +1228,7 @@ function buildAssetTree(
           title: <PhaseNodeTitle phase={phase} row={leaves[0]} openTractMap={openTractMap} />,
           children: leaves.map((row) => ({
             key: rowKey(row),
-            title: <TreeLeaf row={row} openMap={openMap} openEdit={openEdit} />,
+            title: <TreeLeaf row={row} openMap={openMap} openEdit={openEdit} openObservations={openObservations} />,
           })),
         })),
       })),
@@ -1231,13 +1257,35 @@ function PhaseNodeTitle({ phase, row, openTractMap }: { phase: string; row?: Ass
   );
 }
 
-function TreeLeaf({ row, openMap, openEdit }: { row: AssetRow; openMap: (row: AssetRow) => void; openEdit: (row: AssetRow) => void }) {
+function TreeLeaf({
+  row,
+  openMap,
+  openEdit,
+  openObservations,
+}: {
+  row: AssetRow;
+  openMap: (row: AssetRow) => void;
+  openEdit: (row: AssetRow) => void;
+  openObservations: (row: AssetRow) => void;
+}) {
   return (
     <Space size={8} wrap>
       <Text>{row.image_name || row.tiff_id || "未知影像"}</Text>
       {statusTag(row.status)}
       {row.run_id ? <Text code>{row.run_id}</Text> : null}
-      <Text type="secondary">{row.observation_count ? row.observation_count.toLocaleString() + " 株" : ""}</Text>
+      {row.observation_count ? (
+        <Button
+          size="small"
+          type="link"
+          style={{ padding: 0, height: "auto" }}
+          onClick={(e) => {
+            e.stopPropagation();
+            openObservations(row);
+          }}
+        >
+          {row.observation_count.toLocaleString() + " 株"}
+        </Button>
+      ) : null}
       <Tooltip title="查看地图">
         <Button size="small" type="link" icon={<EyeOutlined />} onClick={(e) => { e.stopPropagation(); openMap(row); }} />
       </Tooltip>

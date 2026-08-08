@@ -583,3 +583,47 @@ class ServerFileBrowseOut(BaseModel):
     current_path: str
     parent_path: Optional[str] = None
     items: list[ServerFileItem] = Field(default_factory=list)
+
+
+class TreeObservationItemOut(BaseModel):
+    observation_id: str
+    individual_id: Optional[str] = None
+    run_id: str
+    tract_phase_pk: str
+    tiff_id: Optional[str] = None
+    phase_id: Optional[str] = None
+    species: Optional[str] = None
+    confidence: Optional[float] = None
+    center_geom: Optional[str] = None
+    crown_geom: Optional[str] = None
+    box_px: Optional[str] = None
+    box_px_sub: Optional[str] = None
+    box_geo: Optional[str] = None
+    crown_width_px: Optional[float] = None
+    crown_height_px: Optional[float] = None
+    crown_width_geo: Optional[float] = None
+    crown_height_geo: Optional[float] = None
+    crown_area_px: Optional[float] = None
+    crown_area_geo_est: Optional[float] = None
+    crown_area_geo_real: Optional[float] = None
+    height: Optional[float] = None
+    height_source: Optional[str] = None
+    source: str = "infer"
+    crown_volume_geo_est: Optional[float] = None
+    crown_volume_geo_real: Optional[float] = None
+    source_subimage_path: Optional[str] = None
+    slice_size: Optional[int] = None
+    created_at: str
+    tract_id: Optional[str] = None
+    city: Optional[str] = None
+    county: Optional[str] = None
+    town: Optional[str] = None
+
+
+class TreeObservationListOut(BaseModel):
+    items: list[TreeObservationItemOut] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+    available_species: list[str] = Field(default_factory=list)
+

@@ -678,3 +678,63 @@ export interface ServerFileBrowseOut {
   parent_path?: string | null;
   items: ServerFileItem[];
 }
+
+export interface TreeObservationItem {
+  observation_id: string;
+  individual_id?: string | null;
+  run_id: string;
+  tract_phase_pk: string;
+  tiff_id?: string | null;
+  phase_id?: string | null;
+  species?: string | null;
+  confidence?: number | null;
+  center_geom?: string | null;
+  crown_geom?: string | null;
+  box_px?: string | null;
+  box_px_sub?: string | null;
+  box_geo?: string | null;
+  crown_width_px?: number | null;
+  crown_height_px?: number | null;
+  crown_width_geo?: number | null;
+  crown_height_geo?: number | null;
+  crown_area_px?: number | null;
+  crown_area_geo_est?: number | null;
+  crown_area_geo_real?: number | null;
+  height?: number | null;
+  height_source?: string | null;
+  source: string;
+  crown_volume_geo_est?: number | null;
+  crown_volume_geo_real?: number | null;
+  source_subimage_path?: string | null;
+  slice_size?: number | null;
+  created_at: string;
+  tract_id?: string | null;
+  city?: string | null;
+  county?: string | null;
+  town?: string | null;
+}
+
+export interface TreeObservationListParams {
+  tiff_id?: string | null;
+  run_id?: string | null;
+  phase_id?: string | null;
+  tract_phase_pk?: string | null;
+  tract_id?: string | null;
+  species?: string | null;
+  min_confidence?: number | null;
+  max_confidence?: number | null;
+  keyword?: string | null;
+  page?: number;
+  page_size?: number;
+  sort_by?: string;
+  sort_order?: "asc" | "desc" | "ascend" | "descend";
+}
+
+export interface TreeObservationListResponse {
+  items: TreeObservationItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  available_species: string[];
+}
+

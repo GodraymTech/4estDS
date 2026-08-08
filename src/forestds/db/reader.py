@@ -687,3 +687,132 @@ def active_runs_for_tract_phase(tract_id: str, *, url: str | None = None) -> lis
         return [row["run_id"] for row in rows]
     finally:
         conn.close()
+
+
+def query_tree_observations_paginated(
+    *,
+    tiff_id: str | None = None,
+    run_id: str | None = None,
+    phase_id: str | None = None,
+    tract_phase_pk: str | None = None,
+    tract_id: str | None = None,
+    species: str | None = None,
+    min_confidence: float | None = None,
+    max_confidence: float | None = None,
+    keyword: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    sort_by: str = "observation_id",
+    sort_order: str = "asc",
+    url: str | None = None,
+) -> dict:
+    """分页查询 tree_observations 列表及过滤元数据。"""
+    conn = _connect(url)
+    try:
+        where_clauses: list[str] = []
+        params: list[object] = []
+
+        if isinstance(tiff_id, str) and tiff_id:
+            where_clauses.append("o.tiff_id = ?")
+            params.append(tiff_id)
+        if isinstance(run_id, str) and run_id:
+            where_clauses.append("o.run_id = ?")
+            params.append(run_id)
+        if isinstance(phase_id, str) and phase_id:
+            where_clauses.append("o.phase_id = ?")
+            params.append(phase_id)
+        if isinstance(tract_phase_pk, str) and tract_phase_pk:
+            where_clauses.append("o.tract_phase_pk = ?")
+            params.append(tract_phase_pk)
+        if isinstance(tract_id, str) and tract_id:
+            where_clauses.append("tp.tract_id = ?")
+            params.append(tract_id)
+        if isinstance(species, str) and species:
+            where_clauses.append("o.species = ?")
+            params.append(species)
+        if isinstance(min_confidence, (int, float)):
+            where_clauses.append("o.confidence >= ?")
+            params.append(float(min_confidence))
+        if isinstance(max_confidence, (int, float)):
+            where_clauses.append("o.confidence <= ?")
+            params.append(float(max_confidence))
+        if isinstance(keyword, str) and keyword.strip():
+            kw = f"%{keyword.strip()}%"
+            where_clauses.append("(o.observation_id LIKE ? OR o.individual_id LIKE ?)")
+            params.extend([kw, kw])
+
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        # 统计总数
+        count_sql = (
+            f"SELECT COUNT(*) AS total FROM tree_observations o "
+            f"LEFT JOIN tract_phases tp ON o.tract_phase_pk = tp.tract_phase_pk "
+            f"{where_sql}"
+        )
+        total_row = conn.execute(count_sql, params).fetchone()
+        total = int(total_row["total"]) if total_row else 0
+
+        # 获取该数据集下所有可用树种分类（用于前端下拉筛选）
+        species_where_clauses = [
+            c for c, p in zip(where_clauses, params) if not c.startswith("o.species")
+        ]
+        species_params = [
+            p for c, p in zip(where_clauses, params) if not c.startswith("o.species")
+        ]
+        species_where_sql = ("WHERE " + " AND ".join(species_where_clauses)) if species_where_clauses else ""
+        species_sql = (
+            f"SELECT DISTINCT o.species FROM tree_observations o "
+            f"LEFT JOIN tract_phases tp ON o.tract_phase_pk = tp.tract_phase_pk "
+            f"{species_where_sql} "
+            f"ORDER BY o.species"
+        )
+        species_rows = conn.execute(species_sql, species_params).fetchall()
+        available_species = [
+            r["species"] for r in species_rows if r["species"] is not None and r["species"] != ""
+        ]
+
+        # 排序字段安全白名单映射
+        sort_map = {
+            "observation_id": "o.observation_id",
+            "individual_id": "o.individual_id",
+            "species": "o.species",
+            "confidence": "o.confidence",
+            "height": "o.height",
+            "crown_width_geo": "o.crown_width_geo",
+            "crown_height_geo": "o.crown_height_geo",
+            "crown_area_geo_est": "o.crown_area_geo_est",
+            "crown_area_geo_real": "o.crown_area_geo_real",
+            "crown_volume_geo_est": "o.crown_volume_geo_est",
+            "crown_volume_geo_real": "o.crown_volume_geo_real",
+            "source": "o.source",
+            "created_at": "o.created_at",
+        }
+        order_col = sort_map.get(sort_by, "o.observation_id")
+        order_dir = "DESC" if str(sort_order).lower() in ("desc", "descend") else "ASC"
+
+        # 分页参数控制
+        page = max(1, int(page))
+        page_size = max(1, min(500, int(page_size)))
+        offset = (page - 1) * page_size
+
+        query_sql = (
+            f"SELECT o.*, tp.tract_id, t.city, t.county, t.town "
+            f"FROM tree_observations o "
+            f"LEFT JOIN tract_phases tp ON o.tract_phase_pk = tp.tract_phase_pk "
+            f"LEFT JOIN tracts t ON tp.tract_pk = t.tract_pk "
+            f"{where_sql} "
+            f"ORDER BY {order_col} {order_dir} "
+            f"LIMIT {page_size} OFFSET {offset}"
+        )
+        data_rows = conn.execute(query_sql, params).fetchall()
+        items = [dict(r) for r in data_rows]
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "available_species": available_species,
+        }
+    finally:
+        conn.close()

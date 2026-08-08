@@ -48,6 +48,8 @@ import type {
   ReviewCapabilities,
   ReviewMapContext,
   ServerFileBrowseOut,
+  TreeObservationListParams,
+  TreeObservationListResponse,
 } from "./types";
 
 // 端点定义集中一处(DRY)。承接 v1.0 api.ts 的契约, 重构为 FSD shared 层。
@@ -291,4 +293,23 @@ export const endpoints = {
 
   exportUrl: (tractId: string, fmt = "geojson"): string =>
     apiUrl(`/tracts/${encodeURIComponent(tractId)}/export?fmt=${fmt}`),
+
+  listTreeObservations: (params: TreeObservationListParams): Promise<TreeObservationListResponse> => {
+    const sp = new URLSearchParams();
+    if (params.tiff_id) sp.set("tiff_id", params.tiff_id);
+    if (params.run_id) sp.set("run_id", params.run_id);
+    if (params.phase_id) sp.set("phase_id", params.phase_id);
+    if (params.tract_phase_pk) sp.set("tract_phase_pk", params.tract_phase_pk);
+    if (params.tract_id) sp.set("tract_id", params.tract_id);
+    if (params.species) sp.set("species", params.species);
+    if (params.min_confidence != null) sp.set("min_confidence", String(params.min_confidence));
+    if (params.max_confidence != null) sp.set("max_confidence", String(params.max_confidence));
+    if (params.keyword) sp.set("keyword", params.keyword);
+    if (params.page != null) sp.set("page", String(params.page));
+    if (params.page_size != null) sp.set("page_size", String(params.page_size));
+    if (params.sort_by) sp.set("sort_by", params.sort_by);
+    if (params.sort_order) sp.set("sort_order", params.sort_order);
+    const qs = sp.toString();
+    return apiGet(qs ? `/observations?${qs}` : "/observations");
+  },
 } as const;

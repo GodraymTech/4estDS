@@ -5,6 +5,7 @@ import { MapWorkspacePage } from "../pages/MapWorkspacePage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { ChangePage } from "../pages/ChangePage";
 import { LedgerPage } from "../pages/LedgerPage";
+import { TreeObservationsPage } from "../pages/TreeObservationsPage";
 import { TasksPage } from "../pages/TasksPage";
 import { ReportsPage } from "../pages/ReportsPage";
 import { AlertsPage } from "../pages/AlertsPage";
@@ -38,6 +39,7 @@ export const router = createBrowserRouter([
       { path: "change", element: <ChangePage /> },
       { path: "dashboard", element: <DashboardPage /> },
       { path: "ledger", element: <LedgerPage /> },
+      { path: "db/treeobservations", element: <TreeObservationsPage /> },
       {
         path: "review/:sessionId?",
         element: <Suspense fallback={null}><ReviewPage /></Suspense>,

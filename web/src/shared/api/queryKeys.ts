@@ -19,4 +19,5 @@ export const queryKeys = {
   reviews: ["reviews"] as const,
   review: (sessionId: string) => ["review", sessionId] as const,
   reviewWorkspace: (sessionId: string) => ["review-workspace", sessionId] as const,
+  treeObservations: (params: Record<string, unknown>) => ["tree-observations", params] as const,
 };

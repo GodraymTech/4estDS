@@ -231,10 +231,12 @@ def _assert_new_schema(conn: sqlite3.Connection) -> None:
 
 
 def resolve_db_path(url: str | None = None) -> Path:
-    """解析 sqlite 文件路径(仅支持本地文件型 URL 或 None)。"""
-    if url and url.startswith("sqlite"):
-        tail = url.split(":///", 1)[-1]
-        return Path(tail).expanduser()
+    """解析 sqlite 文件路径(支持本地文件路径、sqlite:/// URL 或 None)。"""
+    if url:
+        if url.startswith("sqlite"):
+            tail = url.split(":///", 1)[-1]
+            return Path(tail).expanduser()
+        return Path(url).expanduser()
     return paths.default_db_path()
 
 

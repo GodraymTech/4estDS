@@ -39,8 +39,8 @@ export function CategoryPanel({
     if (freshMode && categories.length === 0 && !hasPromptedEmptyRef.current) {
       hasPromptedEmptyRef.current = true;
       modal.info({
-        title: "请先添加树种类别",
-        content: "当前复核会话尚未配置树种类别。请点击确定后直接输入新树种名称（如：侧柏、油松、刺槐等），以便开展后续标注与推理校验。",
+        title: "请先添加树种",
+        content: "当前会话尚未配置树种类别。请至少添加一个新树种名称。",
         okText: "立即添加树种",
         onOk: () => {
           setIsAdding(true);
@@ -106,7 +106,7 @@ export function CategoryPanel({
             <Input
               ref={addInputRef}
               size="small"
-              placeholder="输入树种回车确认"
+              placeholder="全英文;无空格"
               value={newSpeciesName}
               onChange={(e) => setNewSpeciesName(e.target.value)}
               onPressEnter={handleConfirmAdd}
