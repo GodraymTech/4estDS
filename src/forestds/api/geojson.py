@@ -96,6 +96,33 @@ def _to_wgs84_geometry(
     return geom
 
 
+import json
+
+
+def _parse_box_geo_polygon(raw: str | list | None) -> dict | None:
+    if not raw:
+        return None
+    try:
+        box = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(box, (list, tuple)) and len(box) >= 4:
+            min_x, min_y, max_x, max_y = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+            return {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [min_x, min_y],
+                        [max_x, min_y],
+                        [max_x, max_y],
+                        [min_x, max_y],
+                        [min_x, min_y],
+                    ]
+                ],
+            }
+    except Exception:
+        pass
+    return None
+
+
 def rows_to_featurecollection(
     rows: list[dict],
     *,
@@ -107,15 +134,15 @@ def rows_to_featurecollection(
 
     Args:
         rows: 每行含 center_geom / crown_geom (WKT) 及属性字段。
-        geometry: ``point`` 用 center_geom；``crown`` 用 crown_geom 多边形。
+        geometry: ``point`` 用 center_geom；``crown`` 用 crown_geom 多边形（若无多边形则降级为 box_geo 矩形面或中心点）。
     """
     features: list[dict] = []
     transform_coords = _coordinate_transformer(crs_epsg=crs_epsg, crs_wkt=crs_wkt)
     for r in rows:
         if geometry == "crown":
-            geom = parse_wkt_polygon(r.get("crown_geom"))
+            geom = parse_wkt_polygon(r.get("crown_geom")) or _parse_box_geo_polygon(r.get("box_geo")) or parse_wkt_point(r.get("center_geom"))
         else:
-            geom = parse_wkt_point(r.get("center_geom"))
+            geom = parse_wkt_point(r.get("center_geom")) or parse_wkt_polygon(r.get("crown_geom"))
         geom = _to_wgs84_geometry(geom, transform_coords=transform_coords)
         props = {k: r.get(k) for k in _PROPERTY_KEYS if r.get(k) is not None}
         # 保留一个稳定 id 便于前端选中/高亮。

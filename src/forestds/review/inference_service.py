@@ -20,7 +20,6 @@ from .domain import ReviewConflict, ReviewNotFound, ReviewValidationError
 from .merge_service import ReviewMergeService, weighted_box_fusion
 from .models import MockReviewAdapter, RasterWindow, ReviewModelAdapter
 from .models.yoloe import YOLOEReviewAdapter
-from .masks import mask_item_fields
 from .session_service import ReviewSessionService
 
 
@@ -282,6 +281,11 @@ class ReviewInferenceService:
                     "skipped_windows": skipped_windows,
                     "updated_at": _now(),
                 })
+                if hasattr(adapter, "conf") and "threshold" in attempt:
+                    try:
+                        adapter.conf = float(attempt["threshold"])
+                    except (TypeError, ValueError):
+                        pass
                 context = self._prompt_context(adapter, attempt, source)
                 candidates: list[dict[str, Any]] = []
                 batch_size = self.batch_size
@@ -316,10 +320,7 @@ class ReviewInferenceService:
                     for prediction in predictions:
                         if prediction.score < float(attempt["threshold"]):
                             continue
-                        mask_fields: dict[str, Any] = {}
-                        if prediction.mask is not None and prediction.source_window:
-                            mask_fields = mask_item_fields(prediction.mask, prediction.source_window, source.transform)
-                        box_px = mask_fields.get("box_px", prediction.box_px)
+                        box_px = prediction.box_px
                         if window_filter is not None and not _keep_box(window_filter, box_px):
                             dropped_outside += 1
                             continue
@@ -333,8 +334,6 @@ class ReviewInferenceService:
                             "status": "pending",
                             "conflict": False,
                             "frozen": False,
-                            "source_window": list(prediction.source_window or ()),
-                            **mask_fields,
                         })
                         if len(candidates) >= self.max_candidates:
                             candidates_truncated = True
@@ -356,8 +355,10 @@ class ReviewInferenceService:
                 "复核 attempt %s 完成：切片=%d 原始候选=%d 融合后=%d 区外丢弃=%d 耗时=%.1fs",
                 attempt_id, len(windows), raw_count, len(candidates), dropped_outside, elapsed,
             )
+            model_name = adapter.capabilities().get("name", "unknown")
             return self._update_attempt(session_id, {
                 **attempt,
+                "model_name": model_name,
                 "status": "succeeded",
                 "progress": 100,
                 "candidate_count": len(candidates),
@@ -377,14 +378,16 @@ class ReviewInferenceService:
         attempt = self.get_attempt(session_id, attempt_id)
         if attempt["status"] != "succeeded":
             raise ReviewConflict("只有成功的 attempt 才能应用。", code="attempt_not_succeeded")
+        session = self.sessions.get(session_id)
         workspace = self.sessions.workspace(session_id)
         mode = merge_mode or attempt.get("merge_mode") or "append"
         if mode not in {"append", "replace_all"}:
             raise ReviewValidationError("不支持的候选合并模式。", code="invalid_merge_mode")
         merged = ReviewMergeService().apply(mode, workspace.items, attempt.get("candidates") or [])
+        target_revision = session.revision
         patch = self.sessions.apply_operations(
             session_id,
-            revision,
+            target_revision,
             f"apply-{attempt_id}-{uuid.uuid4().hex[:6]}",
             [{"type": "apply_attempt", "attempt_id": attempt_id, "items": merged}],
         )
@@ -491,12 +494,24 @@ class ReviewInferenceService:
         from rasterio.enums import Resampling
         from rasterio.windows import Window
 
-        left = max(0, math.floor(min(box[0] for box in boxes)) - 32)
-        top = max(0, math.floor(min(box[1] for box in boxes)) - 32)
-        right = min(source.width, math.ceil(max(box[2] for box in boxes)) + 32)
-        bottom = min(source.height, math.ceil(max(box[3] for box in boxes)) + 32)
+        left_box = min(box[0] for box in boxes)
+        top_box = min(box[1] for box in boxes)
+        right_box = max(box[2] for box in boxes)
+        bottom_box = max(box[3] for box in boxes)
+        box_w = max(1.0, right_box - left_box)
+        box_h = max(1.0, bottom_box - top_box)
+        center_x = (left_box + right_box) / 2
+        center_y = (top_box + bottom_box) / 2
+
+        # 居中扩展至少 512~1024 像素的上下文窗口，防止特征金字塔下采样塌缩
+        target_side = max(512, min(1024, max(box_w, box_h) * 4))
+        left = max(0, int(math.floor(center_x - target_side / 2)))
+        top = max(0, int(math.floor(center_y - target_side / 2)))
+        right = min(int(source.width), int(math.ceil(center_x + target_side / 2)))
+        bottom = min(int(source.height), int(math.ceil(center_y + target_side / 2)))
         width, height = right - left, bottom - top
-        scale = min(1.0, 4096 / max(width, height))
+
+        scale = min(1.0, 1024 / max(width, height))
         out_width, out_height = max(1, round(width * scale)), max(1, round(height * scale))
         raw_reference = source.read(
             window=Window(left, top, width, height),
@@ -519,9 +534,28 @@ class ReviewInferenceService:
 
 
 def build_review_adapter(settings) -> ReviewModelAdapter:
-    name = str(settings.get("review.adapter", "yoloe"))
+    name = str(settings.get("review.adapter", "dinov"))
     if name == "mock_review":
         return MockReviewAdapter()
+    if name == "dinov":
+        from .models.dinov import DINOvReviewAdapter
+
+        variant = str(settings.get("review.dinov_variant", "swin_t"))
+        weights = settings.get(
+            f"review.models.dinov.{variant}.weights",
+            settings.get("review.dinov_weights", ".4estDS/models/dinov/model_swinT.pth"),
+        )
+        config_path = settings.get(
+            f"review.models.dinov.{variant}.config",
+            settings.get("review.dinov_config", "configs/dinov/dinov_sam_coco_train.yaml"),
+        )
+        return DINOvReviewAdapter(
+            weights=weights,
+            config_path=config_path,
+            device=settings.get("review.device", settings.get("detect.device")),
+            conf=float(settings.get("review.conf_threshold", 0.50)),
+            imgsz=int(settings.get("review.model_input", 640)),
+        )
     variant = str(settings.get("review.model_variant", "26x"))
     return YOLOEReviewAdapter(
         settings.get(f"review.models.{variant}.weights"),

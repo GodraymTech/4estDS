@@ -1080,11 +1080,9 @@ function itemCollection(
       const pixelBox = item.box_px?.length === 4 ? (item.box_px.map(Number) as Box) : null;
       if ((!box || box.length !== 4) && !pixelBox) return [];
       const geometry =
-        (candidate || (item.source === "ai" && !item.frozen)) && pixelBox
-          ? ellipsePolygon(pixelBox, context)
-          : box && box.length === 4
-            ? geographicBoxPolygon(box.map(Number) as Box)
-            : pixelBoxPolygon(pixelBox as Box, context);
+        box && box.length === 4
+          ? geographicBoxPolygon(box.map(Number) as Box)
+          : pixelBoxPolygon(pixelBox as Box, context);
       return [
         {
           type: "Feature",
@@ -1177,20 +1175,6 @@ function geographicBoxPolygon([west, south, east, north]: Box): GeoJSON.Polygon 
       ],
     ],
   };
-}
-
-function ellipsePolygon(box: Box, context: ReviewMapContext): GeoJSON.Polygon {
-  const [x1, y1, x2, y2] = clampBox(box, context);
-  const centerX = (x1 + x2) / 2;
-  const centerY = (y1 + y2) / 2;
-  const radiusX = (x2 - x1) / 2;
-  const radiusY = (y2 - y1) / 2;
-  const ring: Point[] = [];
-  for (let index = 0; index <= 32; index += 1) {
-    const angle = (index / 32) * Math.PI * 2;
-    ring.push(pixelToLngLat([centerX + Math.cos(angle) * radiusX, centerY + Math.sin(angle) * radiusY], context));
-  }
-  return { type: "Polygon", coordinates: [ring] };
 }
 
 function clampBox(box: Box, context: ReviewMapContext): Box {

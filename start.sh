@@ -83,7 +83,7 @@ start_redis() {
 
   require_command redis-server
   echo "正在启动 Redis..."
-  redis-server --bind 127.0.0.1 --port 6379 --save "" --appendonly no >"$LOG_DIR/redis.log" 2>&1 &
+  nohup redis-server --bind 127.0.0.1 --port 6379 --save "" --appendonly no >"$LOG_DIR/redis.log" 2>&1 &
   echo $! >"$REDIS_PID_FILE"
   sleep 0.3
   if ! is_running "$REDIS_PID_FILE"; then
@@ -102,7 +102,7 @@ start_worker() {
   fi
 
   echo "正在启动推理 Worker..."
-  REDIS_URL="$REDIS_URL" uv --cache-dir "$UV_CACHE_DIR" run --frozen dramatiq forestds.worker.actors --processes 1 --threads 1 >"$LOG_DIR/worker.log" 2>&1 &
+  nohup env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 REDIS_URL="$REDIS_URL" uv --cache-dir "$UV_CACHE_DIR" run dramatiq forestds.worker.actors --processes 1 --threads 1 >"$LOG_DIR/worker.log" 2>&1 &
   echo $! >"$WORKER_PID_FILE"
   sleep 0.5
   pids=$(worker_pids || true)
@@ -120,7 +120,7 @@ start_backend() {
   fi
 
   echo "正在启动后端 API 服务..."
-  uv --cache-dir "$UV_CACHE_DIR" run --frozen uvicorn forestds.api.main:app --reload --host 0.0.0.0 --port 8000 >"$LOG_DIR/backend.log" 2>&1 &
+  nohup uv --cache-dir "$UV_CACHE_DIR" run uvicorn forestds.api.main:app --reload --host 0.0.0.0 --port 8000 >"$LOG_DIR/backend.log" 2>&1 &
   echo $! >"$BACKEND_PID_FILE"
   echo "后端 API 服务已启动，PID: $(cat "$BACKEND_PID_FILE") (日志输出到 $LOG_DIR/backend.log)"
 }
@@ -132,7 +132,7 @@ start_frontend() {
   fi
 
   echo "正在启动前端 Web 服务..."
-  (cd web && mise exec -- pnpm run dev) >"$LOG_DIR/frontend.log" 2>&1 &
+  nohup bash -c "cd web && mise exec -- pnpm run dev" >"$LOG_DIR/frontend.log" 2>&1 &
   echo $! >"$FRONTEND_PID_FILE"
   echo "前端 Web 服务已启动，PID: $(cat "$FRONTEND_PID_FILE") (日志输出到 $LOG_DIR/frontend.log)"
 }
@@ -163,6 +163,8 @@ stop_one() {
   echo "正在停止 $name (PID: $pid)..."
   pkill -P "$pid" 2>/dev/null || true
   kill "$pid" 2>/dev/null || true
+  sleep 0.3
+  kill -9 "$pid" 2>/dev/null || true
   rm -f "$pid_file"
   return 0
 }
@@ -178,21 +180,18 @@ stop_redis() {
 }
 
 stop_worker() {
-  if stop_one "推理 Worker" "$WORKER_PID_FILE"; then
-    return
-  fi
+  stop_one "推理 Worker" "$WORKER_PID_FILE" || true
   local pids
   pids=$(worker_pids || true)
-  if [[ -z "$pids" ]]; then
-    echo "推理 Worker 未在运行。"
-    return
+  if [[ -n "$pids" ]]; then
+    echo "正在彻底清理残留推理 Worker: $pids"
+    while read -r pid; do
+      [[ -n "$pid" ]] || continue
+      pkill -9 -P "$pid" 2>/dev/null || true
+      kill -9 "$pid" 2>/dev/null || true
+    done <<< "$pids"
   fi
-  echo "正在停止推理 Worker: $pids"
-  while read -r pid; do
-    [[ -n "$pid" ]] || continue
-    pkill -P "$pid" 2>/dev/null || true
-    kill "$pid" 2>/dev/null || true
-  done <<< "$pids"
+  rm -f "$WORKER_PID_FILE"
 }
 
 stop_services() {

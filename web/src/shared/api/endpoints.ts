@@ -44,7 +44,6 @@ import type {
   ReviewSession,
   ReviewWorkspace,
   ReviewAttempt,
-  ReviewMaskStroke,
   ReviewCapabilities,
   ReviewMapContext,
   ServerFileBrowseOut,
@@ -138,10 +137,6 @@ export const endpoints = {
     body: { revision: number; operation_id: string; operations: Array<Record<string, unknown>> },
   ): Promise<ReviewPatch> => apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/operations`, body),
 
-  applyReviewMask: (
-    sessionId: string,
-    body: { revision: number; operation_id: string; item_id: string; strokes: ReviewMaskStroke[] },
-  ): Promise<ReviewPatch> => apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/operations/mask`, body),
 
   undoReview: (sessionId: string, revision: number, operationId: string): Promise<ReviewPatch> =>
     apiPostJson(`/reviews/${encodeURIComponent(sessionId)}/undo`, { revision, operation_id: operationId }),

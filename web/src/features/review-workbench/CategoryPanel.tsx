@@ -41,7 +41,7 @@ export function CategoryPanel({
       modal.info({
         title: "请先添加树种",
         content: "当前会话尚未配置树种类别。请至少添加一个新树种名称。",
-        okText: "立即添加树种",
+        okText: "立即添加",
         onOk: () => {
           setIsAdding(true);
           setTimeout(() => addInputRef.current?.focus(), 120);

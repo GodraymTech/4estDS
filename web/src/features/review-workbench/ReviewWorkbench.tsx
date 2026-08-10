@@ -4,7 +4,7 @@ import { DeleteOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { operationId, useReview, useReviewCommand, useReviewWorkspace } from "../../entities/review";
-import type { ReviewAttempt, ReviewItem, ReviewMaskStroke } from "../../entities/review";
+import type { ReviewAttempt, ReviewItem } from "../../entities/review";
 import { endpoints, queryKeys } from "../../shared/api";
 import { useReviewWorkbenchStore } from "./store";
 import { TopBar } from "./TopBar";
@@ -17,7 +17,6 @@ import { TiffInfoPanel } from "./TiffInfoPanel";
 import { StatusBar } from "./StatusBar";
 import { PromptPanel } from "./PromptPanel";
 import { AttemptPanel } from "./AttemptPanel";
-import { MaskEditor } from "./MaskEditor";
 import "./ReviewWorkbench.css";
 
 const CATEGORY_COLORS = ["#72bc8f", "#5e9fe8", "#eac26b", "#bf8eda", "#de9255", "#df84a8", "#4fb9c9", "#e97366"];
@@ -34,7 +33,6 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
   const store = useReviewWorkbenchStore();
   const [attempts, setAttempts] = useState<ReviewAttempt[]>([]);
   const [candidateItems, setCandidateItems] = useState<ReviewItem[]>([]);
-  const [editingMask, setEditingMask] = useState<ReviewItem | null>(null);
   const [helpModalOpen, setHelpModalOpen] = useState(false);
   const [effectiveAreaVisible, setEffectiveAreaVisible] = useState(false);
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
@@ -86,6 +84,12 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
     useReviewWorkbenchStore.getState().clearSelection();
   }, [apply, editableIds]);
 
+  const clearWorkspace = useCallback(async () => {
+    await apply([{ type: "clear_workspace" }], "clear_workspace");
+    useReviewWorkbenchStore.getState().clearSelection();
+    message.success("工作集已清空（冻结框已保留）");
+  }, [apply]);
+
   const history = useMutation({
     mutationFn: (kind: "undo" | "redo") => {
       const rev = useReviewWorkbenchStore.getState().revision;
@@ -108,14 +112,6 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
       navigate("/review", { replace: true });
     },
     onError: (error) => message.error(error instanceof Error ? error.message : "发布失败"),
-  });
-  const saveMask = useMutation({
-    mutationFn: ({ itemId, strokes }: { itemId: string; strokes: ReviewMaskStroke[] }) => {
-      const rev = useReviewWorkbenchStore.getState().revision;
-      return endpoints.applyReviewMask(sessionId, { revision: rev, operation_id: operationId("mask"), item_id: itemId, strokes });
-    },
-    onSuccess: (patch) => { store.applyPatch(patch); setEditingMask(null); message.success("实例 Mask 已保存"); },
-    onError: (error) => message.error(error instanceof Error ? error.message : "Mask 保存失败"),
   });
 
   useEffect(() => {
@@ -192,7 +188,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
           onUndo={() => history.mutate("undo")}
           onRedo={() => history.mutate("redo")}
           onDeleteSelected={() => void deleteItems(store.selectedIds)}
-          onClearWorkspace={() => modal.confirm({ title: "清空可编辑工作集？", content: "冻结框将保留，其余对象会被删除。", okText: "清空", okButtonProps: { danger: true }, cancelText: "取消", onOk: () => deleteItems(items.map((item) => item.id)) })}
+          onClearWorkspace={() => modal.confirm({ title: "清空可编辑工作集？", content: "冻结框将保留，其余对象会被删除。", okText: "清空", okButtonProps: { danger: true }, cancelText: "取消", onOk: () => void clearWorkspace() })}
           onFitViewport={() => mapRef.current?.fitViewport()}
           onZoomIn={() => mapRef.current?.zoomIn()}
           onZoomOut={() => mapRef.current?.zoomOut()}
@@ -298,7 +294,6 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
                   busy={command.isPending}
                   onUpdate={(patch) => apply([{ type: "update", item_id: active.id, patch }], "item")}
                   onDelete={() => deleteItems([active.id])}
-                  onEditMask={active.mask_rle && !active.frozen ? () => setEditingMask(active) : undefined}
                 />
               ) : (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未选中任何对象" />
@@ -313,7 +308,6 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
         </div>
       </div>
       <div className="area-statusbar"><StatusBar totalItems={items.length} visibleItems={visibleItems.length} /></div>
-      <MaskEditor open={Boolean(editingMask)} item={editingMask} saving={saveMask.isPending} onCancel={() => setEditingMask(null)} onSave={async (strokes) => { if (editingMask) await saveMask.mutateAsync({ itemId: editingMask.id, strokes }); }} />
       <Modal title="工作台快捷键" open={helpModalOpen} footer={null} onCancel={() => setHelpModalOpen(false)}>
         <div className="review-shortcuts">
           <span><kbd>V</kbd> 选择与拖拽 (交替反转左右键)</span>

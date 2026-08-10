@@ -41,6 +41,19 @@ server = [
   "uvicorn[standard]>=0.29",
   "python-multipart>=0.0.9",
 ]
+# 交互式复核与开集视觉提示模型(DINOv)
+review-dinov = [
+  "timm>=1.0",
+  "einops>=0.8",
+  "fvcore>=0.1.5",
+  "iopath>=0.1.9",
+  "yacs>=0.1.8",
+  "pycocotools>=2.0",
+  "kornia>=0.7",
+  "torchmetrics>=1.0",
+  "progressbar2>=4.0",
+  "detectron2 @ git+https://github.com/facebookresearch/detectron2.git",
+]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

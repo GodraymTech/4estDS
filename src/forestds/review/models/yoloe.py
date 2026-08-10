@@ -135,12 +135,40 @@ class YOLOEReviewAdapter:
         if len(boxes) == 0 or len(boxes) != len(labels):
             raise ReviewValidationError("视觉 Prompt 需要等量的参考框和 class ID。", code="invalid_visual_prompt")
         class_ids = list(category_ids or [str(value) for value in sorted(set(labels.tolist()))])
+        ref_clean = _clean_rgb(reference_image)
+
+        embedding = None
+        try:
+            from ultralytics.models.yolo.yoloe import YOLOEVPDetectPredictor, YOLOEVPSegPredictor
+            is_seg = "seg" in str(self.weights).lower() or getattr(self.model, "task", "") == "segment"
+            predictor_cls = YOLOEVPSegPredictor if is_seg else YOLOEVPDetectPredictor
+            predictor = predictor_cls(overrides={
+                "model": str(self.weights),
+                "conf": self.conf,
+                "device": self.device,
+                "imgsz": self.imgsz,
+            })
+            backend = getattr(self.model, "model", self.model)
+            predictor.setup_model(backend, verbose=False)
+            predictor.set_prompts({
+                "bboxes": boxes.tolist(),
+                "cls": [int(x) for x in labels.tolist()],
+            })
+            embedding = predictor.get_vpe(ref_clean)
+            if embedding is not None and hasattr(self.model, "set_classes"):
+                self.model.set_classes(class_ids, embedding)
+        except Exception:
+            # 兼容 FakeModel 或轻量 mock 环境
+            pass
+
         return PromptContext(
             mode="visual",
             class_ids=class_ids,
-            reference_image=_clean_rgb(reference_image),
+            reference_image=ref_clean,
             reference_boxes=boxes.tolist(),
             reference_classes=[int(x) for x in labels.tolist()],
+            embedding=embedding,
+            encoded=True if embedding is not None else False,
         )
 
     def predict_batch(self, windows: Sequence[RasterWindow], prompt_context: PromptContext) -> list[ReviewPrediction]:
@@ -196,8 +224,6 @@ class YOLOEReviewAdapter:
                     ],
                     score=float(scores[index]) if index < len(scores) else 0.0,
                     category_id=category,
-                    mask=mask_values[index] if mask_values is not None and index < len(mask_values) else None,
-                    source_window=(window.x, window.y, window.width, window.height),
                 ))
         return normalized
 

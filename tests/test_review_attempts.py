@@ -32,7 +32,6 @@ class CandidateAdapter:
             box_px=[window.x + 2, window.y + 2, window.x + 12, window.y + 12],
             score=0.9,
             category_id=context.class_ids[0],
-            source_window=(window.x, window.y, window.width, window.height),
         ) for window in windows]
 
     def normalize(self, results, windows, context):

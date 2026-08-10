@@ -70,6 +70,21 @@ export function AttemptPanel({
     if (!query.data) return;
     onChanged(query.data);
     onPreview(query.data.status === "succeeded" ? query.data.candidates : []);
+    if (query.data.status === "succeeded") {
+      const model = query.data.model_name || "dinov";
+      const count = query.data.candidate_count ?? query.data.candidates?.length ?? 0;
+      const elapsed = query.data.elapsed_seconds != null ? `${query.data.elapsed_seconds}s` : "-";
+      console.log(
+        `%c[Review AI]%c 引擎: %c${model}%c | 检出候选: %c${count} 个%c | 耗时: %c${elapsed}`,
+        "color: #3b82f6; font-weight: bold",
+        "color: inherit",
+        "color: #10b981; font-weight: bold",
+        "color: inherit",
+        "color: #f59e0b; font-weight: bold",
+        "color: inherit",
+        "color: #8b5cf6"
+      );
+    }
   }, [query.data?.status, query.data?.progress, query.data?.candidate_count, dismissedId, selectedId]);
 
   const storeRevision = useReviewWorkbenchStore((state) => state.revision);

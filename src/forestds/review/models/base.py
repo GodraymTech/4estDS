@@ -31,8 +31,6 @@ class ReviewPrediction:
     box_px: list[float]
     score: float
     category_id: str
-    mask: Any = None
-    source_window: tuple[int, int, int, int] | None = None
 
 
 class ReviewModelAdapter(Protocol):

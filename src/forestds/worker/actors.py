@@ -9,6 +9,17 @@
 from __future__ import annotations
 
 import os
+
+# 严格锁定底层 OpenMP / MKL / OpenCV 线程数为 1，避免多线程 CUDA/GDAL 内存段错误
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
+import cv2
+cv2.setNumThreads(0)
+
 from typing import Any
 
 import dramatiq
@@ -27,6 +38,7 @@ _INFER_TIME_LIMIT_MS = int(os.environ.get("forestds_INFER_TIME_LIMIT_MS", str(24
 # 进程内缓存(模型常驻) —— 仅在 GPU concurrency=1 前提下安全。
 _settings: Any = None
 _detector_cache: dict[str, Any] = {}
+_review_adapter_cache: dict[str, Any] = {}
 
 
 def _get_settings():
@@ -113,9 +125,19 @@ def batch_actor(run_id: str, request_dict: dict) -> None:
         log.warning("批量作业失败已记录: run_id={}", run_id)
 
 
+def _get_review_adapter(settings):
+    name = str(settings.get("review.adapter", "dinov"))
+    variant = str(settings.get("review.dinov_variant" if name == "dinov" else "review.model_variant", ""))
+    cache_key = f"{name}:{variant}"
+    if cache_key not in _review_adapter_cache:
+        from ..review.inference_service import build_review_adapter
+        _review_adapter_cache[cache_key] = build_review_adapter(settings)
+    return _review_adapter_cache[cache_key]
+
+
 def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) -> None:
     settings = _get_settings()
-    from ..review.inference_service import ReviewInferenceService, build_review_adapter
+    from ..review.inference_service import ReviewInferenceService
 
     service = ReviewInferenceService(
         db_url,
@@ -126,7 +148,8 @@ def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) ->
         effective_area_cache_size=int(settings.get("effective_area.mask_cache_size", 32)),
     )
     try:
-        result = service.run_attempt(session_id, attempt_id, adapter=build_review_adapter(settings))
+        adapter = _get_review_adapter(settings)
+        result = service.run_attempt(session_id, attempt_id, adapter=adapter)
         log.info(
             "复核 attempt 完成: session={} attempt={} candidates={}",
             session_id,

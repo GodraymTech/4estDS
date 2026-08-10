@@ -20,10 +20,10 @@ venv/
 htmlcov/
 
 # 运行期数据目录(默认 ~/.4estDS,若放仓库内也忽略)
-.4estDS/
-outputs/
-data/
-models/
+/.4estDS/
+/outputs/
+/data/
+/models/
 *.sqlite
 *.db
 

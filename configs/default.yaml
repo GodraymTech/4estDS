@@ -23,17 +23,24 @@ effective_area:
   mask_cache_size: 32        # TIFF 像素几何 LRU 项数(>=1)；增大会占用内存，修改后需重启 Worker
 
 review:
-  adapter: yoloe          # yoloe | mock_review；生产使用 YOLOE，离线测试可显式选择 mock_review
-  model_variant: 26x      # 26x | 26l；决定下面使用哪组本地权重
+  adapter: dinov          # dinov | yoloe | mock_review；生产推荐 DINOv 交互视觉提示
+  dinov_variant: swin_l   # swin_t | swin_l；决定使用哪组 DINOv 骨干权重
   models:
+    dinov:
+      swin_t:
+        weights: ".4estDS/models/dinov/model_swinT.pth"
+        config: "configs/dinov/dinov_sam_coco_train.yaml"
+      swin_l:
+        weights: ".4estDS/models/dinov/model_swinL.pth"
+        config: "configs/dinov/dinov_sam_coco_swinl_train.yaml"
     26x:
       weights: ".4estDS/models/multimodal/yoloe-26x-seg.pt"
     26l:
       weights: ".4estDS/models/multimodal/yoloe-26l-seg.pt"
   mobileclip_weights: ".4estDS/models/multimodal/mobileclip2_b.ts"
   device: null            # null 继承 detect.device；也可设置 cuda:0 / cpu
-  model_input: 1024       # YOLOE 模型输入边长（像素）
-  conf_threshold: 0.25    # attempt 候选最低置信度
+  model_input: 640        # 视觉提示模型输入边长（像素）
+  conf_threshold: 0.15    # attempt 候选最低置信度 (DINOv 开集视觉提示单木得分通常在 0.15~0.35)
   default_scope: region   # region | full；前端新 attempt 默认范围，无需重启前端
   default_merge_mode: append # append | replace_all；前端默认合并方式
   tile_size: 1024         # 视口/整图 attempt 的动态读取窗口边长（像素）

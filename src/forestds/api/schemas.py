@@ -212,18 +212,6 @@ class ReviewOperationBatch(BaseModel):
     operations: list[dict[str, Any]] = Field(..., min_length=1)
 
 
-class ReviewMaskStroke(BaseModel):
-    mode: Literal["add", "erase"]
-    x: float
-    y: float
-    radius: float = Field(..., gt=0)
-
-
-class ReviewMaskOperation(BaseModel):
-    revision: int = Field(..., ge=0)
-    operation_id: str = Field(..., min_length=1)
-    item_id: str = Field(..., min_length=1)
-    strokes: list[ReviewMaskStroke] = Field(..., min_length=1)
 
 
 class ReviewRevisionCommand(BaseModel):

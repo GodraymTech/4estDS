@@ -430,24 +430,6 @@ export interface EffectiveAreaImportResponse {
 export type ReviewMode = "inherit" | "fresh";
 export type ReviewItemStatus = "accepted" | "rejected" | "pending";
 
-export interface ReviewMaskRle {
-  height: number;
-  width: number;
-  counts: number[];
-}
-
-export interface ReviewMaskGeometry {
-  type: "Polygon" | "MultiPolygon";
-  coordinates: number[][][] | number[][][][];
-}
-
-export interface ReviewMaskStroke {
-  mode: "add" | "erase";
-  x: number;
-  y: number;
-  radius: number;
-}
-
 export interface ReviewItem {
   id: string;
   parent_observation_id?: string | null;
@@ -459,10 +441,6 @@ export interface ReviewItem {
   /** 地图渲染专用 EPSG:4326 外接框，由后端从 box_px 精确派生。 */
   box_wgs84?: number[] | null;
   center_geom?: string | null;
-  crown_geom?: string | null;
-  mask_rle?: ReviewMaskRle;
-  source_window?: number[];
-  mask_geometry_px?: ReviewMaskGeometry;
   source: "parent" | "human" | "ai";
   confirmed: boolean;
   status: ReviewItemStatus;
@@ -555,6 +533,8 @@ export interface ReviewAttempt {
   skipped_windows?: number;
   /** 中心点落在有效区域外被丢弃的检测框数。 */
   dropped_outside?: number;
+  /** 模型名称。 */
+  model_name?: string;
   /** 推理耗时(秒)。 */
   elapsed_seconds?: number;
 }

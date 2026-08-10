@@ -65,13 +65,23 @@ export function PromptPanel({
   const sliderPosition = regionSidePx >= maxSide ? 100 : sideToSlider(regionSidePx, maxSide);
   const isFull = sliderPosition >= 99.8;
 
-  // 捕获外部在地图上直接画下的视觉 Prompt 框
+  // 模式切换时自适应置信度初始值（视觉 Prompt 零样本分数通常在 0.02~0.15 之间）
+  useEffect(() => {
+    if (activeTool === "ai_visual") {
+      setThreshold((prev) => (prev === 0.25 ? 0.05 : prev));
+    } else if (activeTool === "ai_text") {
+      setThreshold((prev) => (prev === 0.05 ? 0.25 : prev));
+    }
+  }, [activeTool]);
+
+  // 捕获外部在地图上直接画下的视觉 Prompt 框（单一样本模式：直接设为当前样本）
   useEffect(() => {
     if (visualBoxSample && visualBoxSample.length === 4) {
       const sampleId = `sample_${Date.now()}`;
-      setDrawnSampleBoxes((prev) => [...prev, { id: sampleId, box_px: visualBoxSample }]);
+      setDrawnSampleBoxes([{ id: sampleId, box_px: visualBoxSample }]);
+      setVisualExemplarIds([]);
       onClearVisualSample?.();
-      message.success("已捕获地图手绘样例框");
+      message.success("已捕获当前视觉单木样例");
     }
   }, [visualBoxSample, onClearVisualSample]);
 
@@ -94,7 +104,7 @@ export function PromptPanel({
     return [...fromCategories, ...fromCustom];
   }, [categories, selectedCategoryIds, customTextPrompts]);
 
-  // 组合视觉样例：已有选中的检测框 + 地图上手绘的样例框
+  // 组合视觉样例：单一目标样本模式
   const allVisualExemplars = useMemo(() => {
     const fromExisting = items
       .filter((item) => visualExemplarIds.includes(item.id) && item.box_px?.length === 4)
@@ -108,7 +118,7 @@ export function PromptPanel({
       category_id: targetSpecies || categories[0]?.id || "tree",
       box_px: sample.box_px,
     }));
-    return [...fromExisting, ...fromDrawn];
+    return [...fromExisting, ...fromDrawn].slice(-1);
   }, [items, visualExemplarIds, drawnSampleBoxes, targetSpecies, categories]);
 
   const hasValidInputs = promptType === "text" ? combinedTextPrompts.length > 0 : allVisualExemplars.length > 0;
@@ -131,8 +141,9 @@ export function PromptPanel({
       message.warning("选中的对象缺少矩形几何");
       return;
     }
-    setVisualExemplarIds((prev) => Array.from(new Set([...prev, ...validBoxes.map((b) => b.id)])));
-    message.success(`已采纳 ${validBoxes.length} 个视觉样例`);
+    setVisualExemplarIds([validBoxes[0].id]);
+    setDrawnSampleBoxes([]);
+    message.success("已采纳选中框作为视觉样例");
   };
 
   const create = useMutation({
@@ -297,17 +308,17 @@ export function PromptPanel({
           {allVisualExemplars.length ? (
             <div className="review-ai-tags-box">
               <Space size={[4, 4]} wrap>
-                {allVisualExemplars.map((ex, idx) => (
+                {allVisualExemplars.map((ex) => (
                   <Tag
                     key={ex.item_id}
                     closable
                     color="purple"
                     onClose={() => {
-                      setVisualExemplarIds((prev) => prev.filter((id) => id !== ex.item_id));
-                      setDrawnSampleBoxes((prev) => prev.filter((s) => s.id !== ex.item_id));
+                      setVisualExemplarIds([]);
+                      setDrawnSampleBoxes([]);
                     }}
                   >
-                    样例 #{idx + 1}
+                    当前样本框
                   </Tag>
                 ))}
               </Space>
@@ -336,13 +347,13 @@ export function PromptPanel({
           </div>
         </div>
 
-        {/* 置信度：文字 [置信度] ===[滑杆]=== [0.25] 同一行 */}
+        {/* 置信度：文字 [置信度] ===[滑杆]=== [0.05] 同一行 */}
         <div className="review-ai-inline-slider">
           <span className="review-ai-label">置信度</span>
           <Slider
-            min={0.05}
+            min={0.01}
             max={0.95}
-            step={0.05}
+            step={0.01}
             value={threshold}
             tooltip={{ formatter: (v) => `${Number(v).toFixed(2)}` }}
             onChange={(v) => setThreshold(Number(v))}

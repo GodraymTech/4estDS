@@ -66,3 +66,20 @@ def test_visual_prompt_encodes_reference_once_without_projecting_boxes(tmp_path)
     assert second[0].category_id == "秋茄"
     assert "visual_prompts" in backend.predict_calls[0]
     assert "visual_prompts" not in backend.predict_calls[1]
+
+
+def test_real_visual_prompt_multi_window_inference() -> None:
+    from pathlib import Path
+    weights = Path(".4estDS/models/multimodal/yoloe-26x-seg.pt")
+    if not weights.is_file():
+        return
+    adapter = YOLOEReviewAdapter(weights, conf=0.01, device="cpu")
+    ref = np.zeros((512, 512, 3), dtype=np.uint8)
+    ref[200:250, 200:250] = 200
+    context = adapter.prepare_visual_prompts(ref, [[200, 200, 250, 250]], [0], ["tree"])
+    windows = [
+        RasterWindow(0, 0, 512, 512, ref),
+        RasterWindow(512, 0, 512, 512, ref),
+    ]
+    preds = adapter.predict_batch(windows, context)
+    assert isinstance(preds, list)
