@@ -52,9 +52,20 @@ class LocalStorage:
     def save_stream(self, key: str, stream: BinaryIO) -> str:
         dst = self._abs(key)
         dst.parent.mkdir(parents=True, exist_ok=True)
-        with open(dst, "wb") as f:
-            shutil.copyfileobj(stream, f)
-        log.info("LocalStorage 写入: key={} -> {}", key, dst)
+        tmp_dst = dst.with_name(f".{dst.name}.tmp")
+        try:
+            with open(tmp_dst, "wb") as f:
+                shutil.copyfileobj(stream, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_dst, dst)
+        finally:
+            if tmp_dst.exists():
+                try:
+                    tmp_dst.unlink()
+                except OSError:
+                    pass
+        log.info("LocalStorage 原子写入: key={} -> {}", key, dst)
         return key
 
     def local_path(self, key: str) -> str:

@@ -41,10 +41,9 @@ class ReviewPublishService:
         accepted = [item for item in workspace.items if item.get("status") != "rejected"]
         self._validate_items(accepted)
 
+        from ..db.schema import get_db_connection
         init_db(self.db_url)
-        conn = sqlite3.connect(resolve_db_path(self.db_url), timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
+        conn = get_db_connection(self.db_url, timeout=30.0)
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(

@@ -354,6 +354,10 @@ def _validate_image_path(raw_path: str) -> Path:
     return path
 
 
+_IN_FLIGHT_TILE_LOCK = Lock()
+_IN_FLIGHT_TILES: dict[str, Lock] = {}
+
+
 def _render_tile_cached(path: Path, z: int, x: int, y: int) -> tuple[bytes, str]:
     if not TILE_CACHE_ENABLED:
         return _render_tile(path, z, x, y), "BYPASS"
@@ -363,16 +367,30 @@ def _render_tile_cached(path: Path, z: int, x: int, y: int) -> tuple[bytes, str]
         _touch_cache_file(cache_path)
         return cache_path.read_bytes(), "HIT"
 
-    content = _render_tile(path, z, x, y)
-    try:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
-        tmp_path.write_bytes(content)
-        os.replace(tmp_path, cache_path)
-        _maybe_trim_tile_cache()
-    except OSError:
-        pass
-    return content, "MISS"
+    tile_key = str(cache_path)
+    with _IN_FLIGHT_TILE_LOCK:
+        lock = _IN_FLIGHT_TILES.setdefault(tile_key, Lock())
+
+    with lock:
+        # 二次检查缓存是否被先完成的线程写入
+        if cache_path.is_file():
+            _touch_cache_file(cache_path)
+            return cache_path.read_bytes(), "HIT"
+
+        try:
+            content = _render_tile(path, z, x, y)
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
+                tmp_path.write_bytes(content)
+                os.replace(tmp_path, cache_path)
+                _maybe_trim_tile_cache()
+            except OSError:
+                pass
+            return content, "MISS"
+        finally:
+            with _IN_FLIGHT_TILE_LOCK:
+                _IN_FLIGHT_TILES.pop(tile_key, None)
 
 
 def _tile_cache_path(path: Path, z: int, x: int, y: int) -> Path:

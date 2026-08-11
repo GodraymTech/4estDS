@@ -7,15 +7,12 @@ from pathlib import Path
 
 from loguru import logger as log
 
-from .schema import init_db, resolve_db_path
+from .schema import get_db_connection, init_db, resolve_db_path
 
 
 def _connect(url: str | None) -> sqlite3.Connection:
-    db_path: Path = resolve_db_path(url)
     init_db(url)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return get_db_connection(url)
 
 
 def _rows_to_dicts(rows) -> list[dict]:

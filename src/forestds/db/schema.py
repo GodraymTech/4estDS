@@ -230,10 +230,12 @@ def _assert_new_schema(conn: sqlite3.Connection) -> None:
         raise RuntimeError("数据库表 tract_phases 仍含 active_run_id；请使用干净数据库重新初始化。")
 
 
-def resolve_db_path(url: str | None = None) -> Path:
-    """解析 sqlite 文件路径(支持本地文件路径、sqlite:/// URL 或 None)。"""
+def resolve_db_path(url: str | Path | None = None) -> Path:
+    """解析 sqlite 文件路径(支持本地文件路径、Path 对象、sqlite:/// URL 或 None)。"""
+    if isinstance(url, Path):
+        return url
     if url:
-        if url.startswith("sqlite"):
+        if isinstance(url, str) and url.startswith("sqlite"):
             tail = url.split(":///", 1)[-1]
             return Path(tail).expanduser()
         return Path(url).expanduser()
@@ -250,13 +252,34 @@ def _fix_review_sessions_schema(conn: sqlite3.Connection) -> None:
         conn.execute("DROP TABLE review_sessions")
 
 
+def get_db_connection(url: str | Path | None = None, timeout: float = 5.0, row_factory: bool = True) -> sqlite3.Connection:
+    """获取应用统一定制的 SQLite 数据库连接，并配置 WAL 模式与并发 Timeout。"""
+    db_path = resolve_db_path(url)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, timeout=timeout)
+    if row_factory:
+        conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def checkpoint_wal(url: str | Path | None = None, mode: str = "PASSIVE") -> None:
+    """对 WAL 日志进行检查点整理，清理过大的 -wal 文件。"""
+    conn = get_db_connection(url)
+    try:
+        conn.execute(f"PRAGMA wal_checkpoint({mode})")
+    finally:
+        conn.close()
+
+
 def init_db(url: str | None = None) -> Path:
     """创建新数据库表；自动升级旧 schema。"""
     db_path = resolve_db_path(url)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection(db_path, row_factory=False)
     try:
-        conn.execute("PRAGMA foreign_keys = ON")
         _fix_review_sessions_schema(conn)
         _assert_new_schema(conn)
         for stmt in DDL:
@@ -269,8 +292,7 @@ def init_db(url: str | None = None) -> Path:
 
 def table_names(url: str | None = None) -> list[str]:
     """返回现有表名(供测试/调试)。"""
-    db_path = resolve_db_path(url)
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection(url, row_factory=False)
     try:
         rows = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -278,3 +300,4 @@ def table_names(url: str | None = None) -> list[str]:
     finally:
         conn.close()
     return [r[0] for r in rows]
+

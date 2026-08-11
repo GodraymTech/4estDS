@@ -33,10 +33,8 @@ def _now() -> str:
 
 def _connect(url: str | None) -> sqlite3.Connection:
     init_db(url)
-    conn = sqlite3.connect(resolve_db_path(url), timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    from ..db.schema import get_db_connection
+    return get_db_connection(url, timeout=30.0)
 
 
 def _loads(raw: str | None, default):

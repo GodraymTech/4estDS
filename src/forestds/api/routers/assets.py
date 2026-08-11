@@ -33,10 +33,8 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 
 def _connect(url: str | None) -> sqlite3.Connection:
     init_db(url)
-    conn = sqlite3.connect(resolve_db_path(url))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    from ...db.schema import get_db_connection
+    return get_db_connection(url)
 
 
 def _loads(raw: str | None, default):
@@ -218,6 +216,9 @@ def inspect_asset_image(body: AssetInspectRequest) -> AssetInspectOut:
     )
 
 
+_active_cog_locks: set[str] = set()
+
+
 @router.post("/convert-cog", response_model=AssetCogConvertOut, summary="将单个 TIFF 转为严格 COG")
 def convert_asset_cog(body: AssetCogConvertRequest, db_url: str | None = Depends(get_db_url)) -> AssetCogConvertOut:
     from ...preprocess.cog import (
@@ -230,16 +231,25 @@ def convert_asset_cog(body: AssetCogConvertRequest, db_url: str | None = Depends
     from ...db.writer import _compute_tiff_metadata
 
     normalized = normalize_user_path(body.input_path)
-    path = Path(normalized).expanduser()
+    path = Path(normalized).expanduser().resolve()
+    lock_key = str(path)
+
+    if lock_key in _active_cog_locks:
+        raise HTTPException(status_code=409, detail="该文件正在转码中，请勿重复操作")
+
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"TIFF 不存在: {path}")
     if path.suffix.lower() not in {".tif", ".tiff"}:
         raise HTTPException(status_code=415, detail="只支持 tif/tiff 单文件转换")
 
-    source_type = inspect_tiff_format(path)
-    cog_path, prepared_type = prepared_cog_path(path, force=True)
-    if prepared_type != TIFF_COG:
-        raise HTTPException(status_code=500, detail=f"COG 转换失败: {prepared_type}")
+    _active_cog_locks.add(lock_key)
+    try:
+        source_type = inspect_tiff_format(path)
+        cog_path, prepared_type = prepared_cog_path(path, force=True)
+        if prepared_type != TIFF_COG:
+            raise HTTPException(status_code=500, detail=f"COG 转换失败: {prepared_type}")
+    finally:
+        _active_cog_locks.discard(lock_key)
 
     # 【方案B】：转码成功后，100% 精准更新数据库里的物理数据与有效面积
     if prepared_type == TIFF_COG:

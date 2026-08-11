@@ -250,7 +250,13 @@ function RuntimeView({ jobId }: { jobId?: string }) {
 
     const terminal = data?.status === "succeeded" || data?.status === "failed";
     void pull();
-    const timer = terminal ? undefined : window.setInterval(() => void pull(), 1200);
+    const timer = terminal
+      ? undefined
+      : window.setInterval(() => {
+          if (!document.hidden) {
+            void pull();
+          }
+        }, 1500);
     return () => {
       cancelled = true;
       if (timer) window.clearInterval(timer);

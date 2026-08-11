@@ -35,10 +35,44 @@ REVIEW_GPU_QUEUE = os.environ.get("forestds_REVIEW_GPU_QUEUE", "review_gpu")
 # 单作业时限(毫秒)，默认 24h，应对超大 TIFF 的长耗时推理。
 _INFER_TIME_LIMIT_MS = int(os.environ.get("forestds_INFER_TIME_LIMIT_MS", str(24 * 60 * 60 * 1000)))
 
-# 进程内缓存(模型常驻) —— 仅在 GPU concurrency=1 前提下安全。
+import gc
+import time
+
+_MODEL_TTL_SECONDS = int(os.environ.get("forestds_MODEL_TTL_SECONDS", "1800"))
+
+# 进程内缓存(模型常驻) —— 仅在 GPU concurrency=1 前提下安全。包含 last_used 时间戳做 30 分钟空闲卸载。
 _settings: Any = None
-_detector_cache: dict[str, Any] = {}
-_review_adapter_cache: dict[str, Any] = {}
+_detector_cache: dict[str, dict[str, Any]] = {}
+_review_adapter_cache: dict[str, dict[str, Any]] = {}
+
+
+def _evict_idle_models(ttl_seconds: int = _MODEL_TTL_SECONDS) -> None:
+    """清理空闲时间超过 ttl_seconds 的常驻模型权重，并回收 GPU 显存。"""
+    now = time.time()
+    expired_detectors = [
+        k for k, item in _detector_cache.items()
+        if now - item.get("last_used", 0) > ttl_seconds
+    ]
+    for k in expired_detectors:
+        log.info("空闲超时卸载检测器模型: arch={}", k)
+        _detector_cache.pop(k, None)
+
+    expired_adapters = [
+        k for k, item in _review_adapter_cache.items()
+        if now - item.get("last_used", 0) > ttl_seconds
+    ]
+    for k in expired_adapters:
+        log.info("空闲超时卸载复核适配器模型: key={}", k)
+        _review_adapter_cache.pop(k, None)
+
+    if expired_detectors or expired_adapters:
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
 
 def _get_settings():
@@ -54,9 +88,10 @@ def _get_settings():
 
 
 def _get_detector(arch: str, settings):
-    """进程内常驻检测器(权重仅加载一次)，参数与 tasks/batch 保持一致。"""
-    det = _detector_cache.get(arch)
-    if det is None:
+    """进程内常驻检测器(权重仅加载一次)，参数与 tasks/batch 保持一致，支持空闲超时卸载。"""
+    _evict_idle_models()
+    item = _detector_cache.get(arch)
+    if item is None:
         from ..detect import get_detector
 
         det = get_detector(
@@ -68,9 +103,28 @@ def _get_detector(arch: str, settings):
             device=settings.get("detect.device", settings.get("device", None)),
             verbose=settings.get("detect.verbose", False),
         )
-        _detector_cache[arch] = det
+        item = {"model": det, "last_used": time.time()}
+        _detector_cache[arch] = item
         log.info("GPU worker 预热检测器(常驻): arch={}", arch)
-    return det
+    else:
+        item["last_used"] = time.time()
+    return item["model"]
+
+
+def _get_review_adapter(settings):
+    _evict_idle_models()
+    name = str(settings.get("review.adapter", "dinov"))
+    variant = str(settings.get("review.dinov_variant" if name == "dinov" else "review.model_variant", ""))
+    cache_key = f"{name}:{variant}"
+    item = _review_adapter_cache.get(cache_key)
+    if item is None:
+        from ..review.inference_service import build_review_adapter
+        adapter = build_review_adapter(settings)
+        item = {"model": adapter, "last_used": time.time()}
+        _review_adapter_cache[cache_key] = item
+    else:
+        item["last_used"] = time.time()
+    return item["model"]
 
 
 def _setup_actor_logging(settings, run_id: str, task_type: str) -> None:
@@ -170,3 +224,68 @@ def review_region_actor(session_id: str, attempt_id: str, db_url: str | None = N
 def review_full_actor(session_id: str, attempt_id: str, db_url: str | None = None) -> None:
     """整图任务低优先级，仍保持单 GPU 串行。"""
     _run_review_attempt(session_id, attempt_id, db_url)
+
+
+@dramatiq.actor(queue_name=GPU_QUEUE, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
+def convert_cog_actor(input_path: str, db_url: str | None = None) -> None:
+    """耗时转 COG 任务(后台异步队列处理)。"""
+    from pathlib import Path
+    from ..db.schema import get_db_connection
+    from ..db.writer import _compute_tiff_metadata
+    from ..preprocess.cog import TIFF_COG, calculate_exact_effective_ratio, prepared_cog_path
+
+    path = Path(input_path).expanduser()
+    if not path.is_file():
+        log.error("转 COG 异步任务失败: 文件不存在 {}", path)
+        return
+
+    cog_path, prepared_type = prepared_cog_path(path, force=True)
+    if prepared_type == TIFF_COG:
+        exact_ratio = calculate_exact_effective_ratio(cog_path)
+        tiff_meta = _compute_tiff_metadata(cog_path, phase_id="00000000", tract_phase_pk="dummy")
+        if tiff_meta:
+            exact_effective_area = None
+            if tiff_meta.get("footprint_area_hm2") is not None:
+                exact_effective_area = round(tiff_meta["footprint_area_hm2"] * exact_ratio, 4)
+
+            conn = get_db_connection(db_url)
+            try:
+                conn.execute(
+                    """
+                    UPDATE tiffs
+                    SET tiff_type = ?,
+                        file_path = ?,
+                        pixel_width = ?,
+                        pixel_height = ?,
+                        bands = ?,
+                        crs_wkt = ?,
+                        bounds_wgs84 = ?,
+                        boundary_geom = ?,
+                        boundary_geom_cent = ?,
+                        footprint_area_hm2 = ?,
+                        effective_area_hm2 = COALESCE(?, effective_area_hm2),
+                        updated_at = datetime('now')
+                    WHERE file_path = ? OR file_path = ?
+                    """,
+                    (
+                        "COG",
+                        str(cog_path),
+                        tiff_meta["pixel_width"],
+                        tiff_meta["pixel_height"],
+                        tiff_meta["bands"],
+                        tiff_meta["crs_wkt"],
+                        tiff_meta["bounds_wgs84"],
+                        tiff_meta["boundary_geom"],
+                        tiff_meta["boundary_geom_cent"],
+                        tiff_meta["footprint_area_hm2"],
+                        exact_effective_area,
+                        str(path),
+                        str(cog_path),
+                    ),
+                )
+                conn.commit()
+            except Exception as e:
+                log.warning("异步转 COG 后更新数据库失败: {}", e)
+            finally:
+                conn.close()
+    log.info("异步转 COG 任务完成: path={} -> cog={}", path, cog_path)
