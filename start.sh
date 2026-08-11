@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 统一存储 PID 在 ~/.4estDS/pids 目录下，避免污染工作区。
-PID_DIR="$HOME/.4estDS/pids"
+# 单机多环境配置 (PROD / DEV)
+ENV_MODE="${ENV_MODE:-prod}"
+
+if [[ "$ENV_MODE" == "dev" ]]; then
+  PORT_API="${PORT_API:-8001}"
+  PORT_WEB="${PORT_WEB:-5174}"
+  START_WORKER="${START_WORKER:-false}"
+  ENV_LABEL="开发环境 (DEV)"
+else
+  PORT_API="${PORT_API:-8000}"
+  PORT_WEB="${PORT_WEB:-5173}"
+  START_WORKER="${START_WORKER:-true}"
+  ENV_LABEL="生产环境 (PROD)"
+fi
+
+# 运行根目录与数据隔离
+export forestds_HOME="${forestds_HOME:-$PWD/.4estDS}"
+PID_DIR="$forestds_HOME/pids"
 LOG_DIR="logs"
 
 REDIS_PID_FILE="$PID_DIR/redis.pid"
@@ -13,7 +29,7 @@ FRONTEND_PID_FILE="$PID_DIR/frontend.pid"
 REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
 UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/forestds-uv-cache}"
 
-mkdir -p "$PID_DIR" "$LOG_DIR"
+mkdir -p "$PID_DIR" "$LOG_DIR" "$forestds_HOME"
 
 is_running() {
   local pid_file=$1
@@ -94,6 +110,11 @@ start_redis() {
 }
 
 start_worker() {
+  if [[ "$START_WORKER" != "true" ]]; then
+    echo "推理 Worker: [DEV 模式跳过独立启动，共享生产 GPU 队列与 Worker]"
+    return
+  fi
+
   local pids
   pids=$(worker_pids || true)
   if is_running "$WORKER_PID_FILE" || [[ -n "$pids" ]]; then
@@ -102,7 +123,7 @@ start_worker() {
   fi
 
   echo "正在启动推理 Worker..."
-  nohup env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 REDIS_URL="$REDIS_URL" uv --cache-dir "$UV_CACHE_DIR" run dramatiq forestds.worker.actors --processes 1 --threads 1 >"$LOG_DIR/worker.log" 2>&1 &
+  nohup env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 REDIS_URL="$REDIS_URL" forestds_HOME="$forestds_HOME" uv --cache-dir "$UV_CACHE_DIR" run dramatiq forestds.worker.actors --processes 1 --threads 1 >"$LOG_DIR/worker.log" 2>&1 &
   echo $! >"$WORKER_PID_FILE"
   sleep 0.5
   pids=$(worker_pids || true)
@@ -114,39 +135,42 @@ start_worker() {
 }
 
 start_backend() {
-  if is_running "$BACKEND_PID_FILE" || port_listening 8000; then
-    echo "后端 API 服务已在运行中。"
+  if is_running "$BACKEND_PID_FILE" || port_listening "$PORT_API"; then
+    echo "后端 API 服务已在运行中 (端口 $PORT_API)。"
     return
   fi
 
-  echo "正在启动后端 API 服务..."
-  nohup uv --cache-dir "$UV_CACHE_DIR" run uvicorn forestds.api.main:app --reload --host 0.0.0.0 --port 8000 >"$LOG_DIR/backend.log" 2>&1 &
+  echo "正在启动后端 API 服务 [$ENV_LABEL: 端口 $PORT_API]..."
+  nohup env forestds_HOME="$forestds_HOME" REDIS_URL="$REDIS_URL" uv --cache-dir "$UV_CACHE_DIR" run uvicorn forestds.api.main:app --reload --host 0.0.0.0 --port "$PORT_API" >"$LOG_DIR/backend.log" 2>&1 &
   echo $! >"$BACKEND_PID_FILE"
   echo "后端 API 服务已启动，PID: $(cat "$BACKEND_PID_FILE") (日志输出到 $LOG_DIR/backend.log)"
 }
 
 start_frontend() {
-  if is_running "$FRONTEND_PID_FILE" || port_listening 5173; then
-    echo "前端 Web 服务已在运行中。"
+  if is_running "$FRONTEND_PID_FILE" || port_listening "$PORT_WEB"; then
+    echo "前端 Web 服务已在运行中 (端口 $PORT_WEB)。"
     return
   fi
 
-  echo "正在启动前端 Web 服务..."
-  nohup bash -c "cd web && mise exec -- pnpm run dev" >"$LOG_DIR/frontend.log" 2>&1 &
+  echo "正在启动前端 Web 服务 [$ENV_LABEL: 端口 $PORT_WEB]..."
+  nohup bash -c "cd web && env VITE_PORT=$PORT_WEB VITE_API_TARGET=http://127.0.0.1:$PORT_API mise exec -- pnpm run dev" >"$LOG_DIR/frontend.log" 2>&1 &
   echo $! >"$FRONTEND_PID_FILE"
   echo "前端 Web 服务已启动，PID: $(cat "$FRONTEND_PID_FILE") (日志输出到 $LOG_DIR/frontend.log)"
 }
 
 start_services() {
+  echo ">>> 启动 4estDS $ENV_LABEL (数据路径: $forestds_HOME)"
   start_redis
   start_worker
   start_backend
   start_frontend
 
-  echo "服务入口："
-  echo "  API: http://127.0.0.1:8000"
-  echo "  Web: http://localhost:5173"
-  echo "  Redis: $REDIS_URL"
+  echo "----------------------------------------"
+  echo "$ENV_LABEL 服务入口："
+  echo "  API: http://127.0.0.1:$PORT_API"
+  echo "  Web: http://localhost:$PORT_WEB"
+  echo "  数据库: $forestds_HOME/db/4estds.sqlite"
+  echo "----------------------------------------"
 }
 
 stop_one() {
@@ -154,7 +178,6 @@ stop_one() {
   local pid_file=$2
 
   if ! is_running "$pid_file"; then
-    echo "$name PID 未记录或已停止。"
     return 1
   fi
 
@@ -170,36 +193,41 @@ stop_one() {
 }
 
 stop_redis() {
-  if stop_one "Redis" "$REDIS_PID_FILE"; then
-    return
+  if [[ "$ENV_MODE" == "prod" ]]; then
+    if stop_one "Redis" "$REDIS_PID_FILE"; then
+      return
+    fi
+    if command -v redis-cli >/dev/null 2>&1; then
+      redis-cli -h 127.0.0.1 -p 6379 shutdown nosave >/dev/null 2>&1 || true
+    fi
+    stop_port "Redis" 6379 || echo "Redis 未在运行。"
   fi
-  if command -v redis-cli >/dev/null 2>&1; then
-    redis-cli -h 127.0.0.1 -p 6379 shutdown nosave >/dev/null 2>&1 || true
-  fi
-  stop_port "Redis" 6379 || echo "Redis 未在运行。"
 }
 
 stop_worker() {
-  stop_one "推理 Worker" "$WORKER_PID_FILE" || true
-  local pids
-  pids=$(worker_pids || true)
-  if [[ -n "$pids" ]]; then
-    echo "正在彻底清理残留推理 Worker: $pids"
-    while read -r pid; do
-      [[ -n "$pid" ]] || continue
-      pkill -9 -P "$pid" 2>/dev/null || true
-      kill -9 "$pid" 2>/dev/null || true
-    done <<< "$pids"
+  if [[ "$START_WORKER" == "true" ]]; then
+    stop_one "推理 Worker" "$WORKER_PID_FILE" || true
+    local pids
+    pids=$(worker_pids || true)
+    if [[ -n "$pids" ]]; then
+      echo "正在清理推理 Worker: $pids"
+      while read -r pid; do
+        [[ -n "$pid" ]] || continue
+        pkill -9 -P "$pid" 2>/dev/null || true
+        kill -9 "$pid" 2>/dev/null || true
+      done <<< "$pids"
+    fi
+    rm -f "$WORKER_PID_FILE"
   fi
-  rm -f "$WORKER_PID_FILE"
 }
 
 stop_services() {
-  stop_one "前端 Web 服务" "$FRONTEND_PID_FILE" || stop_port "前端 Web 服务" 5173 || echo "前端 Web 服务 未在运行。"
-  stop_one "后端 API 服务" "$BACKEND_PID_FILE" || stop_port "后端 API 服务" 8000 || echo "后端 API 服务 未在运行。"
+  echo ">>> 停止 4estDS $ENV_LABEL"
+  stop_one "前端 Web 服务 ($PORT_WEB)" "$FRONTEND_PID_FILE" || stop_port "前端 Web 服务" "$PORT_WEB" || echo "前端 Web 服务 未在运行。"
+  stop_one "后端 API 服务 ($PORT_API)" "$BACKEND_PID_FILE" || stop_port "后端 API 服务" "$PORT_API" || echo "后端 API 服务 未在运行。"
   stop_worker
   stop_redis
-  rm -f "$FRONTEND_PID_FILE" "$BACKEND_PID_FILE" "$WORKER_PID_FILE" "$REDIS_PID_FILE"
+  rm -f "$FRONTEND_PID_FILE" "$BACKEND_PID_FILE" "$WORKER_PID_FILE"
 }
 
 status_port() {
@@ -210,7 +238,7 @@ status_port() {
   pids=$(port_pids "$port" || true)
 
   if is_running "$pid_file"; then
-    echo "$name: 运行中 (PID: $(cat "$pid_file"))"
+    echo "$name: 运行中 (PID: $(cat "$pid_file"), 端口 $port)"
   elif [[ -n "$pids" ]]; then
     echo "$name: 运行中 (端口 $port, PID: $pids)"
   elif port_listening "$port"; then
@@ -221,6 +249,7 @@ status_port() {
 }
 
 status_services() {
+  echo "=== 4estDS $ENV_LABEL 状态 [数据: $forestds_HOME] ==="
   status_port "Redis" "$REDIS_PID_FILE" 6379
   local pids
   pids=$(worker_pids || true)
@@ -231,8 +260,8 @@ status_services() {
   else
     echo "推理 Worker: 已停止"
   fi
-  status_port "后端 API 服务" "$BACKEND_PID_FILE" 8000
-  status_port "前端 Web 服务" "$FRONTEND_PID_FILE" 5173
+  status_port "后端 API 服务" "$BACKEND_PID_FILE" "$PORT_API"
+  status_port "前端 Web 服务" "$FRONTEND_PID_FILE" "$PORT_WEB"
 }
 
 case "${1:-}" in
