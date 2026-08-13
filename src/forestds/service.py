@@ -101,14 +101,37 @@ def run_inference_job(
     return InferenceResult.from_metrics(metrics, status=JobStatus.succeeded, published=published)
 
 
+def _to_batch_specs(request: BatchInferenceRequest, default_arch: str) -> list:
+    """把契约层的待命项映射为任务层的 ``BatchItemSpec``。"""
+    from .tasks.batch import BatchItemSpec
+
+    specs = []
+    for item in request.items:
+        specs.append(
+            BatchItemSpec(
+                image_path=item.image_path,
+                arch=item.arch or default_arch,
+                publish=item.publish,
+                **item.to_pipeline_kwargs(),
+            )
+        )
+    return specs
+
+
 def run_batch_inference_job(
     request: BatchInferenceRequest,
     *,
     settings=None,
     run_id: Optional[str] = None,
+    detector_factory=None,
 ) -> dict:
-    """执行一次批量推理作业，并用一个顶层 run_log 表示目录级任务状态。"""
+    """执行一次批量推理作业(一串各自携带参数的待命项)，用一个顶层 run_log 表示批次状态。
+
+    顶层终态语义：只要有任何一条失败或被取消，批次即记为 failed（但已完成的单图
+    仍保留各自的 succeeded 子 run与成果），使前端不会把部分失败误读为全部成功。
+    """
     from . import paths
+    from .cancellation import clear_cancel
     from .config import load_settings
     from .db import writer
     from .logging_setup import new_run_id
@@ -121,43 +144,41 @@ def run_batch_inference_job(
     rid = run_id or new_run_id()
     paths.set_run_context(rid, "batch")
     db_url = settings.get("url", None)
-    arch_val = request.arch or settings.get("detect.arch", "ultralytics")
+    default_arch = settings.get("detect.arch", "ultralytics")
+
+    specs = _to_batch_specs(request, default_arch)
+    archs = sorted({spec.arch for spec in specs if spec.arch})
+    arch_val = archs[0] if len(archs) == 1 else ",".join(archs)
+    input_label = specs[0].image_path if len(specs) == 1 else f"{len(specs)} 张影像"
 
     writer.start_run_log(
         rid,
         "batch",
         model_arch=arch_val,
-        input_path=request.input_path,
+        input_path=input_label,
         params=request.model_dump(mode="json"),
         url=db_url,
     )
 
     try:
         summary = run_batch_pipeline(
-            [request.input_path],
-            settings=settings,
-            arch=arch_val,
-        phase_id=request.phase_id,
-        tract_id=request.tract_id,
-            tile_size=request.tile_size,
-            overlap_rate=request.overlap_rate,
-            dsm=request.dsm,
-            dem=request.dem,
-            las=request.las,
-            export_fmt=request.export_fmt.value if request.export_fmt else None,
-            publish=request.publish,
-            cancel_run_id=rid,
+            specs, settings=settings, cancel_run_id=rid, detector_factory=detector_factory
         )
     except Exception as exc:  # noqa: BLE001 - 顶层批量任务必须落 failed
         writer.finish_run_log(rid, "failed", error=str(exc), url=db_url)
         log.opt(exception=False).error("批量推理作业失败: run_id={} {} — {}", rid, type(exc).__name__, exc)
         raise InferenceError(str(exc), run_id=rid, cause=exc) from exc
+    finally:
+        # 无论成败都清除取消标志，避免残留标志影响后续作业。
+        clear_cancel(rid)
 
     metrics = {
         "job_type": "batch",
         "total": summary.total,
         "succeeded": summary.succeeded,
         "failed": summary.failed,
+        "canceled": summary.canceled,
+        "cancelled": summary.cancelled,
         "total_trees": summary.total_trees,
         "duration_s": summary.elapsed_s,
         "items": [
@@ -177,5 +198,20 @@ def run_batch_inference_job(
             for item in summary.items
         ],
     }
-    writer.finish_run_log(rid, "succeeded", metrics=metrics, duration_s=summary.elapsed_s, url=db_url)
+
+    if summary.failed or summary.canceled:
+        error_msg = (
+            "用户终止作业：成功 {} 条，失败 {} 条，已取消 {} 条".format(
+                summary.succeeded, summary.failed, summary.canceled
+            )
+            if summary.cancelled
+            else "批量推理部分失败：成功 {} 条，失败 {} 条".format(summary.succeeded, summary.failed)
+        )
+        writer.finish_run_log(
+            rid, "failed", metrics=metrics, duration_s=summary.elapsed_s, error=error_msg, url=db_url
+        )
+    else:
+        writer.finish_run_log(
+            rid, "succeeded", metrics=metrics, duration_s=summary.elapsed_s, url=db_url
+        )
     return metrics

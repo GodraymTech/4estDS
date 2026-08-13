@@ -118,6 +118,8 @@ export interface CancelJobResult {
 
 export interface CancelAllJobsResult {
   cancelled: number;
+  /** 因 worker 即将停机而由后端直接写入终态的作业数。 */
+  finalized: number;
   purged_queues: string[];
   message: string;
 }
@@ -151,15 +153,15 @@ export interface ArtifactExportResult {
   url: string;
 }
 
-// 上传响应(对应 schemas.UploadResponse)。key 回传给 /jobs/infer。
+// 上传响应(对应 schemas.UploadResponse)。key 回传给 /jobs/batch。
 export interface UploadResponse {
   key: string;
   filename: string;
   size: number;
 }
 
-// 提交推理作业的请求体(对应 schemas.InferSubmit)。
-export interface InferSubmit {
+// 作业队列中的一条待命项(对应 schemas.BatchInferItem)。
+export interface BatchInferItem {
   image_key?: string;
   input_path?: string;
   arch?: string;
@@ -171,6 +173,12 @@ export interface InferSubmit {
   dem?: string;
   las?: string;
   export_fmt?: string;
+}
+
+// 提交推理作业的请求体(对应 schemas.BatchInferSubmit)。
+// 单图直接推理即 items 长度为 1，与批量完全同路。
+export interface BatchInferSubmit {
+  items: BatchInferItem[];
 }
 
 // 作业引用(对应 schemas.JobRef)。

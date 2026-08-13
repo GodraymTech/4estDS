@@ -4,6 +4,7 @@ import {
   Button,
   Input,
   InputNumber,
+  Modal,
   Progress,
   Select,
   Space,
@@ -17,12 +18,18 @@ import {
   InfoCircleOutlined,
   InboxOutlined,
   PlayCircleOutlined,
+  PlusOutlined,
   RightOutlined,
   StopOutlined,
 } from "@ant-design/icons";
 import { useSearchParams } from "react-router-dom";
-import { ApiError, endpoints, type InferSubmit, type InputInspectResult } from "../../shared/api";
-import { useJobsStore } from "./jobsStore";
+import {
+  ApiError,
+  endpoints,
+  type BatchInferItem,
+  type InputInspectResult,
+} from "../../shared/api";
+import { newPendingId, useJobsStore, type PendingTask } from "./jobsStore";
 import { ServerFileBrowserModal } from "../../shared/ui/ServerFileBrowserModal";
 
 const EXPORT_OPTIONS = [
@@ -33,9 +40,13 @@ const EXPORT_OPTIONS = [
 ];
 
 const PATH_TIP =
-  "支持“图像路径”（单图像推理）和“文件夹路径”（批量推理）";
+  "支持“图像路径”与“文件夹路径”；文件夹会在加入队列时展开为逐张待命项，可分别调整参数";
 const TRACT_TIP =
-  '为输入图像设置地块 ID，默认使用图像文件名。批量推理时，您输入的 tract_id 将作为地块 ID 前缀。';
+  "为输入图像设置地块 ID，默认使用图像文件名。文件夹展开为多张影像时，地块 ID 按各自文件名生成。";
+const QUEUE_TIP =
+  "把当前参数存为一条待命项，然后可以继续选下一张影像；点「开始推理」时整个待命队列会按顺序串行执行";
+const CANCEL_TIP =
+  "终止后端正在执行与排队中的作业；本地尚未提交的待命条目会保留";
 
 export function UploadForm({
   activeJobId,
@@ -47,24 +58,22 @@ export function UploadForm({
   onCancelled?: (jobId: string) => void;
 }) {
   const [searchParams] = useSearchParams();
-  const [inputPath, setInputPath] = useState("");
+
+  // 表单参数存在 store 里(持久化)：台账页与任务页来回跳转时不能丢失正在填写的内容。
+  const draft = useJobsStore((s) => s.draft);
+  const patchDraft = useJobsStore((s) => s.patchDraft);
+  const clearDraftInput = useJobsStore((s) => s.clearDraftInput);
+  const pending = useJobsStore((s) => s.pending);
+  const enqueue = useJobsStore((s) => s.enqueue);
+  const clearPending = useJobsStore((s) => s.clearPending);
+  const addJob = useJobsStore((s) => s.addJob);
+
+  // File 对象无法持久化，只能留在本地状态。
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [inspect, setInspect] = useState<InputInspectResult | null>(null);
   const [inspectBusy, setInspectBusy] = useState(false);
-  const [tractId, setTractId] = useState("");
-  const [phaseId, setPhaseId] = useState("");
-  const [tileSize, setTileSize] = useState<number | null>(null);
-  const [overlapPercent, setOverlapPercent] = useState<number | null>(null);
-  const [exportFmt, setExportFmt] = useState("shp");
-  const [dsmOpen, setDsmOpen] = useState(false);
-  const [dsm, setDsm] = useState("");
-  const [demOpen, setDemOpen] = useState(false);
-  const [dem, setDem] = useState("");
-  const [lasOpen, setLasOpen] = useState(false);
-  const [las, setLas] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
-  const addJob = useJobsStore((s) => s.addJob);
 
   const [browserOpen, setBrowserOpen] = useState(false);
   const [browserConfig, setBrowserConfig] = useState<{
@@ -88,13 +97,15 @@ export function UploadForm({
     const nextInputPath = searchParams.get("input_path") || "";
     const nextTractId = searchParams.get("tract_id") || "";
     const nextPhaseId = searchParams.get("phase_id") || "";
-    if (nextInputPath) setInputPath(nextInputPath);
-    if (nextTractId) setTractId(nextTractId);
-    if (nextPhaseId) setPhaseId(nextPhaseId);
-  }, [searchParams]);
+    const patch: Record<string, string> = {};
+    if (nextInputPath) patch.inputPath = nextInputPath;
+    if (nextTractId) patch.tractId = nextTractId;
+    if (nextPhaseId) patch.phaseId = nextPhaseId;
+    if (Object.keys(patch).length) patchDraft(patch);
+  }, [patchDraft, searchParams]);
 
   useEffect(() => {
-    const path = inputPath.trim();
+    const path = draft.inputPath.trim();
     if (!path) {
       setInspect(null);
       return undefined;
@@ -104,16 +115,20 @@ export function UploadForm({
       void inspectPath(path);
     }, 450);
     return () => window.clearTimeout(handle);
-  }, [inputPath]);
+  }, [draft.inputPath]);
 
   const isBatch = inspect?.input_kind === "directory";
   const suggestedTractId = inspect?.suggested_tract_id || undefined;
   const suggestedPhaseId = inspect?.suggested_phase_id || undefined;
+  const hasInput = Boolean(draft.inputPath.trim() || uploadFile);
   const inputName = useMemo(() => {
     if (inspect?.normalized_path) return basename(inspect.normalized_path);
-    if (inputPath.trim()) return basename(inputPath.trim());
+    if (draft.inputPath.trim()) return basename(draft.inputPath.trim());
     return uploadFile?.name || "";
-  }, [inputPath, inspect?.normalized_path, uploadFile?.name]);
+  }, [draft.inputPath, inspect?.normalized_path, uploadFile?.name]);
+
+  // 「开始推理」将要执行的条数 = 待命队列 + 当前表单(若已填输入)。
+  const runCount = pending.length + (hasInput ? (isBatch ? inspect?.images.length || 1 : 1) : 0);
 
   async function inspectPath(path: string) {
     setInspectBusy(true);
@@ -130,29 +145,142 @@ export function UploadForm({
     }
   }
 
-  async function submit() {
-    const body = buildSubmitBody();
-    if (!body) return;
-    setBusy(true);
-    setProgress(0);
-    try {
-      let finalBody = body;
-      if (!body.input_path && uploadFile) {
-        const up = await endpoints.uploadImage(uploadFile, setProgress);
-        finalBody = { ...body, image_key: up.key };
+  /**
+   * 把当前表单构造成待命项。
+   *
+   * 目录在**前端**展开为逐张影像：只有这样用户才能对其中某一张单独改参数或删除，
+   * 后端因此只需接受具体文件，契约保持简单。
+   */
+  async function buildTasksFromForm(): Promise<PendingTask[] | null> {
+    const cleanPhaseId = draft.phaseId.replace(/[^\d]/g, "");
+    if (draft.phaseId && cleanPhaseId.length !== 8) {
+      message.warning("时相 ID 需为 8 位 YYYYMMDD");
+      return null;
+    }
+    if (!hasInput) {
+      message.warning("请先输入路径或拖入影像文件");
+      return null;
+    }
+
+    const shared = {
+      phaseId: cleanPhaseId || undefined,
+      tileSize: typeof draft.tileSize === "number" ? draft.tileSize : undefined,
+      overlapRate:
+        typeof draft.overlapPercent === "number" ? draft.overlapPercent / 100 : undefined,
+      dsm: draft.dsmOpen && draft.dsm.trim() ? draft.dsm.trim() : undefined,
+      dem: draft.demOpen && draft.dem.trim() ? draft.dem.trim() : undefined,
+      las: draft.lasOpen && draft.las.trim() ? draft.las.trim() : undefined,
+      exportFmt: draft.exportFmt,
+    };
+    const tractId = draft.tractId.trim() || undefined;
+
+    // 本地文件：先上传拿到 key，待命项才有稳定的服务端引用。
+    if (uploadFile && !draft.inputPath.trim()) {
+      const up = await endpoints.uploadImage(uploadFile, setProgress);
+      return [
+        {
+          id: newPendingId(),
+          imageKey: up.key,
+          displayName: uploadFile.name,
+          fullPath: uploadFile.name,
+          fromUpload: true,
+          tractId,
+          ...shared,
+        },
+      ];
+    }
+
+    const rawPath = draft.inputPath.trim();
+    if (isBatch) {
+      const images = inspect?.images ?? [];
+      if (!images.length) {
+        message.warning("该目录下没有可用的影像文件");
+        return null;
       }
-      const ref = await endpoints.submitInfer(finalBody);
+      if (inspect && inspect.image_count > images.length) {
+        message.warning(
+          `目录内共 ${inspect.image_count} 张影像，本次仅加入前 ${images.length} 张，可分批加入`
+        );
+      }
+      // 地块 ID 必须唯一，多张影像不能共用同一个显式值。
+      if (tractId) {
+        message.info("目录展开为多张影像，地块 ID 将按各自文件名生成");
+      }
+      return images.map((img) => ({
+        id: newPendingId(),
+        inputPath: img.path,
+        displayName: basename(img.path),
+        fullPath: img.path,
+        fromUpload: false,
+        tractId: undefined,
+        ...shared,
+      }));
+    }
+
+    const filePath = inspect?.normalized_path || rawPath;
+    return [
+      {
+        id: newPendingId(),
+        inputPath: filePath,
+        displayName: basename(filePath),
+        fullPath: filePath,
+        fromUpload: false,
+        tractId,
+        ...shared,
+      },
+    ];
+  }
+
+  function resetInput() {
+    clearDraftInput();
+    setUploadFile(null);
+    setInspect(null);
+    setProgress(0);
+  }
+
+  async function addToQueue() {
+    setBusy(true);
+    try {
+      const tasks = await buildTasksFromForm();
+      if (!tasks) return;
+      enqueue(tasks);
+      message.success(`已加入待命队列：${tasks.length} 条`);
+      resetInput();
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : "加入队列失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submit() {
+    setBusy(true);
+    try {
+      // 表单里还留着未入队的输入时，把它当作队列的最后一条一起提交。
+      let tasks = pending;
+      if (hasInput) {
+        const extra = await buildTasksFromForm();
+        if (!extra) return;
+        tasks = [...pending, ...extra];
+      }
+      if (!tasks.length) {
+        message.warning("请先输入路径，或先加入待命队列");
+        return;
+      }
+
+      const ref = await endpoints.submitBatch({ items: tasks.map(toBatchItem) });
       addJob({
         jobId: ref.job_id,
-        filename: inputName || uploadFile?.name || ref.job_id,
-        sourceKind: isBatch ? "directory" : body.input_path ? "file" : "upload",
-        tractId: tractId || suggestedTractId,
-        phaseId: phaseId || suggestedPhaseId,
+        filename: tasks.length === 1 ? tasks[0].displayName : `${tasks.length} 张影像`,
+        itemCount: tasks.length,
+        tractId: tasks.length === 1 ? tasks[0].tractId : undefined,
+        phaseId: tasks[0].phaseId,
         submittedAt: Date.now(),
       });
+      clearPending();
+      resetInput();
       onSubmitted?.(ref.job_id);
-      message.success("作业已提交：" + ref.job_id);
-      setProgress(0);
+      message.success(`作业已提交（${tasks.length} 条）：${ref.job_id}`);
     } catch (e) {
       message.error(e instanceof ApiError ? e.message : "提交失败");
     } finally {
@@ -160,55 +288,40 @@ export function UploadForm({
     }
   }
 
-  async function cancelActiveJob() {
-    setBusy(true);
-    try {
-      const res = await endpoints.cancelAllJobs();
-      if (activeJobId) onCancelled?.(activeJobId);
-      message.success(res.message);
-    } catch (e) {
-      message.error(e instanceof ApiError ? e.message : "终止失败");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function buildSubmitBody(): InferSubmit | null {
-    const cleanPhaseId = phaseId.replace(/[^\d]/g, "");
-    if (phaseId && cleanPhaseId.length !== 8) {
-      message.warning("时相 ID 需为 8 位 YYYYMMDD");
-      return null;
-    }
-    if (!inputPath.trim() && !uploadFile) {
-      message.warning("请先输入路径或拖入影像文件");
-      return null;
-    }
-
-    const body: InferSubmit = {
-      export_fmt: exportFmt,
-    };
-    if (inputPath.trim()) body.input_path = inputPath.trim();
-    if (cleanPhaseId) body.phase_id = cleanPhaseId;
-    if (tractId.trim()) body.tract_id = tractId.trim();
-    if (typeof tileSize === "number") body.tile_size = tileSize;
-    if (typeof overlapPercent === "number") body.overlap_rate = overlapPercent / 100;
-    if (dsmOpen && dsm.trim()) body.dsm = dsm.trim();
-    if (demOpen && dem.trim()) body.dem = dem.trim();
-    if (lasOpen && las.trim()) body.las = las.trim();
-    return body;
+  function cancelActiveJob() {
+    Modal.confirm({
+      title: "终止全部推理作业",
+      content:
+        "已完成的影像保留为「成功」，正在推理的记为「失败」，尚未开始的记为「已取消」。待命队列中未提交的条目将保留（不会丢失）。",
+      okText: "终止",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setBusy(true);
+        try {
+          const res = await endpoints.cancelAllJobs();
+          if (activeJobId) onCancelled?.(activeJobId);
+          message.success(res.message);
+        } catch (e) {
+          message.error(e instanceof ApiError ? e.message : "终止失败");
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   }
 
   function handlePathDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     const droppedPath = extractTransferPath(e);
     if (droppedPath) {
-      setInputPath(droppedPath);
+      patchDraft({ inputPath: droppedPath });
       return;
     }
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
     setUploadFile(file);
-    setInputPath("");
+    clearDraftInput();
     setInspect(null);
   }
 
@@ -219,8 +332,8 @@ export function UploadForm({
           <FieldLabel title="输入路径" tooltip={PATH_TIP} />
           <div className="task-path-control">
             <Input
-              value={inputPath}
-              onChange={(e) => setInputPath(e.target.value)}
+              value={draft.inputPath}
+              onChange={(e) => patchDraft({ inputPath: e.target.value })}
               placeholder="图像路径或文件夹路径"
               prefix={isBatch ? <FolderOpenOutlined /> : <FileImageOutlined />}
               disabled={busy}
@@ -229,7 +342,14 @@ export function UploadForm({
             <Button
               icon={<FolderOpenOutlined />}
               disabled={busy}
-              onClick={() => openBrowser(inputPath, setInputPath, "选择输入路径 (影像文件或目录)", "both")}
+              onClick={() =>
+                openBrowser(
+                  draft.inputPath,
+                  (val) => patchDraft({ inputPath: val }),
+                  "选择输入路径 (影像文件或目录)",
+                  "both"
+                )
+              }
             >
               选择
             </Button>
@@ -246,8 +366,8 @@ export function UploadForm({
         <div className="task-field-row">
           <FieldLabel title="时相 ID" />
           <Input
-            value={phaseId}
-            onChange={(e) => setPhaseId(e.target.value)}
+            value={draft.phaseId}
+            onChange={(e) => patchDraft({ phaseId: e.target.value })}
             placeholder={suggestedPhaseId ? `默认 ${suggestedPhaseId}` : "默认读取元数据"}
             disabled={busy}
           />
@@ -255,23 +375,23 @@ export function UploadForm({
         <div className="task-field-row">
           <FieldLabel title="地块 ID" tooltip={TRACT_TIP} />
           <Input
-            value={tractId}
-            onChange={(e) => setTractId(e.target.value)}
+            value={draft.tractId}
+            onChange={(e) => patchDraft({ tractId: e.target.value })}
             placeholder={
               isBatch
-                ? "批量时作为前缀"
+                ? "目录展开后按文件名生成"
                 : suggestedTractId
                   ? `默认 ${suggestedTractId}`
                   : "默认图像文件名"
             }
-            disabled={busy}
+            disabled={busy || isBatch}
           />
         </div>
         <div className="task-field-row">
           <FieldLabel title="切片尺寸" />
           <InputNumber
-            value={tileSize}
-            onChange={(v) => setTileSize(typeof v === "number" ? v : null)}
+            value={draft.tileSize}
+            onChange={(v) => patchDraft({ tileSize: typeof v === "number" ? v : null })}
             placeholder="默认自适应"
             min={1}
             precision={0}
@@ -282,8 +402,8 @@ export function UploadForm({
         <div className="task-field-row">
           <FieldLabel title="覆盖率" />
           <InputNumber
-            value={overlapPercent}
-            onChange={(v) => setOverlapPercent(typeof v === "number" ? v : null)}
+            value={draft.overlapPercent}
+            onChange={(v) => patchDraft({ overlapPercent: typeof v === "number" ? v : null })}
             placeholder="默认自适应"
             min={0}
             max={50}
@@ -296,8 +416,8 @@ export function UploadForm({
         <div className="task-field-row">
           <FieldLabel title="导出格式" />
           <Select
-            value={exportFmt}
-            onChange={setExportFmt}
+            value={draft.exportFmt}
+            onChange={(v) => patchDraft({ exportFmt: v })}
             options={EXPORT_OPTIONS}
             disabled={busy}
             className="task-select"
@@ -308,30 +428,36 @@ export function UploadForm({
       <div className="task-form__section task-form__section--aux">
         <OptionalPath
           title="DSM"
-          open={dsmOpen}
-          value={dsm}
-          onOpen={setDsmOpen}
-          onChange={setDsm}
+          open={draft.dsmOpen}
+          value={draft.dsm}
+          onOpen={(open) => patchDraft({ dsmOpen: open })}
+          onChange={(val) => patchDraft({ dsm: val })}
           disabled={busy}
-          onSelectClick={() => openBrowser(dsm, setDsm, "选择 DSM 路径", "file")}
+          onSelectClick={() =>
+            openBrowser(draft.dsm, (val) => patchDraft({ dsm: val }), "选择 DSM 路径", "file")
+          }
         />
         <OptionalPath
           title="DEM"
-          open={demOpen}
-          value={dem}
-          onOpen={setDemOpen}
-          onChange={setDem}
+          open={draft.demOpen}
+          value={draft.dem}
+          onOpen={(open) => patchDraft({ demOpen: open })}
+          onChange={(val) => patchDraft({ dem: val })}
           disabled={busy}
-          onSelectClick={() => openBrowser(dem, setDem, "选择 DEM 路径", "file")}
+          onSelectClick={() =>
+            openBrowser(draft.dem, (val) => patchDraft({ dem: val }), "选择 DEM 路径", "file")
+          }
         />
         <OptionalPath
           title="LAS"
-          open={lasOpen}
-          value={las}
-          onOpen={setLasOpen}
-          onChange={setLas}
+          open={draft.lasOpen}
+          value={draft.las}
+          onOpen={(open) => patchDraft({ lasOpen: open })}
+          onChange={(val) => patchDraft({ las: val })}
           disabled={busy}
-          onSelectClick={() => openBrowser(las, setLas, "选择 LAS 路径", "file")}
+          onSelectClick={() =>
+            openBrowser(draft.las, (val) => patchDraft({ las: val }), "选择 LAS 路径", "file")
+          }
         />
       </div>
 
@@ -352,29 +478,58 @@ export function UploadForm({
       {busy && progress > 0 ? <Progress percent={progress} size="small" /> : null}
 
       <div className="task-action-row">
+        <Tooltip title={QUEUE_TIP} placement="top">
+          <Button
+            icon={<PlusOutlined />}
+            loading={busy}
+            disabled={!hasInput}
+            onClick={addToQueue}
+            className="task-action-queue"
+          >
+            加入队列
+          </Button>
+        </Tooltip>
         <Button
           type="primary"
           icon={<PlayCircleOutlined />}
           loading={busy}
-          disabled={!inputPath.trim() && !uploadFile}
+          disabled={runCount === 0}
           onClick={submit}
           className="task-action-primary"
         >
-          开始推理
+          {runCount > 1 ? `开始推理 (${runCount})` : "开始推理"}
         </Button>
-        <Button
-          danger
-          type="primary"
-          icon={<StopOutlined />}
-          disabled={busy}
-          onClick={cancelActiveJob}
-          className="task-action-danger"
-        >
-          一键终止
-        </Button>
+        <Tooltip title={CANCEL_TIP} placement="top">
+          <Button
+            danger
+            type="primary"
+            icon={<StopOutlined />}
+            disabled={busy}
+            onClick={cancelActiveJob}
+            className="task-action-danger"
+          >
+            一键终止
+          </Button>
+        </Tooltip>
       </div>
     </div>
   );
+}
+
+/** 待命项 -> 后端待命项载荷(丢弃空值，保持请求体干净)。 */
+function toBatchItem(task: PendingTask): BatchInferItem {
+  const item: BatchInferItem = {};
+  if (task.imageKey) item.image_key = task.imageKey;
+  if (task.inputPath) item.input_path = task.inputPath;
+  if (task.phaseId) item.phase_id = task.phaseId;
+  if (task.tractId) item.tract_id = task.tractId;
+  if (typeof task.tileSize === "number") item.tile_size = task.tileSize;
+  if (typeof task.overlapRate === "number") item.overlap_rate = task.overlapRate;
+  if (task.dsm) item.dsm = task.dsm;
+  if (task.dem) item.dem = task.dem;
+  if (task.las) item.las = task.las;
+  if (task.exportFmt) item.export_fmt = task.exportFmt;
+  return item;
 }
 
 function FieldLabel({ title, tooltip }: { title: string; tooltip?: string }) {

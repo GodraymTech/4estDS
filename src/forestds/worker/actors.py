@@ -1,10 +1,12 @@
 """Dramatiq actors: GPU 推理作业。
 
 设计要点：
-- infer_actor 在进程内常驻缓存 Detector(权重仅加载一次)，GPU 队列 concurrency=1
+- batch_actor 是推理作业的**唯一** actor：一个作业 = 1~N 条各自携带参数的待命项，
+  单图推理即长度为 1 的批量。
+- 进程内常驻缓存 Detector(权重仅加载一次)，GPU 队列 concurrency=1
   (由 worker 启动参数 --processes 1 --threads 1 + queue_name 保证，见 deploy/)。
 - 作业与 run_id 一一对应；runs 表即作业状态存储(API 轮询 reader.get_run(run_id))。
-- 复用 service.run_inference_job 的统一生命周期(DRY)；不自动重试(GPU 昂贵且非幂等)。
+- 复用 service.run_batch_inference_job 的统一生命周期(DRY)；不自动重试(GPU 昂贵且非幂等)。
 """
 from __future__ import annotations
 
@@ -26,8 +28,8 @@ import dramatiq
 from loguru import logger as log
 
 from . import broker as _broker  # noqa: F401  确保 broker 先于 actor 装配
-from ..contracts import BatchInferenceRequest, InferenceRequest
-from ..service import InferenceError, run_batch_inference_job, run_inference_job
+from ..contracts import BatchInferenceRequest
+from ..service import InferenceError, run_batch_inference_job
 
 # GPU 专用队列名；worker 以 --processes 1 --threads 1 消费该队列以实现 concurrency=1。
 GPU_QUEUE = os.environ.get("forestds_GPU_QUEUE", "gpu")
@@ -138,55 +140,30 @@ def _setup_actor_logging(settings, run_id: str, task_type: str) -> None:
 
 
 @dramatiq.actor(queue_name=GPU_QUEUE, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
-def infer_actor(run_id: str, request_dict: dict) -> None:
-    """单图推理作业(GPU)。参数均为 JSON 可序列化类型。
-
-    状态不在此返回；由 runs 表记录(running/succeeded/failed)，API 轮询获取。
-    """
-    settings = _get_settings()
-    _setup_actor_logging(settings, run_id, "infer")
-    request = InferenceRequest.model_validate(request_dict)
-    arch = request.arch or settings.get("detect.arch", "ultralytics")
-    detector = _get_detector(arch, settings)
-
-    try:
-        result = run_inference_job(request, settings=settings, run_id=run_id, detector=detector)
-        log.info(
-            "作业完成: run_id={} tract={} 单木={} 入库={} 发布={}",
-            result.run_id, result.tract_id, result.fused_count,
-            result.observations_written, result.published,
-        )
-    except InferenceError:
-        # 状态已落 runs=failed；不重试(max_retries=0)，吹掉异常避免框架重入。
-        log.warning("作业失败已记录: run_id={}", run_id)
-
-
-@dramatiq.actor(queue_name=GPU_QUEUE, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
 def batch_actor(run_id: str, request_dict: dict) -> None:
-    """批量推理作业(GPU 串行)。"""
+    """推理作业(GPU 串行)。一个作业包含 1~N 条各自携带参数的待命项。
+
+    参数均为 JSON 可序列化类型。状态不在此返回，由 runs 表记录，API 轮询获取。
+    向管线注入进程内常驻的检测器工厂，使同一 arch 的权重在多个作业之间也只加载一次。
+    """
     settings = _get_settings()
     _setup_actor_logging(settings, run_id, "batch")
     request = BatchInferenceRequest.model_validate(request_dict)
 
     try:
-        metrics = run_batch_inference_job(request, settings=settings, run_id=run_id)
+        metrics = run_batch_inference_job(
+            request,
+            settings=settings,
+            run_id=run_id,
+            detector_factory=lambda arch: _get_detector(arch, settings),
+        )
         log.info(
-            "批量作业完成: run_id={} 总数={} 成功={} 失败={} 累计单木={}",
+            "推理作业完成: run_id={} 总数={} 成功={} 失败={} 已取消={} 累计单木={}",
             run_id, metrics.get("total"), metrics.get("succeeded"),
-            metrics.get("failed"), metrics.get("total_trees"),
+            metrics.get("failed"), metrics.get("canceled"), metrics.get("total_trees"),
         )
     except InferenceError:
-        log.warning("批量作业失败已记录: run_id={}", run_id)
-
-
-def _get_review_adapter(settings):
-    name = str(settings.get("review.adapter", "dinov"))
-    variant = str(settings.get("review.dinov_variant" if name == "dinov" else "review.model_variant", ""))
-    cache_key = f"{name}:{variant}"
-    if cache_key not in _review_adapter_cache:
-        from ..review.inference_service import build_review_adapter
-        _review_adapter_cache[cache_key] = build_review_adapter(settings)
-    return _review_adapter_cache[cache_key]
+        log.warning("推理作业失败已记录: run_id={}", run_id)
 
 
 def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) -> None:

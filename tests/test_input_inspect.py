@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from forestds.tasks.batch import build_batch_tract_id
+from forestds.tasks.batch import BatchItemSpec
 from forestds.utils.input_inspect import (
     extract_image_phase_id,
     inspect_input_path,
@@ -32,7 +32,8 @@ def test_inspect_input_path_file_reads_stem_and_mtime_date(tmp_path: Path) -> No
     assert extract_image_phase_id(image)[0]
 
 
-def test_build_batch_tract_id_uses_user_value_as_prefix() -> None:
-    assert build_batch_tract_id(Path("/data/Q12.tif"), None) == "Q12"
-    assert build_batch_tract_id(Path("/data/Q12.tif"), "珠海_斗门") == "珠海_斗门_Q12"
-    assert build_batch_tract_id(Path("/data/Q12.tif"), "珠海_斗门", 2) == "珠海_斗门_Q12_2"
+def test_batch_item_spec_tract_key_falls_back_to_file_stem() -> None:
+    """每条待命项自带地块 ID；未填时回落文件名 stem，不再做前缀拼接。"""
+    assert BatchItemSpec(image_path="/data/Q12.tif").display_tract_key == "Q12"
+    assert BatchItemSpec(image_path="/data/Q12.tif", tract_id="  ").display_tract_key == "Q12"
+    assert BatchItemSpec(image_path="/data/Q12.tif", tract_id="珠海_斗门").display_tract_key == "珠海_斗门"

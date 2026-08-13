@@ -18,15 +18,16 @@ class UploadResponse(BaseModel):
     size: int
 
 
-class InferSubmit(BaseModel):
-    """提交推理作业的请求体。
+class BatchInferItem(BaseModel):
+    """作业队列中的**一条待命项**：一张影像 + 它自己完整的一套参数。
 
-    ``image_key`` 来自 /uploads；``input_path`` 是后端/Worker 可访问的本地路径。
-    二者二选一，路由层负责进一步校验存在性与批量路由。
+    ``image_key`` 来自 /uploads；``input_path`` 是后端/Worker 可访问的本地文件路径。
+    二者二选一，路由层负责校验存在性。目录由前端在加入队列时展开为多条待命项，
+    后端只接受具体文件，以保证每张影像的参数都可被用户单独审阅与修改。
     """
 
     image_key: Optional[str] = Field(None, description="已上传影像的存储 key")
-    input_path: Optional[str] = Field(None, description="本地影像文件或目录路径")
+    input_path: Optional[str] = Field(None, description="本地影像文件路径")
     arch: Optional[str] = None
     phase_id: Optional[str] = Field(None, description="地块时相 YYYYMMDD")
     tract_id: Optional[str] = None
@@ -36,6 +37,15 @@ class InferSubmit(BaseModel):
     dem: Optional[str] = None
     las: Optional[str] = None
     export_fmt: Optional[ExportFormat] = None
+
+
+class BatchInferSubmit(BaseModel):
+    """提交推理作业的唯一请求体：按顺序串行执行的待命项列表。
+
+    单图直接推理即 ``len(items) == 1``，与批量共用同一条服务端路径。
+    """
+
+    items: list[BatchInferItem] = Field(..., min_length=1, description="待命项列表")
 
 
 class InputInspectRequest(BaseModel):
@@ -111,7 +121,8 @@ class CancelJobOut(BaseModel):
 
 
 class CancelAllJobsOut(BaseModel):
-    cancelled: int = 0
+    cancelled: int = Field(0, description="已发出终止信号的运行中/排队中作业数")
+    finalized: int = Field(0, description="因 worker 即将停机而由 API 直接写入终态的作业数")
     purged_queues: list[str] = Field(default_factory=list)
     message: str
 
@@ -529,7 +540,7 @@ class AssetRow(BaseModel):
     pixel_width: Optional[int] = None
     pixel_height: Optional[int] = None
     estimated_cog_seconds: Optional[float] = None
-    file_size_gb: Optional[float] = Field(None, description="影像源文件大小(GB)")
+    file_size_gb: Optional[float] = Field(None, description="影像��文件大小(GB)")
     is_converting: bool = Field(False, description="是否正在后台转码为 COG")
     file_exists: bool = Field(True, description="原始 TIFF 文件是否存在于当前磁盘路径")
 

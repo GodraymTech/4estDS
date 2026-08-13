@@ -198,14 +198,23 @@ function ReviewHome() {
                     )}
                     {row.published_run_id && <Text code>{row.published_run_id}</Text>}
                     <Popconfirm
-                      title="删除草稿"
-                      description="确定要永久删除此复核草稿吗？此操作无法撤销。"
+                      title={row.status === "published" ? "删除复核记录" : "删除草稿"}
+                      description={
+                        row.status === "published"
+                          ? "该会话已发布，删除仅移除这条复核记录，不影响已发布的检测成果。"
+                          : "确定要永久删除此复核草稿吗？此操作无法撤销。"
+                      }
                       onConfirm={() => handleDelete(row.session_id)}
                       okText="确定删除"
                       cancelText="取消"
                       okButtonProps={{ danger: true }}
                     >
-                      <Button type="text" danger icon={<DeleteOutlined />} aria-label="删除草稿" />
+                      <Button
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        aria-label={row.status === "published" ? "删除复核记录" : "删除草稿"}
+                      />
                     </Popconfirm>
                   </Space>
                 ),

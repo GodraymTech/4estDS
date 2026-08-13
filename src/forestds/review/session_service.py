@@ -543,9 +543,12 @@ class ReviewSessionService:
         return self.get(session_id)
 
     def delete(self, session_id: str) -> None:
-        session = self.get(session_id)
-        if session.status == "published":
-            raise ReviewConflict("已发布的复核会话无法删除。", code="cannot_delete_published_session")
+        """删除复核会话记录。
+
+        任何状态都允许删除：会话只是一次复核工作的过程记录。已发布的成果落在
+        runs / 观测表里，不随会话行消失，因此没有理由把已发布的条目永久钉在列表里。
+        """
+        self.get(session_id)  # 不存在时抛 ReviewNotFound -> 404
         conn = _connect(self.db_url)
         try:
             conn.execute("DELETE FROM review_sessions WHERE session_id=?", (session_id,))

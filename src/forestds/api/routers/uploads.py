@@ -3,7 +3,7 @@
 - POST /uploads -> 保存上传影像到存储后端，返回 key/filename/size。
 
 薄壳原则(框架思维)：仅做 HTTP 边界(接收 multipart、生成 key、落存储)，
-key 回传给 /jobs/infer 发起推理。存储经 Storage 抽象(local|s3)，本路由与具体后端解耦。
+key 回传给 /jobs/batch 发起推理。存储经 Storage 抽象(local|s3)，本路由与具体后端解耦。
 """
 from __future__ import annotations
 

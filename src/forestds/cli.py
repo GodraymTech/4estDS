@@ -119,35 +119,49 @@ def cmd_infer(
         #     logger.info("[infer] 导出 → {}", result["export_path"])
         return 0
     else:
-        # 批量预处理推理
-        from .tasks.batch import run_batch_pipeline
+        # 批量推理：把每张影像展开为一条待命项(CLI 场景下整批共用同一套参数)。
+        from .tasks.batch import BatchItemSpec, resolve_images, run_batch_pipeline
+
+        resolved = resolve_images(images)
+        if not resolved:
+            logger.warning("[infer] 批量推理未找到任何有效的影像文件。")
+            return 0
+
+        # 地块 ID 必须唯一，多图时不能共用同一个显式值，回落为每张影像的文件名。
+        if len(resolved) > 1 and tract_id:
+            logger.warning(
+                "[infer] --tract-id 仅在单图时生效；本次共 {} 张影像，地块 ID 将按文件名自动生成。",
+                len(resolved),
+            )
+        item_tract_id = tract_id if len(resolved) == 1 else None
 
         batch_summary = run_batch_pipeline(
-            images,
+            [
+                BatchItemSpec(
+                    image_path=str(path),
+                    arch=arch,
+                    phase_id=phase_id,
+                    tract_id=item_tract_id,
+                    tile_size=tile_size,
+                    overlap_rate=overlap_rate,
+                    chm=chm,
+                    dsm=dsm,
+                    dem=dem,
+                    las=las,
+                    las_grid_size=las_grid_size,
+                    dem_default=dem_default,
+                    draw_box=act_draw_box,
+                    export_fmt=export_format,
+                )
+                for path in resolved
+            ],
             settings=settings,
-            arch=arch,
-            phase_id=phase_id,
-            tract_id=tract_id,
-            tile_size=tile_size,
-            overlap_rate=overlap_rate,
-            chm=chm,
-            dsm=dsm,
-            dem=dem,
-            las=las,
-            las_grid_size=las_grid_size,
-            dem_default=dem_default,
-            draw_box=act_draw_box,
-            export_fmt=export_format,
         )
 
-        if batch_summary.total == 0:
-            logger.warning("[infer] 批量推理未处理任何有效影像。")
-            return 0
-        
         logger.info(
-            "[infer] 批量推理完成！总数={} 成功={} 失败={} 累计单木={} 耗时={:.1f}s",
+            "[infer] 批量推理完成！总数={} 成功={} 失败={} 已取消={} 累计单木={} 耗时={:.1f}s",
             batch_summary.total, batch_summary.succeeded, batch_summary.failed,
-            batch_summary.total_trees, batch_summary.elapsed_s
+            batch_summary.canceled, batch_summary.total_trees, batch_summary.elapsed_s
         )
         return 0 if batch_summary.failed == 0 else 1
 
@@ -370,7 +384,7 @@ def cmd_batch(
     glob: str = Option("*.tif", "--glob", "-g", help="文件匹配模式(默认 *.tif)"),
     arch: Optional[str] = Option(None, "--arch", "-a", help="模型架构 (默认 ultralytics)"),
     phase_id: Optional[str] = Option(None, "--phase-id", "-p", help="地块时相 YYYYMMDD"),
-    tract_id: Optional[str] = Option(None, "--tract-id", "-t", help="批量地块 ID 前缀"),
+    tract_id: Optional[str] = Option(None, "--tract-id", "-t", help="地块 ID(仅单图时生效，多图时按文件名自动生成)"),
     log_level: Optional[str] = Option(None, "--log-level", "-l", help="日志级别(默认读配置)"),
 ) -> int:
     args = SimpleNamespace(
@@ -381,7 +395,7 @@ def cmd_batch(
     settings, run_id = _bootstrap(args.log_level, task_type="batch")
     logger.warning("[batch] 仅支持 RGB;批量推理串行执行。")
     from pathlib import Path
-    from .tasks.batch import run_batch_pipeline
+    from .tasks.batch import BatchItemSpec, run_batch_pipeline
 
     arch_val = args.arch or settings.get("arch", "ultralytics")
     base = Path(args.input_dir)
@@ -399,15 +413,27 @@ def cmd_batch(
         logger.warning(f"[batch] 未匹配到输入文件: {args.input_dir} ({args.glob})")
         return 0
 
+    if len(inputs) > 1 and args.tract_id:
+        logger.warning(
+            f"[batch] --tract-id 仅在单图时生效；本次共 {len(inputs)} 张影像，地块 ID 将按文件名自动生成。"
+        )
+    item_tract_id = args.tract_id if len(inputs) == 1 else None
+
     res = run_batch_pipeline(
-        inputs,
+        [
+            BatchItemSpec(
+                image_path=path,
+                arch=arch_val,
+                phase_id=args.phase_id,
+                tract_id=item_tract_id,
+            )
+            for path in inputs
+        ],
         settings=settings,
-        arch=arch_val,
-        phase_id=args.phase_id,
-        tract_id=args.tract_id,
     )
     logger.info(
-        f"[batch] 完成: 成功={res.succeeded} 失败={res.failed} 总株数={res.total_trees} 耗时={res.elapsed_s:.2f}s"
+        f"[batch] 完成: 成功={res.succeeded} 失败={res.failed} 已取消={res.canceled} "
+        f"总株数={res.total_trees} 耗时={res.elapsed_s:.2f}s"
     )
     return 0 if res.failed == 0 else 1
 

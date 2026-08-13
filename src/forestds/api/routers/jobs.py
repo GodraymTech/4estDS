@@ -1,6 +1,8 @@
 """异步推理作业端点。
 
-- POST /jobs/infer -> 202 + job_id(即 run_id)，作业入 GPU 队列异步执行。
+- POST /jobs/batch -> 202 + job_id(即顶层 run_id)，作业入 GPU 队列异步串行执行。
+  一个作业 = 1~N 条**各自携带完整参数**的待命项；单图推理即长度为 1 的批量，
+  因此提交推理只有这一个端点。
 - GET  /jobs/:job_id -> 从 runs 轮询状态(无行=queued)。
 
 作业状态复用 runs 表为单一真相，不引入额外结果后端(KISS/一致性)。
@@ -29,7 +31,8 @@ from ..schemas import (
     ArtifactExportRequest,
     ArtifactNode,
     ArtifactTreeOut,
-    InferSubmit,
+    BatchInferItem,
+    BatchInferSubmit,
     InputInspectImage,
     InputInspectOut,
     InputInspectRequest,
@@ -147,98 +150,77 @@ def inspect_input(body: InputInspectRequest) -> InputInspectOut:
     )
 
 
+_IMAGE_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+
+
+def _resolve_item_image(item: BatchInferItem, label: str, storage) -> str:
+    """把一条待命项的输入解析为 Worker 可读的**单个影像文件**本地路径。"""
+    if bool(item.image_key) == bool(item.input_path):
+        raise HTTPException(status_code=400, detail=f"{label}：image_key 与 input_path 必须且只能提供一个")
+
+    if item.image_key:
+        if not storage.exists(item.image_key):
+            raise HTTPException(status_code=404, detail=f"{label}：影像对象不存在: {item.image_key}")
+        # 把存储 key 解析为 Worker 可读的本地路径(引擎使用 rasterio 窗口读，需本地文件)。
+        return storage.local_path(item.image_key)
+
+    try:
+        kind, normalized_path, _images = inspect_input_path(item.input_path or "")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"{label}：{exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{label}：{exc}") from exc
+
+    if kind != "file":
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label}：目录需在加入队列时展开为逐张影像，请重新选择具体的影像文件",
+        )
+    if Path(normalized_path).suffix.lower() not in _IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail=f"{label}：不支持的影像格式: {normalized_path}")
+    return str(normalized_path)
+
+
 @router.post(
-    "/infer",
+    "/batch",
     response_model=JobRef,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="提交单图推理作业(异步)",
+    summary="提交推理作业(异步，1~N 条待命项串行执行)",
 )
-def submit_infer(
-    body: InferSubmit,
+def submit_batch(
+    body: BatchInferSubmit,
     response: Response,
     storage=Depends(get_storage_dep),
 ) -> JobRef:
-    if bool(body.image_key) == bool(body.input_path):
-        raise HTTPException(status_code=400, detail="image_key 与 input_path 必须且只能提供一个")
+    """提交推理作业。单图直接推理即 ``items`` 长度为 1，与批量完全同路。
 
-    dsm = _resolve_aux_path(body.dsm, "DSM")
-    dem = _resolve_aux_path(body.dem, "DEM")
-    las = _resolve_aux_path(body.las, "LAS")
-
-    if body.image_key:
-        if not storage.exists(body.image_key):
-            raise HTTPException(status_code=404, detail=f"影像对象不存在: {body.image_key}")
-
-        # 把存储 key 解析为 Worker 可读的本地路径(引擎使用 rasterio 窗口读，需本地文件)。
-        image_path = storage.local_path(body.image_key)
-        req = InferenceRequest(
-            image_path=image_path,
-            arch=body.arch,
-            phase_id=body.phase_id,
-            tract_id=body.tract_id,
-            tile_size=body.tile_size,
-            overlap_rate=body.overlap_rate,
-            dsm=dsm,
-            dem=dem,
-            las=las,
-            export_fmt=body.export_fmt,
-            publish=True,
+    整批参数先全部校验通过再入队：避免“前几条已入队、后一条报错”的半提交状态。
+    """
+    requests: list[InferenceRequest] = []
+    for index, item in enumerate(body.items, 1):
+        label = f"第 {index} 条待命项"
+        requests.append(
+            InferenceRequest(
+                image_path=_resolve_item_image(item, label, storage),
+                arch=item.arch,
+                phase_id=item.phase_id,
+                tract_id=item.tract_id,
+                tile_size=item.tile_size,
+                overlap_rate=item.overlap_rate,
+                dsm=_resolve_aux_path(item.dsm, f"{label} DSM"),
+                dem=_resolve_aux_path(item.dem, f"{label} DEM"),
+                las=_resolve_aux_path(item.las, f"{label} LAS"),
+                export_fmt=item.export_fmt,
+                publish=True,
+            )
         )
 
-        from ...worker import enqueue_inference
+    from ...worker import enqueue_batch_inference
 
-        try:
-            job_id = enqueue_inference(req)
-        except Exception as exc:  # noqa: BLE001
-            raise _queue_unavailable(exc) from exc
-    else:
-        try:
-            kind, normalized_path, _images = inspect_input_path(body.input_path or "")
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        if kind == "directory":
-            batch_req = BatchInferenceRequest(
-                input_path=str(normalized_path),
-                arch=body.arch,
-                phase_id=body.phase_id,
-                tract_id=body.tract_id,
-                tile_size=body.tile_size,
-                overlap_rate=body.overlap_rate,
-                dsm=dsm,
-                dem=dem,
-                las=las,
-                export_fmt=body.export_fmt,
-                publish=True,
-            )
-            from ...worker import enqueue_batch_inference
-
-            try:
-                job_id = enqueue_batch_inference(batch_req)
-            except Exception as exc:  # noqa: BLE001
-                raise _queue_unavailable(exc) from exc
-        else:
-            req = InferenceRequest(
-                image_path=str(normalized_path),
-                arch=body.arch,
-                phase_id=body.phase_id,
-                tract_id=body.tract_id,
-                tile_size=body.tile_size,
-                overlap_rate=body.overlap_rate,
-                dsm=dsm,
-                dem=dem,
-                las=las,
-                export_fmt=body.export_fmt,
-                publish=True,
-            )
-            from ...worker import enqueue_inference
-
-            try:
-                job_id = enqueue_inference(req)
-            except Exception as exc:  # noqa: BLE001
-                raise _queue_unavailable(exc) from exc
+    try:
+        job_id = enqueue_batch_inference(BatchInferenceRequest(items=requests))
+    except Exception as exc:  # noqa: BLE001
+        raise _queue_unavailable(exc) from exc
 
     response.headers["Location"] = f"/api/v1/jobs/{job_id}"
     return JobRef(job_id=job_id, status=JobStatus.queued)
@@ -310,7 +292,16 @@ def cancel_job(job_id: str, db_url: str | None = Depends(get_db_url)) -> CancelJ
     return CancelJobOut(job_id=job_id, status=JobStatus.failed, message="已请求终止，worker 将在最近检查点停止")
 
 
-def _cancel_all_jobs(db_url: str | None) -> CancelAllJobsOut:
+def _cancel_all_jobs(db_url: str | None, *, force_finalize: bool = False) -> CancelAllJobsOut:
+    """清空 GPU 队列并向全部未结束的推理作业发出终止信号。
+
+    善后职责划分(关键)：
+    - 默认(``force_finalize=False``)只发信号，**不**替 worker 写终态。worker 会在最近的
+      检查点自行收尾，从而准确区分“已完成=成功 / 被夹断=失败 / 未开始=已取消”。
+      若在此处粗暴地把顶层作业标为 failed，会覆盖掉已完成影像的真实成果。
+    - 仅当 worker 即将被停掉(``/jobs/stop-worker``)、已无法自我收尾时，才由 API 直接
+      写入 failed 终态，避免作业永久僵在 running。
+    """
     from ...cancellation import request_cancel
     from ...db import reader, writer
     from ...worker.broker import broker
@@ -324,6 +315,7 @@ def _cancel_all_jobs(db_url: str | None) -> CancelAllJobsOut:
         raise HTTPException(status_code=500, detail=f"清空推理队列失败: {exc}") from exc
 
     cancelled = 0
+    finalized = 0
     for row in reader.list_runs(url=db_url, limit=200):
         if row.get("task_type") not in {"infer", "batch"}:
             continue
@@ -331,20 +323,32 @@ def _cancel_all_jobs(db_url: str | None) -> CancelAllJobsOut:
             continue
         run_id = str(row["run_id"])
         request_cancel(run_id)
-        writer.finish_run_log(
-            run_id,
-            "failed",
-            url=db_url,
-            metrics=_metrics_from_run(row),
-            duration_s=row.get("duration_s"),
-            error="用户一键终止全部推理作业",
-        )
         cancelled += 1
+        if force_finalize:
+            writer.finish_run_log(
+                run_id,
+                "failed",
+                url=db_url,
+                metrics=_metrics_from_run(row),
+                duration_s=row.get("duration_s"),
+                error="用户一键终止全部推理作业",
+            )
+            finalized += 1
+
+    queue_text = ", ".join(purged)
+    if force_finalize:
+        message = f"已终止全部推理作业：清空队列 {queue_text}，标记 {finalized} 个运行中/排队作业为失败"
+    else:
+        message = (
+            f"已终止全部推理作业：清空队列 {queue_text}，向 {cancelled} 个运行中/排队作业发出终止信号；"
+            "已完成的影像保留为成功，正在推理的记为失败，尚未开始的记为已取消"
+        )
 
     return CancelAllJobsOut(
         cancelled=cancelled,
+        finalized=finalized,
         purged_queues=purged,
-        message=f"已终止全部推理作业：清空队列 {', '.join(purged)}，标记 {cancelled} 个运行中/排队作业",
+        message=message,
     )
 
 
@@ -355,10 +359,13 @@ def cancel_all_jobs(db_url: str | None = Depends(get_db_url)) -> CancelAllJobsOu
 
 @router.post("/stop-worker", response_model=WorkerStopOut, summary="停止本机推理 Worker 并释放模型内存")
 def stop_worker(db_url: str | None = Depends(get_db_url)) -> WorkerStopOut:
-    """先取消作业，再停止当前项目下由同一用户启动的本机 worker。"""
+    """先取消作业，再停止当前项目下由同一用户启动的本机 worker。
+
+    worker 即将退出，已没有机会自我收尾，因此这里必须强制写入终态。
+    """
     from ...worker.control import stop_local_workers
 
-    cancelled = _cancel_all_jobs(db_url)
+    cancelled = _cancel_all_jobs(db_url, force_finalize=True)
     worker_pids = stop_local_workers()
     if worker_pids:
         message = cancelled.message + "；已请求停止本机推理 worker，模型内存将随进程退出释放"

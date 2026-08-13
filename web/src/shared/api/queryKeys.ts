@@ -8,6 +8,8 @@ export const queryKeys = {
   geoSearch: (q: string, city = "广东") => ["geo-search", city, q] as const,
   observations: (tractId: string, geometry: GeometryKind) =>
     ["observations", tractId, geometry] as const,
+  // 前缀键: 用于一次性失效全部作业列表(不必关心当前筛选组合)。
+  jobsAll: ["jobs"] as const,
   jobs: (taskType: string | null = "infer", phaseId?: string, tiffId?: string) =>
     ["jobs", taskType ?? "all", phaseId ?? "", tiffId ?? ""] as const,
   job: (jobId: string) => ["job", jobId] as const,
