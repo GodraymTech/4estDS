@@ -1,9 +1,11 @@
 import { apiDelete, apiGet, apiGetText, apiPatchJson, apiPostForm, apiPostJson, apiPutJson, apiUpload, apiUrl } from "./client";
 import type {
   FeatureCollection,
+  AssetCogCancelOut,
+  AssetCogConvertResult,
+  AssetCogStatusOut,
   AssetInspectRequest,
   AssetInspectResult,
-  AssetCogConvertResult,
   AssetDeletePreview,
   AssetPatch,
   AssetRow,
@@ -153,7 +155,7 @@ export const endpoints = {
   deleteReview: (sessionId: string): Promise<{ session_id: string; status: string }> =>
     apiDelete(`/reviews/${encodeURIComponent(sessionId)}`),
 
-  checkHealth: (): Promise<{ status: string }> => apiGet("/healthz"),
+  checkHealth: (): Promise<{ status: string; port?: number | string; env?: string }> => apiGet("/healthz"),
 
   checkReadiness: (): Promise<{ status: string; checks?: { storage?: string; database?: string } }> =>
     apiGet("/health"),
@@ -168,6 +170,12 @@ export const endpoints = {
 
   convertAssetCog: (inputPath: string): Promise<AssetCogConvertResult> =>
     apiPostJson("/assets/convert-cog", { input_path: inputPath }),
+
+  cancelAssetCog: (inputPath: string): Promise<AssetCogCancelOut> =>
+    apiPostJson("/assets/cancel-cog", { input_path: inputPath }),
+
+  getCogStatus: (inputPath: string): Promise<AssetCogStatusOut> =>
+    apiGet(`/assets/cog-status?path=${encodeURIComponent(inputPath)}`),
 
   preheatTiffTiles: (
     phaseId: string,

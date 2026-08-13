@@ -16,8 +16,11 @@ from ...utils.input_inspect import normalize_user_path
 from ..deps import get_db_url
 from .geo import AmapConfigError, AmapServiceError, reverse_admin
 from ..schemas import (
+    AssetCogCancelOut,
+    AssetCogCancelRequest,
     AssetCogConvertOut,
     AssetCogConvertRequest,
+    AssetCogStatusOut,
     AssetDeletePreview,
     AssetInspectOut,
     AssetInspectRequest,
@@ -95,6 +98,38 @@ def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
                 row.get("pixel_width"), row.get("pixel_height")
             )
 
+        file_size_gb: float | None = None
+        file_exists: bool = False
+        source_path = row.get("source_path")
+        if source_path:
+            try:
+                norm_p = normalize_user_path(source_path)
+                p = Path(norm_p)
+                if p.is_file():
+                    file_exists = True
+                    try:
+                        file_size_gb = round(p.stat().st_size / (1024 ** 3), 2)
+                    except OSError:
+                        file_size_gb = None
+            except Exception:
+                file_exists = False
+
+        if file_size_gb is None and row.get("pixel_width") and row.get("pixel_height"):
+            # 如果源文件不在本地，从分辨率粗略估算解压 Raw Byte 大小 (3 通道 uint8)
+            raw_bytes = int(row["pixel_width"]) * int(row["pixel_height"]) * int(row.get("band_count") or 3)
+            file_size_gb = round(raw_bytes / (1024 ** 3), 2)
+
+        is_converting = False
+        if source_path:
+            try:
+                from ...preprocess.cog import get_cog_task_status
+                norm_p = str(Path(normalize_user_path(source_path)).expanduser().resolve())
+                task_st = get_cog_task_status(norm_p)
+                if task_st.get("is_converting") or norm_p in _active_cog_locks or source_path in _active_cog_locks:
+                    is_converting = True
+            except Exception:
+                pass
+
         out.append(
             AssetRow(
                 city=city,
@@ -123,6 +158,9 @@ def list_assets(db_url: str | None = Depends(get_db_url)) -> list[AssetRow]:
                 pixel_width=row.get("pixel_width"),
                 pixel_height=row.get("pixel_height"),
                 estimated_cog_seconds=estimated_cog_seconds,
+                file_size_gb=file_size_gb,
+                is_converting=is_converting,
+                file_exists=file_exists,
                 effective_area_hm2=row.get("tiff_effective_area_hm2") if row.get("tiff_effective_area_hm2") is not None else row.get("area_hm2"),
                 tract_area_hm2=row.get("effective_area_hm2"),
                 tract_phase_area_hm2=row.get("tract_phase_area_hm2"),
@@ -216,6 +254,14 @@ def inspect_asset_image(body: AssetInspectRequest) -> AssetInspectOut:
     )
 
 
+@router.get("/cog-status", response_model=AssetCogStatusOut, summary="获取指定 TIFF 的物理真实转码进度与 ETA")
+def get_asset_cog_status(path: str = Query(..., description="TIFF 源文件路径")) -> AssetCogStatusOut:
+    from ...preprocess.cog import get_cog_task_status
+    normalized = normalize_user_path(path)
+    res = get_cog_task_status(normalized)
+    return AssetCogStatusOut(**res)
+
+
 _active_cog_locks: set[str] = set()
 
 
@@ -291,7 +337,7 @@ def convert_asset_cog(body: AssetCogConvertRequest, db_url: str | None = Depends
                             "area_hm2=?, updated_at=datetime('now') "
                             "WHERE tiff_id=? AND phase_id=?",
                             (
-                                tiff_meta["path_versions"],
+                                json.dumps([str(x) for x in tiff_meta["path_versions"]]) if isinstance(tiff_meta["path_versions"], (list, tuple)) else str(tiff_meta["path_versions"]),
                                 "COG",
                                 tiff_meta["pixel_width"],
                                 tiff_meta["pixel_height"],
@@ -317,6 +363,27 @@ def convert_asset_cog(body: AssetCogConvertRequest, db_url: str | None = Depends
         tiff_type_label=TIFF_FORMAT_LABELS[prepared_type],
         converted=str(path.resolve()) != str(cog_path.resolve()) or source_type != TIFF_COG,
     )
+
+
+@router.post("/cancel-cog", response_model=AssetCogCancelOut, summary="取消/终止指定 TIFF 的 COG 转码任务")
+def cancel_asset_cog(body: AssetCogCancelRequest) -> AssetCogCancelOut:
+    from ...preprocess.cog import cancel_cog_task
+
+    normalized = normalize_user_path(body.input_path)
+    path = Path(normalized).expanduser().resolve()
+    lock_key = str(path)
+
+    for k in (lock_key, body.input_path, str(path.resolve()), normalized):
+        if k:
+            _active_cog_locks.discard(k)
+    cancelled = True
+
+    task_cancelled = cancel_cog_task(path) or cancel_cog_task(body.input_path)
+    cancelled = cancelled or task_cancelled
+
+    msg = "已终止该 TIFF 的 COG 转码任务并释放锁" if cancelled else "该文件未在转码中"
+    log.info("手动终止 COG 转码: path={} cancelled={}", body.input_path, cancelled)
+    return AssetCogCancelOut(message=msg, cancelled=cancelled)
 
 
 @router.post("/tiffs", response_model=list[AssetRow], summary="手动录入 TIFF")

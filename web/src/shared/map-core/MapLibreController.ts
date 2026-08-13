@@ -91,6 +91,10 @@ export class MapLibreController implements MapController {
     return this.ready;
   }
 
+  getNativeMap(): maplibregl.Map | null {
+    return this.map;
+  }
+
   setGeoJsonLayer(spec: GeoJsonLayerSpec): void {
     const map = this.requireMap();
     if (!map.getSource(spec.id)) {

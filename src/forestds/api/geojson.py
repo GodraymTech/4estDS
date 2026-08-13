@@ -12,6 +12,7 @@ from ..export.formats import parse_wkt_point, parse_wkt_polygon
 # 作为 Feature 属性保留的标销字段(避免把大型几何/内部列泄露到前端)。
 _PROPERTY_KEYS = (
     "species", "confidence", "height", "height_source",
+    "crown_width_px", "crown_height_px", "crown_area_px", "box_px", "center_geom",
     "crown_width_geo", "crown_height_geo",
     "crown_area_geo_real", "crown_area_geo_est",
     "crown_volume_geo_real", "crown_volume_geo_est",

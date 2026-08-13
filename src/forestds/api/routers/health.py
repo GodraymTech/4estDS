@@ -7,7 +7,8 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import os
+from fastapi import APIRouter, Depends, Request
 
 from ... import __codename__, __version__
 from ..deps import get_db_url, get_storage_dep
@@ -16,9 +17,17 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/healthz", summary="存活探针(liveness)")
-def healthz() -> dict:
-    """进程存活即返回 200，不探测任何外部依赖。"""
-    return {"status": "ok", "service": __codename__, "version": __version__}
+def healthz(request: Request) -> dict:
+    """进程存活即返回 200，返回后端监听端口与环境元数据。"""
+    env_port = os.environ.get("PORT_API")
+    resolved_port = int(env_port) if env_port and env_port.isdigit() else (request.url.port or 80)
+    return {
+        "status": "ok",
+        "service": __codename__,
+        "version": __version__,
+        "port": resolved_port,
+        "env": os.environ.get("ENV_MODE", "prod"),
+    }
 
 
 @router.get("/health", summary="就绪探针(readiness)")

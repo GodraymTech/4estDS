@@ -706,37 +706,40 @@ def query_tree_observations_paginated(
     """分页查询 tree_observations 列表及过滤元数据。"""
     conn = _connect(url)
     try:
-        where_clauses: list[str] = []
-        params: list[object] = []
+        where_items: list[tuple[str, list[object]]] = []
 
         if isinstance(tiff_id, str) and tiff_id:
-            where_clauses.append("o.tiff_id = ?")
-            params.append(tiff_id)
+            where_items.append(("o.tiff_id = ?", [tiff_id]))
         if isinstance(run_id, str) and run_id:
-            where_clauses.append("o.run_id = ?")
-            params.append(run_id)
+            where_items.append(("o.run_id = ?", [run_id]))
         if isinstance(phase_id, str) and phase_id:
-            where_clauses.append("o.phase_id = ?")
-            params.append(phase_id)
+            where_items.append(("o.phase_id = ?", [phase_id]))
         if isinstance(tract_phase_pk, str) and tract_phase_pk:
-            where_clauses.append("o.tract_phase_pk = ?")
-            params.append(tract_phase_pk)
+            where_items.append(("o.tract_phase_pk = ?", [tract_phase_pk]))
         if isinstance(tract_id, str) and tract_id:
-            where_clauses.append("tp.tract_id = ?")
-            params.append(tract_id)
+            where_items.append(("tp.tract_id = ?", [tract_id]))
         if isinstance(species, str) and species:
-            where_clauses.append("o.species = ?")
-            params.append(species)
+            where_items.append(("o.species = ?", [species]))
         if isinstance(min_confidence, (int, float)):
-            where_clauses.append("o.confidence >= ?")
-            params.append(float(min_confidence))
+            where_items.append(("o.confidence >= ?", [float(min_confidence)]))
         if isinstance(max_confidence, (int, float)):
-            where_clauses.append("o.confidence <= ?")
-            params.append(float(max_confidence))
+            where_items.append(("o.confidence <= ?", [float(max_confidence)]))
         if isinstance(keyword, str) and keyword.strip():
-            kw = f"%{keyword.strip()}%"
-            where_clauses.append("(o.observation_id LIKE ? OR o.individual_id LIKE ?)")
-            params.extend([kw, kw])
+            clean_kw = keyword.strip().lstrip("#").strip()
+            if clean_kw:
+                kw = f"%{clean_kw}%"
+                where_items.append((
+                    "(CAST(o.observation_id AS TEXT) LIKE ? OR "
+                    "CAST(o.individual_id AS TEXT) LIKE ? OR "
+                    "o.species LIKE ? OR "
+                    "o.tiff_id LIKE ?)",
+                    [kw, kw, kw, kw],
+                ))
+
+        where_clauses = [item[0] for item in where_items]
+        params: list[object] = []
+        for item in where_items:
+            params.extend(item[1])
 
         where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
@@ -751,11 +754,13 @@ def query_tree_observations_paginated(
 
         # 获取该数据集下所有可用树种分类（用于前端下拉筛选）
         species_where_clauses = [
-            c for c, p in zip(where_clauses, params) if not c.startswith("o.species")
+            item[0] for item in where_items if not item[0].startswith("o.species =")
         ]
-        species_params = [
-            p for c, p in zip(where_clauses, params) if not c.startswith("o.species")
-        ]
+        species_params: list[object] = []
+        for item in where_items:
+            if not item[0].startswith("o.species ="):
+                species_params.extend(item[1])
+
         species_where_sql = ("WHERE " + " AND ".join(species_where_clauses)) if species_where_clauses else ""
         species_sql = (
             f"SELECT DISTINCT o.species FROM tree_observations o "

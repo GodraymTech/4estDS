@@ -233,6 +233,22 @@ export interface AssetRow {
   pixel_width?: number | null;
   pixel_height?: number | null;
   estimated_cog_seconds?: number | null;
+  file_size_gb?: number | null;
+  is_converting?: boolean;
+  file_exists?: boolean;
+}
+
+export interface AssetCogCancelOut {
+  message: string;
+  cancelled: boolean;
+}
+
+export interface AssetCogStatusOut {
+  is_converting: boolean;
+  progress: number;
+  elapsed_seconds: number;
+  eta_seconds: number;
+  status: string;
 }
 
 export interface AssetDeletePreview {

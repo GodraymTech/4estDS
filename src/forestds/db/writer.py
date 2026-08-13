@@ -697,13 +697,13 @@ def write_observations(
             box_px_sub = extra.get("box_px_sub")
             source_subimage_path = extra.get("source_subimage_path")
 
-            crown_area_px = (
-                extra.get("crown_area_px")
-                if extra.get("crown_area_px") is not None
-                else extra.get("crown_area_px_real")
-            )
+            crown_area_px = extra.get("crown_area_px")
             if crown_area_px is None:
                 crown_area_px = extra.get("crown_area_px_est")
+            if crown_area_px is None:
+                crown_area_px = extra.get("crown_area_px_real")
+            if crown_area_px is None:
+                crown_area_px = float(d.width * d.height)
             crown_area_geo_est = extra.get("crown_area_geo_est")
             crown_area_geo_real = extra.get("crown_area_geo_real")
             crown_volume_geo_est = extra.get("volume_est")

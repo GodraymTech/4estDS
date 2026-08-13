@@ -529,6 +529,26 @@ class AssetRow(BaseModel):
     pixel_width: Optional[int] = None
     pixel_height: Optional[int] = None
     estimated_cog_seconds: Optional[float] = None
+    file_size_gb: Optional[float] = Field(None, description="影像源文件大小(GB)")
+    is_converting: bool = Field(False, description="是否正在后台转码为 COG")
+    file_exists: bool = Field(True, description="原始 TIFF 文件是否存在于当前磁盘路径")
+
+
+class AssetCogCancelRequest(BaseModel):
+    input_path: str = Field(..., description="要取消转码的本地 TIFF 文件路径")
+
+
+class AssetCogCancelOut(BaseModel):
+    message: str
+    cancelled: bool
+
+
+class AssetCogStatusOut(BaseModel):
+    is_converting: bool = Field(False, description="是否正在转码")
+    progress: float = Field(0.0, description="物理转码真实百分比 0.0~100.0")
+    elapsed_seconds: float = Field(0.0, description="已消耗时间(秒)")
+    eta_seconds: float = Field(0.0, description="动态估算剩余秒数")
+    status: str = Field("none", description="状态: none | converting | completed | failed")
 
 
 class GeoPlaceOut(BaseModel):

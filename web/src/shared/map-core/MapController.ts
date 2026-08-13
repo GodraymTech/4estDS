@@ -57,6 +57,9 @@ export interface MapController {
   setRasterOverlay(id: string, overlay: RasterOverlaySpec): void;
   removeRasterOverlay(id: string): void;
 
+  /** 获取底层原生地图实例（MapLibre 等）。 */
+  getNativeMap(): unknown;
+
   /** 订阅事件, 返回退订函数(用于量算等临时交互的清理)。 */
   on(event: MapCoreEvent, handler: MapCoreHandler): () => void;
 }

@@ -1,18 +1,41 @@
 import type { CSSProperties, ReactNode } from "react";
 
+export interface MapGlassPanelProps {
+  title?: ReactNode;
+  style?: CSSProperties;
+  bodyStyle?: CSSProperties;
+  /** 背景不透明度 (0 ~ 1) */
+  glassOpacity?: number;
+  /** 毛玻璃模糊度 (如 8, 16 或 '12px') */
+  blur?: number | string;
+  children: ReactNode;
+}
+
 export function MapGlassPanel({
   title,
   style,
+  bodyStyle,
+  glassOpacity,
+  blur,
   children,
-}: {
-  title?: ReactNode;
-  style?: CSSProperties;
-  children: ReactNode;
-}) {
+}: MapGlassPanelProps) {
+  const panelStyle: CSSProperties = {
+    ...PANEL,
+    ...(glassOpacity != null
+      ? { background: `color-mix(in srgb, var(--glass-bg) ${Math.round(glassOpacity * 100)}%, transparent)` }
+      : {}),
+    ...(blur != null
+      ? {
+          backdropFilter: `blur(${typeof blur === "number" ? `${blur}px` : blur}) saturate(160%)`,
+          WebkitBackdropFilter: `blur(${typeof blur === "number" ? `${blur}px` : blur}) saturate(160%)`,
+        }
+      : {}),
+    ...style,
+  };
   return (
-    <section style={{ ...PANEL, ...style }}>
+    <section style={panelStyle}>
       {title ? <div style={TITLE}>{title}</div> : null}
-      <div style={BODY}>{children}</div>
+      <div style={{ ...BODY, ...bodyStyle }}>{children}</div>
     </section>
   );
 }

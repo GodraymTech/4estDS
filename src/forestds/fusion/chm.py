@@ -449,7 +449,15 @@ class CHMSampler:
         if self.find_real_canopy:
             area_px_real = float(valid_h.size)
             area_geo_real = float(valid_h.size * pixel_area)
-            
+
+            # 点云/CHM 严重欠采样保底保护: 若点云落入点极少且测得物理面积显著低于估计值的15%
+            if area_geo_est > 0 and (area_geo_real < 0.15 * area_geo_est and valid_h.size < 15):
+                log.warning(
+                    "单木区域 (w_geo={:.2f}m, h_geo={:.2f}m) 点云/CHM严重欠采样(仅{}点)，对真实冠幅面积进行融合下限保护",
+                    w_geo, h_geo, valid_h.size
+                )
+                area_geo_real = max(area_geo_real, float(0.5 * area_geo_est))
+
             import math
             r_real = math.sqrt(area_geo_real / np.pi) if area_geo_real > 0 else 0.0
             
@@ -574,6 +582,7 @@ class CHMSampler:
                 d.extra["height"] = h
                 d.extra["height_source"] = src
                 d.extra["volume"] = vol
+                d.extra["crown_area_px"] = res["crown_area_px_est"]
                 d.extra["crown_area_px_est"] = res["crown_area_px_est"]
                 d.extra["crown_area_px_real"] = res["crown_area_px_real"]
                 d.extra["crown_area_geo_est"] = res["crown_area_geo_est"]

@@ -65,7 +65,7 @@ export const env = {
 const STORAGE_ENDPOINT_KEY = "FORESTDS_ENDPOINT_URL";
 const STORAGE_OFFLINE_KEY = "FORESTDS_OFFLINE_MODE";
 
-export const DEFAULT_LOCAL_ENDPOINT = "http://localhost:8000";
+export const DEFAULT_LOCAL_ENDPOINT = "";
 
 export function getStoredEndpoint(): string {
   try {

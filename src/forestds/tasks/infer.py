@@ -84,7 +84,7 @@ def run_infer_pipeline(
             weights=settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights")),
             conf=float(settings.get("detect.conf_threshold", 0.25)),
             iou=float(settings.get("detect.iou_threshold", 0.6)),
-            imgsz=int(settings.get("model_input", 1024)),
+            imgsz=int(settings.get("detect.model_input", settings.get("model_input", 1024))),
             device=settings.get("detect.device", settings.get("device", None)),
             verbose=settings.get("detect.verbose", False),
         )

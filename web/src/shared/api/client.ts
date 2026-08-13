@@ -1,4 +1,4 @@
-import { resolveApiUrl } from "../config/env";
+import { getOfflineMode, resolveApiUrl } from "../config/env";
 import { authHeaders } from "../auth/session";
 
 /**
@@ -14,6 +14,12 @@ export class ApiError extends Error {
   ) {
     super(message);
     this.name = "ApiError";
+  }
+}
+
+function checkOfflineGuard(path: string) {
+  if (getOfflineMode() && !path.includes("health")) {
+    throw new ApiError(0, "当前已开启【手动断开】模式，连接已挂起");
   }
 }
 
@@ -42,18 +48,21 @@ async function parse<T>(res: Response): Promise<T> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
+  checkOfflineGuard(path);
   return parse<T>(
     await fetch(resolveApiUrl(path), { headers: authHeaders() }),
   );
 }
 
 export async function apiGetText(path: string): Promise<string> {
+  checkOfflineGuard(path);
   const res = await fetch(resolveApiUrl(path), { headers: authHeaders() });
   if (!res.ok) throw new ApiError(res.status, `请求失败 (${res.status}): ${res.statusText}`);
   return res.text();
 }
 
 export async function apiPostJson<T>(path: string, body: unknown): Promise<T> {
+  checkOfflineGuard(path);
   return parse<T>(
     await fetch(resolveApiUrl(path), {
       method: "POST",
@@ -64,6 +73,7 @@ export async function apiPostJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPatchJson<T>(path: string, body: unknown): Promise<T> {
+  checkOfflineGuard(path);
   return parse<T>(
     await fetch(resolveApiUrl(path), {
       method: "PATCH",
@@ -74,6 +84,7 @@ export async function apiPatchJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPutJson<T>(path: string, body: unknown): Promise<T> {
+  checkOfflineGuard(path);
   return parse<T>(
     await fetch(resolveApiUrl(path), {
       method: "PUT",
@@ -84,6 +95,7 @@ export async function apiPutJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPostForm<T>(path: string, body: FormData): Promise<T> {
+  checkOfflineGuard(path);
   return parse<T>(
     await fetch(resolveApiUrl(path), {
       method: "POST",
@@ -94,6 +106,7 @@ export async function apiPostForm<T>(path: string, body: FormData): Promise<T> {
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
+  checkOfflineGuard(path);
   return parse<T>(
     await fetch(resolveApiUrl(path), {
       method: "DELETE",

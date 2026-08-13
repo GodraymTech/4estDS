@@ -26,16 +26,18 @@ def create_app() -> FastAPI:
         description="红树林单木智能解译平台 — 一张图服务端",
     )
 
-    # CORS: 前端(开发/部署域)可通过环境变量配置，缺省允许本地开发。
+    # CORS: 支持环境变量配置，默认允许本地任意端口(5173, 5174, 3000 等)及跨域访问。
     origins = os.environ.get(
-        "forestds_CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
+        "FORESTDS_CORS_ORIGINS", "*"
     )
+    origin_list = [o.strip() for o in origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[o.strip() for o in origins.split(",") if o.strip()],
+        allow_origins=origin_list if "*" not in origin_list else ["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     )
 
     # 健康探针既支持根路径直测(/healthz)，也支持挂在 /api/v1 下供代理转发。

@@ -154,7 +154,7 @@ def run_silent_inference(image_path: str, settings) -> List[Tuple[int, float, fl
     weights = settings.get(f"detect.models.{arch}.weights", settings.get("detect.weights"))
     conf = float(settings.get("conf_threshold", 0.25))
     iou = float(settings.get("detect.iou_threshold", 0.55))
-    imgsz = int(settings.get("model_input", 1024))
+    imgsz = int(settings.get("detect.model_input", settings.get("model_input", 1024)))
     log.info("正在静默推理 (模型: {}, 输入尺寸: {}x{})...", weights, infer_w, infer_h)
 
     with silence_inference_env():

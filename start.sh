@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap '' HUP
 
-# 单机多环境配置 (PROD / DEV)
-ENV_MODE="${ENV_MODE:-prod}"
+# 单机多环境配置 (根据运行路径智能感知默认环境身份)
+if [[ -z "${ENV_MODE:-}" ]]; then
+  if [[ "$PWD" == *"_prod"* ]] || [[ "$PWD" == *"/prod"* ]]; then
+    ENV_MODE="prod"
+  else
+    ENV_MODE="dev"
+  fi
+fi
 
 if [[ "$ENV_MODE" == "dev" ]]; then
   PORT_API="${PORT_API:-8001}"
@@ -31,12 +38,19 @@ UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/forestds-uv-cache}"
 
 mkdir -p "$PID_DIR" "$LOG_DIR" "$forestds_HOME"
 
+if [[ ! -d ".venv" ]]; then
+  echo ">>> 检测到未初始化虚拟环境，正在自动同步 (uv sync)..."
+  uv sync
+fi
+
+trap '' HUP
+
 is_running() {
   local pid_file=$1
   if [[ -f "$pid_file" ]]; then
     local pid
     pid=$(cat "$pid_file")
-    if [[ -n "$pid" ]] && ps -p "$pid" >/dev/null 2>&1; then
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       return 0
     fi
     rm -f "$pid_file"
@@ -61,7 +75,7 @@ port_pids() {
 
 port_listening() {
   local port=$1
-  ss -ltn "sport = :$port" 2>/dev/null | grep -q LISTEN
+  ss -ltn 2>/dev/null | grep -qE ":$port[[:space:]]"
 }
 
 worker_pids() {
@@ -99,9 +113,11 @@ start_redis() {
 
   require_command redis-server
   echo "正在启动 Redis..."
-  nohup redis-server --bind 127.0.0.1 --port 6379 --save "" --appendonly no >"$LOG_DIR/redis.log" 2>&1 &
-  echo $! >"$REDIS_PID_FILE"
-  sleep 0.3
+  nohup redis-server --bind 127.0.0.1 --port 6379 --save "" --appendonly no </dev/null >"$LOG_DIR/redis.log" 2>&1 &
+  local pid=$!
+  echo $pid >"$REDIS_PID_FILE"
+  disown $pid 2>/dev/null || true
+  sleep 0.5
   if ! is_running "$REDIS_PID_FILE"; then
     echo "Redis 启动失败，请查看 $LOG_DIR/redis.log"
     exit 1
@@ -123,9 +139,11 @@ start_worker() {
   fi
 
   echo "正在启动推理 Worker..."
-  nohup env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 REDIS_URL="$REDIS_URL" forestds_HOME="$forestds_HOME" uv --cache-dir "$UV_CACHE_DIR" run dramatiq forestds.worker.actors --processes 1 --threads 1 >"$LOG_DIR/worker.log" 2>&1 &
-  echo $! >"$WORKER_PID_FILE"
-  sleep 0.5
+  nohup env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 REDIS_URL="$REDIS_URL" forestds_HOME="$forestds_HOME" .venv/bin/dramatiq forestds.worker.actors --processes 1 --threads 1 </dev/null >"$LOG_DIR/worker.log" 2>&1 &
+  local pid=$!
+  echo $pid >"$WORKER_PID_FILE"
+  disown $pid 2>/dev/null || true
+  sleep 1.0
   pids=$(worker_pids || true)
   if ! is_running "$WORKER_PID_FILE" && [[ -z "$pids" ]]; then
     echo "推理 Worker 启动失败，请查看 $LOG_DIR/worker.log"
@@ -135,27 +153,35 @@ start_worker() {
 }
 
 start_backend() {
-  if is_running "$BACKEND_PID_FILE" || port_listening "$PORT_API"; then
+  if port_listening "$PORT_API"; then
     echo "后端 API 服务已在运行中 (端口 $PORT_API)。"
     return
   fi
+  rm -f "$BACKEND_PID_FILE"
 
   echo "正在启动后端 API 服务 [$ENV_LABEL: 端口 $PORT_API]..."
-  nohup env forestds_HOME="$forestds_HOME" REDIS_URL="$REDIS_URL" uv --cache-dir "$UV_CACHE_DIR" run uvicorn forestds.api.main:app --reload --host 0.0.0.0 --port "$PORT_API" >"$LOG_DIR/backend.log" 2>&1 &
-  echo $! >"$BACKEND_PID_FILE"
-  echo "后端 API 服务已启动，PID: $(cat "$BACKEND_PID_FILE") (日志输出到 $LOG_DIR/backend.log)"
+  setsid nohup env PYTHONUNBUFFERED=1 forestds_HOME="$forestds_HOME" REDIS_URL="$REDIS_URL" .venv/bin/python3 -m uvicorn forestds.api.main:app --host 0.0.0.0 --port "$PORT_API" </dev/null >"$LOG_DIR/backend.log" 2>&1 &
+  local pid=$!
+  echo $pid >"$BACKEND_PID_FILE"
+  disown $pid 2>/dev/null || true
+  sleep 1.0
+  echo "后端 API 服务已启动，PID: $(cat "$BACKEND_PID_FILE" 2>/dev/null || echo "$pid") (日志输出到 $LOG_DIR/backend.log)"
 }
 
 start_frontend() {
-  if is_running "$FRONTEND_PID_FILE" || port_listening "$PORT_WEB"; then
+  if port_listening "$PORT_WEB"; then
     echo "前端 Web 服务已在运行中 (端口 $PORT_WEB)。"
     return
   fi
+  rm -f "$FRONTEND_PID_FILE"
 
   echo "正在启动前端 Web 服务 [$ENV_LABEL: 端口 $PORT_WEB]..."
-  nohup bash -c "cd web && env VITE_PORT=$PORT_WEB VITE_API_TARGET=http://127.0.0.1:$PORT_API mise exec -- pnpm run dev" >"$LOG_DIR/frontend.log" 2>&1 &
-  echo $! >"$FRONTEND_PID_FILE"
-  echo "前端 Web 服务已启动，PID: $(cat "$FRONTEND_PID_FILE") (日志输出到 $LOG_DIR/frontend.log)"
+  setsid nohup env CI=true PORT="$PORT_WEB" VITE_PORT="$PORT_WEB" VITE_API_TARGET="http://127.0.0.1:$PORT_API" pnpm --prefix web run dev </dev/null >"$LOG_DIR/frontend.log" 2>&1 &
+  local pid=$!
+  echo $pid >"$FRONTEND_PID_FILE"
+  disown $pid 2>/dev/null || true
+  sleep 1.0
+  echo "前端 Web 服务已启动，PID: $(cat "$FRONTEND_PID_FILE" 2>/dev/null || echo "$pid") (日志输出到 $LOG_DIR/frontend.log)"
 }
 
 start_services() {
@@ -164,6 +190,8 @@ start_services() {
   start_worker
   start_backend
   start_frontend
+
+  disown -a 2>/dev/null || true
 
   echo "----------------------------------------"
   echo "$ENV_LABEL 服务入口："
@@ -237,12 +265,16 @@ status_port() {
   local pids
   pids=$(port_pids "$port" || true)
 
-  if is_running "$pid_file"; then
-    echo "$name: 运行中 (PID: $(cat "$pid_file"), 端口 $port)"
-  elif [[ -n "$pids" ]]; then
-    echo "$name: 运行中 (端口 $port, PID: $pids)"
-  elif port_listening "$port"; then
-    echo "$name: 运行中 (端口 $port)"
+  if port_listening "$port"; then
+    if is_running "$pid_file"; then
+      echo "$name: 运行中 (PID: $(cat "$pid_file"), 端口 $port)"
+    elif [[ -n "$pids" ]]; then
+      echo "$name: 运行中 (端口 $port, PID: $pids)"
+    else
+      echo "$name: 运行中 (端口 $port)"
+    fi
+  elif is_running "$pid_file"; then
+    echo "$name: 启动中 (PID: $(cat "$pid_file"))"
   else
     echo "$name: 已停止"
   fi
