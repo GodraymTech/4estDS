@@ -365,7 +365,6 @@ export function TreeObservationsTable({
                         onClick={() => refetch()}
                         loading={isLoading}
                     >
-                        刷新
                     </Button>
                     <Button
                         type="primary"
@@ -373,7 +372,7 @@ export function TreeObservationsTable({
                         onClick={() => setExportOpen(true)}
                         disabled={!data?.items?.length}
                     >
-                        导出 CSV
+                        CSV
                     </Button>
                 </Space>
             </div>
@@ -416,7 +415,7 @@ export function TreeObservationsTable({
             <ExportColumnsModal
                 open={exportOpen}
                 onClose={() => setExportOpen(false)}
-                items={data?.items || []}
+                queryParams={queryParams}
                 total={data?.total || 0}
                 filenamePrefix={`tree_obs_${initialRunId || initialTiffId || "export"}`}
             />

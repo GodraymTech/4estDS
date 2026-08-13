@@ -1,38 +1,41 @@
 /* 全局基线样式。字体经 @fontsource 自托管, 在 main.tsx 以副作用导入(契合内网, 无外部 CDN)。 */
 * {
-  box-sizing: border-box;
+    box-sizing: border-box;
 }
+
 html,
 body,
 #root {
-  height: 100%;
+    height: 100%;
 }
+
 html {
-  background: var(--color-bg);
+    background: var(--color-bg);
 }
+
 body {
-  margin: 0;
-  font-family: var(--font-body);
-  color: var(--color-text);
-  background: var(--color-bg);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+    margin: 0;
+    font-family: var(--font-body);
+    color: var(--color-text);
+    background: var(--color-bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
 .ant-app {
-  min-height: 100%;
-  background: var(--color-bg);
-  color: var(--color-text);
+    min-height: 100%;
+    background: var(--color-bg);
+    color: var(--color-text);
 }
 
 .ant-layout,
 .ant-layout-content {
-  background: var(--color-bg) !important;
-  color: var(--color-text);
+    background: var(--color-bg) !important;
+    color: var(--color-text);
 }
 
 .ant-layout-header {
-  background: var(--ink) !important;
+    background: var(--ink) !important;
 }
 
 .ant-card,
@@ -46,8 +49,8 @@ body {
 .ant-select-dropdown,
 .ant-picker-dropdown .ant-picker-panel-container,
 .ant-list {
-  background: var(--color-surface) !important;
-  color: var(--color-text);
+    background: var(--color-surface) !important;
+    color: var(--color-text);
 }
 
 .ant-card,
@@ -61,7 +64,7 @@ body {
 .ant-picker,
 .ant-segmented,
 .ant-upload-wrapper .ant-upload-drag {
-  border-color: var(--color-border) !important;
+    border-color: var(--color-border) !important;
 }
 
 .ant-input,
@@ -72,23 +75,23 @@ body {
 .ant-select-selector,
 .ant-picker,
 .ant-segmented {
-  background: var(--color-surface) !important;
-  color: var(--color-text) !important;
+    background: var(--color-surface) !important;
+    color: var(--color-text) !important;
 }
 
 .ant-input::placeholder,
 .ant-input-affix-wrapper input::placeholder,
 .ant-input-number-input::placeholder,
-.ant-picker-input > input::placeholder,
+.ant-picker-input>input::placeholder,
 .ant-select-selection-placeholder {
-  color: var(--color-text-muted) !important;
-  opacity: 0.72;
+    color: var(--color-text-muted) !important;
+    opacity: 0.72;
 }
 
-.ant-input-affix-wrapper > input.ant-input,
-.ant-picker-input > input {
-  background: transparent !important;
-  color: var(--color-text) !important;
+.ant-input-affix-wrapper>input.ant-input,
+.ant-picker-input>input {
+    background: transparent !important;
+    color: var(--color-text) !important;
 }
 
 .ant-typography,
@@ -107,31 +110,31 @@ body {
 .ant-select-arrow,
 .ant-input-prefix,
 .ant-progress-text {
-  color: var(--color-text);
+    color: var(--color-text);
 }
 
 .ant-typography-secondary,
 .ant-list-item-meta-description {
-  color: var(--color-text-muted) !important;
+    color: var(--color-text-muted) !important;
 }
 
 .ant-card-head {
-  background: var(--color-surface) !important;
-  border-bottom-color: var(--color-border) !important;
+    background: var(--color-surface) !important;
+    border-bottom-color: var(--color-border) !important;
 }
 
-.ant-table-thead > tr > th {
-  background: color-mix(in srgb, var(--color-surface) 84%, var(--color-bg)) !important;
-  color: var(--color-text) !important;
-  border-bottom-color: var(--color-border) !important;
+.ant-table-thead>tr>th {
+    background: color-mix(in srgb, var(--color-surface) 84%, var(--color-bg)) !important;
+    color: var(--color-text) !important;
+    border-bottom-color: var(--color-border) !important;
 }
 
-.ant-table-tbody > tr > td {
-  border-bottom-color: var(--color-border) !important;
+.ant-table-tbody>tr>td {
+    border-bottom-color: var(--color-border) !important;
 }
 
-.ant-table-tbody > tr.ant-table-row:hover > td {
-  background: color-mix(in srgb, var(--color-surface) 76%, var(--color-bg)) !important;
+.ant-table-tbody>tr.ant-table-row:hover>td {
+    background: color-mix(in srgb, var(--color-surface) 76%, var(--color-bg)) !important;
 }
 
 .ant-select-item-option-active:not(.ant-select-item-option-disabled),
@@ -139,93 +142,126 @@ body {
 .ant-dropdown-menu-submenu-title:hover,
 .ant-list-item:hover,
 .ant-segmented-item:hover {
-  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface)) !important;
+    background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface)) !important;
 }
 
 .ant-select-item-option-selected:not(.ant-select-item-option-disabled),
 .ant-segmented-item-selected {
-  background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface)) !important;
-  color: var(--color-text) !important;
+    background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface)) !important;
+    color: var(--color-text) !important;
 }
 
 .ant-btn-default {
-  background: var(--color-surface);
-  border-color: var(--color-border);
-  color: var(--color-text);
+    background: var(--color-surface);
+    border-color: var(--color-border);
+    color: var(--color-text);
 }
 
 .ant-btn-default:hover {
-  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface)) !important;
-  border-color: var(--color-primary) !important;
+    background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface)) !important;
+    border-color: var(--color-primary) !important;
 }
 
 .ant-tag:not([class*="ant-tag-"]) {
-  background: color-mix(in srgb, var(--color-surface) 72%, var(--color-bg));
-  border-color: var(--color-border);
-  color: var(--color-text-muted);
+    background: color-mix(in srgb, var(--color-surface) 72%, var(--color-bg));
+    border-color: var(--color-border);
+    color: var(--color-text-muted);
 }
 
 /* 地理量等宽排版: 坐标/面积/株数/时间戳/运行号 —— 仪器面板美学(可信/可追溯)。 */
 .geo-metric,
 .mono {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
+    font-family: var(--font-mono);
+}
+
+/* ==========================================================================
+   全局 Tooltip 视觉设计 (反色高对比美学 + 箭头与气泡 100% 同步)
+   ========================================================================== */
+.ant-tooltip-inner {
+    background: var(--tooltip-bg) !important;
+    backdrop-filter: blur(3px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(3px) saturate(180%) !important;
+    border: 1px solid var(--tooltip-border) !important;
+    border-radius: 8px !important;
+    color: var(--tooltip-text) !important;
+    font-size: 12px !important;
+    font-family: var(--font-body) !important;
+    padding: 6px 10px !important;
+    box-shadow: var(--tooltip-shadow) !important;
+    line-height: 1.4 !important;
+}
+
+/* 箭头与框本体完全同步，解决小尖尖色差脱节问题 */
+.ant-tooltip-arrow::before,
+.ant-tooltip-arrow::after {
+    background: var(--tooltip-bg) !important;
+}
+
+.geo-metric,
+.mono {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
 }
 
 /* 无障碍质量底线: 键盘焦点始终可见。 */
 :focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
 }
 
 /* 跳到主内容: 键盘用户可越过导航直达内容(默认藏, 聚焦显现)。 */
 .skip-link {
-  position: absolute;
-  left: 8px;
-  top: -48px;
-  z-index: 1000;
-  padding: 8px 14px;
-  background: var(--color-primary);
-  color: #fff;
-  border-radius: 6px;
-  text-decoration: none;
-  transition: top 0.15s;
+    position: absolute;
+    left: 8px;
+    top: -48px;
+    z-index: 1000;
+    padding: 8px 14px;
+    background: var(--color-primary);
+    color: #fff;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: top 0.15s;
 }
+
 .skip-link:focus {
-  top: 8px;
+    top: 8px;
 }
 
 /* 尊重系统降动效偏好。 */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }
 
 /* 自定义毛玻璃面板的滚动条，适配亮暗主题 */
 .custom-glass-scroll::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+    width: 5px;
+    height: 5px;
 }
+
 .custom-glass-scroll::-webkit-scrollbar-track {
-  background: transparent;
+    background: transparent;
 }
+
 .custom-glass-scroll::-webkit-scrollbar-thumb {
-  background: var(--glass-scrollbar-thumb);
-  border-radius: 99px;
-  transition: background 0.15s ease;
+    background: var(--glass-scrollbar-thumb);
+    border-radius: 99px;
+    transition: background 0.15s ease;
 }
+
 .custom-glass-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--glass-scrollbar-thumb-hover);
+    background: var(--glass-scrollbar-thumb-hover);
 }
+
 /* 支持 Firefox */
 .custom-glass-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: var(--glass-scrollbar-thumb) transparent;
+    scrollbar-width: thin;
+    scrollbar-color: var(--glass-scrollbar-thumb) transparent;
 }

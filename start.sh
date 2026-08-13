@@ -160,7 +160,7 @@ start_backend() {
   rm -f "$BACKEND_PID_FILE"
 
   echo "正在启动后端 API 服务 [$ENV_LABEL: 端口 $PORT_API]..."
-  setsid nohup env PYTHONUNBUFFERED=1 forestds_HOME="$forestds_HOME" REDIS_URL="$REDIS_URL" .venv/bin/python3 -m uvicorn forestds.api.main:app --host 0.0.0.0 --port "$PORT_API" </dev/null >"$LOG_DIR/backend.log" 2>&1 &
+  setsid nohup env PYTHONUNBUFFERED=1 PORT_API="$PORT_API" ENV_MODE="$ENV_MODE" forestds_HOME="$forestds_HOME" REDIS_URL="$REDIS_URL" .venv/bin/python3 -m uvicorn forestds.api.main:app --host 0.0.0.0 --port "$PORT_API" </dev/null >"$LOG_DIR/backend.log" 2>&1 &
   local pid=$!
   echo $pid >"$BACKEND_PID_FILE"
   disown $pid 2>/dev/null || true

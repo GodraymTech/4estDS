@@ -794,8 +794,12 @@ def query_tree_observations_paginated(
 
         # 分页参数控制
         page = max(1, int(page))
-        page_size = max(1, min(500, int(page_size)))
-        offset = (page - 1) * page_size
+        if page_size == -1:
+            limit_clause = ""
+        else:
+            page_size = max(1, min(100000, int(page_size)))
+            offset = (page - 1) * page_size
+            limit_clause = f"LIMIT {page_size} OFFSET {offset}"
 
         query_sql = (
             f"SELECT o.*, tp.tract_id, t.city, t.county, t.town "
@@ -804,7 +808,7 @@ def query_tree_observations_paginated(
             f"LEFT JOIN tracts t ON tp.tract_pk = t.tract_pk "
             f"{where_sql} "
             f"ORDER BY {order_col} {order_dir} "
-            f"LIMIT {page_size} OFFSET {offset}"
+            f"{limit_clause}".strip()
         )
         data_rows = conn.execute(query_sql, params).fetchall()
         items = [dict(r) for r in data_rows]

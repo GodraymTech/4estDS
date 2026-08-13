@@ -2,92 +2,114 @@
    单一真相(DRY): 所有颜色/字体/间距/圆角在此定义, 组件与 AntD 主题皆引用之。
    源自红树林潮滩世界, 刻意避开 AI 套路(暖奶油/醋绿黑底/报刊发丝线)。 */
 :root {
-  /* 色彩 · 潮间带 */
-  --ink: #10302b; /* 潮墨: 导航 / 深色地图 chrome / 正文 */
-  --tide: #0e6e63; /* 潮青: 主品牌 / 主操作 */
-  --canopy: #3e8e5a; /* 冠绿: 正向 / 新增图斑 / 成活 */
-  --laterite: #b8472a; /* 赤土: 预警 / 减少 / 违法 / 退化 */
-  --silt: #c9a24b; /* 滩泥: 注意 / 中等预警 */
-  --carbon: #1e4e8c; /* 蓝碳: 蓝碳模块专用深蓝 */
-  --haze: #edf1ef; /* 雾白: 冷调画布(非暖奶油) */
-  --paper: #f7f9f8; /* 卡片 / 浮层底 */
-  --line: #d8e0dd; /* 分隔线 */
-  --muted: #5c6b66; /* 次要文字 */
+    /* 色彩 · 潮间带 */
+    --ink: #10302b;
+    /* 潮墨: 导航 / 深色地图 chrome / 正文 */
+    --tide: #0e6e63;
+    /* 潮青: 主品牌 / 主操作 */
+    --canopy: #3e8e5a;
+    /* 冠绿: 正向 / 新增图斑 / 成活 */
+    --laterite: #b8472a;
+    /* 赤土: 预警 / 减少 / 违法 / 退化 */
+    --silt: #c9a24b;
+    /* 滩泥: 注意 / 中等预警 */
+    --carbon: #1e4e8c;
+    /* 蓝碳: 蓝碳模块专用深蓝 */
+    --haze: #edf1ef;
+    /* 雾白: 冷调画布(非暖奶油) */
+    --paper: #f7f9f8;
+    /* 卡片 / 浮层底 */
+    --line: #d8e0dd;
+    /* 分隔线 */
+    --muted: #5c6b66;
+    /* 次要文字 */
 
-  /* 语义别名: 组件只用语义名, 换主题只改此层 */
-  --color-bg: var(--haze);
-  --color-surface: var(--paper);
-  --color-border: var(--line);
-  --color-text: var(--ink);
-  --color-text-muted: var(--muted);
-  --color-primary: var(--tide);
-  --color-success: var(--canopy);
-  --color-warning: var(--silt);
-  --color-danger: var(--laterite);
-  --color-info: var(--carbon);
+    /* 语义别名: 组件只用语义名, 换主题只改此层 */
+    --color-bg: var(--haze);
+    --color-surface: var(--paper);
+    --color-border: var(--line);
+    --color-text: var(--ink);
+    --color-text-muted: var(--muted);
+    --color-primary: var(--tide);
+    --color-success: var(--canopy);
+    --color-warning: var(--silt);
+    --color-danger: var(--laterite);
+    --color-info: var(--carbon);
 
-  /* 字体栈 · IBM Plex 超家族 + 思源 (中英+等宽一体) */
-  --font-display:
-    "IBM Plex Serif", "Source Han Serif SC", "Noto Serif SC", serif;
-  --font-body:
-    "IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", "Sarasa Mono SC", ui-monospace, monospace;
+    /* 字体栈 · IBM Plex 超家族 + 思源 (中英+等宽一体) */
+    --font-display:
+        "IBM Plex Serif", "Source Han Serif SC", "Noto Serif SC", serif;
+    --font-body:
+        "IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", "Sarasa Mono SC", ui-monospace, monospace;
 
-  /* 圆角 / 间距 / 阴影 */
-  --radius-sm: 4px;
-  --radius: 8px;
-  --radius-lg: 12px;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --shadow-1: 0 1px 2px rgba(16, 48, 43, 0.06), 0 1px 3px rgba(16, 48, 43, 0.1);
-  --shadow-2: 0 4px 12px rgba(16, 48, 43, 0.12);
-  --glass-bg: rgba(255, 255, 255, 0.68);
-  --glass-bg-strong: rgba(255, 255, 255, 0.82);
-  --glass-border: rgba(255, 255, 255, 0.72);
-  --glass-shadow: 0 18px 48px rgba(16, 48, 43, 0.18), 0 2px 8px rgba(16, 48, 43, 0.08);
-  --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.62);
-  --glass-text: #10221e;
-  --glass-muted: #5c6b66;
-  --glass-chip: rgba(248, 250, 249, 0.72);
-  --glass-scrollbar-thumb: rgba(16, 48, 43, 0.18);
-  --glass-scrollbar-thumb-hover: rgba(16, 48, 43, 0.32);
+    /* 圆角 / 间距 / 阴影 */
+    --radius-sm: 4px;
+    --radius: 8px;
+    --radius-lg: 12px;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --shadow-1: 0 1px 2px rgba(16, 48, 43, 0.06), 0 1px 3px rgba(16, 48, 43, 0.1);
+    --shadow-2: 0 4px 12px rgba(16, 48, 43, 0.12);
+    --glass-bg: rgba(255, 255, 255, 0.68);
+    --glass-bg-strong: rgba(255, 255, 255, 0.82);
+    --glass-border: rgba(255, 255, 255, 0.72);
+    --glass-shadow: 0 18px 48px rgba(16, 48, 43, 0.18), 0 2px 8px rgba(16, 48, 43, 0.08);
+    --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+    --glass-text: #10221e;
+    --glass-muted: #5c6b66;
+    --glass-chip: rgba(248, 250, 249, 0.72);
+    --glass-scrollbar-thumb: rgba(16, 48, 43, 0.18);
+    --glass-scrollbar-thumb-hover: rgba(16, 48, 43, 0.32);
 
-  /* 布局尺度 */
-  --nav-rail-width: 72px;
-  --header-height: 56px;
+    /* 反色高对比 Tooltip 浮层 (亮色主题 -> 深色气泡) */
+    --tooltip-bg: rgba(146, 161, 156, 0.88);
+    --tooltip-text: #0c1015;
+    --tooltip-border: rgba(255, 255, 255, 0.14);
+    --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+
+    /* 布局尺度 */
+    --nav-rail-width: 72px;
+    --header-height: 56px;
 }
 
 :root[data-theme="dark"] {
-  --ink: #071412;
-  --tide: #36b7a7;
-  --canopy: #60c47a;
-  --laterite: #e26d4a;
-  --silt: #d6b75b;
-  --carbon: #6aa7e8;
-  --haze: #0b1412;
-  --paper: #13211e;
-  --line: #28423b;
-  --muted: #9ab1aa;
-  --color-bg: var(--haze);
-  --color-surface: var(--paper);
-  --color-border: var(--line);
-  --color-text: #e6f0ed;
-  --color-text-muted: var(--muted);
-  --color-primary: var(--tide);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.42);
-  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.42);
-  --glass-bg: rgba(20, 30, 28, 0.58);
-  --glass-bg-strong: rgba(20, 30, 28, 0.76);
-  --glass-border: rgba(255, 255, 255, 0.18);
-  --glass-shadow: 0 22px 58px rgba(0, 0, 0, 0.42), 0 2px 10px rgba(0, 0, 0, 0.28);
-  --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.16);
-  --glass-text: #e6f0ed;
-  --glass-muted: #9ab1aa;
-  --glass-chip: rgba(255, 255, 255, 0.10);
-  --glass-scrollbar-thumb: rgba(255, 255, 255, 0.18);
-  --glass-scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
+    --ink: #071412;
+    --tide: #36b7a7;
+    --canopy: #60c47a;
+    --laterite: #e26d4a;
+    --silt: #d6b75b;
+    --carbon: #6aa7e8;
+    --haze: #0b1412;
+    --paper: #13211e;
+    --line: #28423b;
+    --muted: #9ab1aa;
+    --color-bg: var(--haze);
+    --color-surface: var(--paper);
+    --color-border: var(--line);
+    --color-text: #e6f0ed;
+    --color-text-muted: var(--muted);
+    --color-primary: var(--tide);
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.42);
+    --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.42);
+    --glass-bg: rgba(20, 30, 28, 0.58);
+    --glass-bg-strong: rgba(20, 30, 28, 0.76);
+    --glass-border: rgba(255, 255, 255, 0.18);
+    --glass-shadow: 0 22px 58px rgba(0, 0, 0, 0.42), 0 2px 10px rgba(0, 0, 0, 0.28);
+    --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    --glass-text: #e6f0ed;
+    --glass-muted: #9ab1aa;
+    --glass-chip: rgba(255, 255, 255, 0.10);
+    --glass-scrollbar-thumb: rgba(255, 255, 255, 0.18);
+    --glass-scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
+
+    /* 反色高对比 Tooltip 浮层 (暗色主题 -> 高亮浅色气泡) */
+    --tooltip-bg: rgba(85, 107, 99, 0.92);
+    --tooltip-text: #e4e6eb;
+    --tooltip-border: rgba(0, 0, 0, 0.15);
+    --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }

@@ -71,14 +71,14 @@ export function ObservationDetailDrawer({ open, onClose, item }: ObservationDeta
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", paddingRight: 16 }}>
                     <Space>
                         <FileTextOutlined style={{ color: "var(--color-primary, #1890ff)" }} />
-                        <span>单木观测详情: <Text code>{item.observation_id}</Text></span>
+                        <span>单木观测详情: </span>
                     </Space>
                     <Space size="small">
                         <Button size="small" icon={<CopyOutlined />} onClick={handleCopyJson}>
-                            复制 JSON
+                            整体复制
                         </Button>
                         <Button size="small" type="primary" icon={<CompassOutlined />} onClick={handleOpenMap}>
-                            在地图中查看
+                            地图查看
                         </Button>
                     </Space>
                 </div>

@@ -162,6 +162,7 @@ def run_batch_pipeline(
     *,
     settings,
     cancel_run_id: str | None = None,
+    detector_factory=None,
 ) -> BatchSummary:
     """串行执行一批待命项，每条使用它自己的参数。
 
@@ -169,6 +170,7 @@ def run_batch_pipeline(
         items: 待命项列表，按数组顺序执行。
         settings: 已加载的 Settings。
         cancel_run_id: 顶层作业 run_id；用户终止时以它作为取消信号源。
+        detector_factory: 可选的检测器工厂闭包/方法，为空时在批内自建。
 
     Returns:
         BatchSummary（包含逐条终态，供上层写入顶层 run 的 metrics）。
@@ -189,7 +191,7 @@ def run_batch_pipeline(
 
     db_url = settings.get("url", None)
     default_arch = settings.get("detect.arch", "ultralytics")
-    detector_for = _build_detector_factory(settings)
+    detector_for = detector_factory or _build_detector_factory(settings)
 
     log.info("批量推理启动：共 {} 条待命项。", len(specs))
 

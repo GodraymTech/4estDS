@@ -27,7 +27,7 @@ def list_observations(
     max_confidence: Annotated[Optional[float], Query(ge=0.0, le=1.0, description="最高置信度")] = None,
     keyword: Annotated[Optional[str], Query(description="搜索 observation_id 或 individual_id")] = None,
     page: Annotated[int, Query(ge=1, description="页码(从1开始)")] = 1,
-    page_size: Annotated[int, Query(ge=1, le=500, description="每页条数(建议 20/50/100)")] = 50,
+    page_size: Annotated[int, Query(ge=-1, le=100000, description="每页条数(-1表示全量)")] = 50,
     sort_by: Annotated[str, Query(description="排序字段")] = "observation_id",
     sort_order: Annotated[str, Query(description="排序方向: asc | desc")] = "asc",
     db_url: Annotated[Optional[str], Depends(get_db_url)] = None,
