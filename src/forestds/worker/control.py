@@ -67,6 +67,8 @@ def ensure_local_worker() -> bool:
             "forestds.worker.actors",
             "--queues",
             "gpu",
+            "review_gpu",
+            "default",
             "--processes",
             "1",
             "--threads",

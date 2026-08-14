@@ -67,9 +67,9 @@ export function ObjectList({
               key: species,
               label: (
                 <Space>
-                  <span className="review-color-dot" style={{ background: categoryMap.get(species)?.color ?? "#72bc8f" }} />
+                  <span className="review-color-dot" style={{ background: categoryMap.get(species)?.color ?? "#3b82f6" }} />
                   <Text strong>{categoryMap.get(species)?.display_name ?? species}</Text>
-                  <Badge count={group.length} showZero color="#606b68" />
+                  <Badge count={group.length} showZero overflowCount={999999} color="#606b68" />
                 </Space>
               ),
               children: group.map((item, idx) => {

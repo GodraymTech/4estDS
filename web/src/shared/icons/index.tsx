@@ -10,13 +10,15 @@ import type { ReactNode, SVGProps } from "react";
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "children"> {
   /** 图标边长, 默认 1em。 */
   size?: number | string;
+  /** 线宽，默认 2.2 (加粗视觉重量)。 */
+  strokeWidth?: number | string;
 }
 
 const BASE = {
   viewBox: "0 0 24 24",
   fill: "none",
   stroke: "currentColor",
-  strokeWidth: 1.5,
+  strokeWidth: 2.2,
   strokeLinecap: "round",
   strokeLinejoin: "round",
   focusable: "false",
@@ -25,9 +27,15 @@ const BASE = {
 
 /** 以统一规格包装矢量形状, 生成具名图标组件(避免每个图标重复样板)。 */
 function createIcon(displayName: string, shape: ReactNode) {
-  function Icon({ size = "1em", ...rest }: IconProps) {
+  function Icon({ size = "1em", strokeWidth, ...rest }: IconProps) {
     return (
-      <svg {...BASE} width={size} height={size} {...rest}>
+      <svg
+        {...BASE}
+        width={size}
+        height={size}
+        {...(strokeWidth != null ? { strokeWidth } : {})}
+        {...rest}
+      >
         {shape}
       </svg>
     );

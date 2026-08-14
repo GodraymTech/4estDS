@@ -55,7 +55,7 @@
     --space-8: 32px;
     --shadow-1: 0 1px 2px rgba(16, 48, 43, 0.06), 0 1px 3px rgba(16, 48, 43, 0.1);
     --shadow-2: 0 4px 12px rgba(16, 48, 43, 0.12);
-    --glass-bg: rgba(255, 255, 255, 0.68);
+    --glass-bg: rgba(197, 225, 220, 0.168);
     --glass-bg-strong: rgba(255, 255, 255, 0.82);
     --glass-border: rgba(255, 255, 255, 0.72);
     --glass-shadow: 0 18px 48px rgba(16, 48, 43, 0.18), 0 2px 8px rgba(16, 48, 43, 0.08);
@@ -96,7 +96,7 @@
     --color-primary: var(--tide);
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.42);
     --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.42);
-    --glass-bg: rgba(20, 30, 28, 0.58);
+    --glass-bg: rgba(50, 61, 59, 0.319);
     --glass-bg-strong: rgba(20, 30, 28, 0.76);
     --glass-border: rgba(255, 255, 255, 0.18);
     --glass-shadow: 0 22px 58px rgba(0, 0, 0, 0.42), 0 2px 10px rgba(0, 0, 0, 0.28);

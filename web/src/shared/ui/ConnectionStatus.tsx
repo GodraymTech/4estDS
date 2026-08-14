@@ -180,4 +180,4 @@ export function ConnectionStatus() {
     );
 }
 
-const ACTION_STYLE: CSSProperties = { color: "#edf1ef", fontSize: 18 };
+const ACTION_STYLE: CSSProperties = { fontSize: 18 };
