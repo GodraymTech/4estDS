@@ -1,31 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
-import { Button, Empty, Modal, Popconfirm, Segmented, Table, Tag, Tooltip, message } from "antd";
+import { useEffect, useState } from "react";
+import { App, Button, Empty, Popconfirm, Table, Tag, Tooltip } from "antd";
 import type { TableProps } from "antd";
 import {
-    ArrowDownOutlined,
-    ArrowUpOutlined,
-    CloseOutlined,
-    EditOutlined,
-    ExportOutlined,
+    ClearOutlined,
+    FolderOpenOutlined,
     PoweroffOutlined,
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { endpoints, queryKeys, type JobHistoryItem, type JobState, type JobStatus } from "../../shared/api";
 import { useJob } from "../../entities/run";
 import { UploadForm } from "./UploadForm";
 import { JobStatusCell } from "./JobStatusCell";
-import { useJobsStore, type PendingTask, type SubmittedJob } from "./jobsStore";
+import { useJobsStore, type SubmittedJob } from "./jobsStore";
 import "./TasksCenter.css";
 
-// 一次提交会产生一个顶层 batch run 与 N 个 infer 子 run，两者都要进历史列表。
-const JOB_TASK_TYPES = "infer,batch";
-const JOB_TASK_TYPES_WITH_REVIEW = "infer,batch,review";
+// 历史列表包含单图推理(infer)、多图批量(batch)与复核(review)顶层作业。
+const JOB_TASK_TYPES = "infer,batch,review";
 
 const TABLE_LOCALE = { emptyText: <Empty description="暂无作业" /> };
-const PENDING_LOCALE = {
-    emptyText: <Empty description="暂无待命条目，在左侧填好参数后点「加入队列」" />,
-};
 
 const STATUS_TEXT: Record<JobState, string> = {
     queued: "排队中",
@@ -35,68 +28,42 @@ const STATUS_TEXT: Record<JobState, string> = {
     canceled: "已取消",
 };
 
-/** 批量作业明细条目(对应后端 metrics.items)。 */
-interface BatchItemRow {
-    path?: string;
-    tract_key?: string;
-    status?: string;
-    run_id?: string;
-    tree_count?: number;
-    error?: string;
-}
-
-const ITEM_STATUS: Record<string, { color: string; text: string }> = {
-    succeeded: { color: "success", text: "完成" },
-    failed: { color: "error", text: "失败" },
-    canceled: { color: "default", text: "已取消" },
-};
-
-type QueueView = "pending" | "submitted";
-
 export function TasksCenter() {
     const submitted = useJobsStore((s) => s.submitted);
-    const pending = useJobsStore((s) => s.pending);
     const [activeJobId, setActiveJobId] = useState<string | undefined>(submitted[0]?.jobId);
-    const [queueView, setQueueView] = useState<QueueView>(pending.length ? "pending" : "submitted");
     const queryClient = useQueryClient();
 
     useEffect(() => {
         if (!activeJobId && submitted[0]?.jobId) setActiveJobId(submitted[0].jobId);
     }, [activeJobId, submitted]);
 
-    // 刚攻入新的待命条目时自动展示待命视图，避免用户以为没加上。
-    useEffect(() => {
-        if (pending.length) setQueueView("pending");
-    }, [pending.length]);
-
     return (
         <div className="tasks-console">
-            <section className="tasks-panel tasks-panel--form">
-                <div className="tasks-panel__header">
-                    <h2>推理参数</h2>
-                </div>
-                <UploadForm
-                    activeJobId={activeJobId}
-                    onSubmitted={(jobId) => {
-                        setActiveJobId(jobId);
-                        setQueueView("submitted");
-                        void queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
-                    }}
-                    onCancelled={(jobId) => {
-                        void queryClient.invalidateQueries({ queryKey: queryKeys.job(jobId) });
-                        void queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
-                    }}
-                />
-            </section>
+            <div className="tasks-sidebar">
+                <section className="tasks-panel tasks-panel--form">
+                    <div className="tasks-panel__header">
+                        <h2>推理参数</h2>
+                    </div>
+                    <UploadForm
+                        activeJobId={activeJobId}
+                        onSubmitted={(jobId) => {
+                            setActiveJobId(jobId);
+                            void queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
+                        }}
+                        onCancelled={(jobId) => {
+                            void queryClient.invalidateQueries({ queryKey: queryKeys.job(jobId) });
+                            void queryClient.invalidateQueries({ queryKey: queryKeys.jobsAll });
+                        }}
+                    />
+                </section>
 
-            <section className="tasks-panel tasks-panel--history">
-                <HistoryJobs onSelect={setActiveJobId} />
-            </section>
+                <section className="tasks-panel tasks-panel--history">
+                    <HistoryJobs onSelect={setActiveJobId} />
+                </section>
+            </div>
 
             <section className="tasks-main">
                 <JobQueuePanel
-                    view={queueView}
-                    onViewChange={setQueueView}
                     onSelectJob={setActiveJobId}
                     activeJobId={activeJobId}
                 />
@@ -109,26 +76,18 @@ export function TasksCenter() {
     );
 }
 
-/**
- * 作业队列：一个面板、两个视图。
- * 「待命」= 本地攒着、还可以增删改排的条目；「已提交」= 后端已接手、只能观察的作业。
- */
+/** 作业队列面板：展示当前会话提交的异步推理作业。 */
 function JobQueuePanel({
-    view,
-    onViewChange,
     onSelectJob,
     activeJobId,
 }: {
-    view: QueueView;
-    onViewChange: (view: QueueView) => void;
     onSelectJob: (jobId: string) => void;
     activeJobId?: string;
 }) {
-    const pending = useJobsStore((s) => s.pending);
     const submitted = useJobsStore((s) => s.submitted);
-    const clearPending = useJobsStore((s) => s.clearPending);
     const clearSubmitted = useJobsStore((s) => s.clearSubmitted);
     const queryClient = useQueryClient();
+    const { modal, message } = App.useApp();
 
     const stopWorker = useMutation({
         mutationFn: endpoints.stopWorker,
@@ -143,253 +102,136 @@ function JobQueuePanel({
     return (
         <div className="tasks-panel tasks-panel--queue">
             <div className="tasks-panel__header tasks-panel__header--split">
-                <div className="task-queue__toolbar">
-                    <h2>作业队列</h2>
-                    <Segmented<QueueView>
-                        size="small"
-                        value={view}
-                        onChange={onViewChange}
-                        options={[
-                            { label: `待命 ${pending.length}`, value: "pending" },
-                            { label: `已提交 ${submitted.length}`, value: "submitted" },
-                        ]}
-                    />
-                </div>
-                {view === "pending" ? (
+                <h2>作业队列</h2>
+                <div className="task-queue__ops">
                     <Popconfirm
-                        title="清空待命队列"
-                        description={`将移除全部 ${pending.length} 条待命条目，此操作不可撤销。`}
+                        title="清空作业记录"
+                        description={`将清空本地记录的 ${submitted.length} 条已提交条目，此操作不可撤销。`}
                         okText="清空"
                         okButtonProps={{ danger: true }}
                         cancelText="取消"
-                        onConfirm={clearPending}
-                        disabled={!pending.length}
+                        onConfirm={clearSubmitted}
+                        disabled={!submitted.length}
                     >
-                        <Button size="small" danger disabled={!pending.length}>
-                            清空待命
-                        </Button>
-                    </Popconfirm>
-                ) : (
-                    <div className="task-queue__ops">
-                        <Button size="small" type="text" disabled={!submitted.length} onClick={clearSubmitted}>
+                        <Button
+                            size="small"
+                            icon={<ClearOutlined />}
+                            disabled={!submitted.length}
+                            className="task-pill-btn task-pill-btn--clear"
+                        >
                             清空记录
                         </Button>
-                        <Button
-                            danger
-                            size="small"
-                            icon={<PoweroffOutlined />}
-                            loading={stopWorker.isPending}
-                            onClick={() => {
-                                Modal.confirm({
-                                    title: "停止推理 Worker 并释放模型内存",
-                                    content:
-                                        "将取消全部排队/运行中的推理任务，并停止本机 worker。后续推理前需重新启动 worker。",
-                                    okText: "停止并释放内存",
-                                    okButtonProps: { danger: true },
-                                    cancelText: "取消",
-                                    onOk: () => stopWorker.mutate(),
-                                });
-                            }}
-                        >
-                            释放 Worker
-                        </Button>
-                    </div>
-                )}
+                    </Popconfirm>
+                    <Button
+                        danger
+                        size="small"
+                        icon={<PoweroffOutlined />}
+                        loading={stopWorker.isPending}
+                        className="task-pill-btn task-pill-btn--worker"
+                        onClick={() => {
+                            modal.confirm({
+                                title: "停止推理 Worker 并释放模型内存",
+                                content: "取消全部排队/运行中的推理任务，停止本机 worker。",
+                                okText: "确认",
+                                okButtonProps: { danger: true },
+                                cancelText: "取消",
+                                onOk: () => stopWorker.mutate(),
+                            });
+                        }}
+                    >
+                        释放 Worker
+                    </Button>
+                </div>
             </div>
             <div className="task-scroll-window task-scroll-window--queue">
-                {view === "pending" ? (
-                    <PendingQueueTable />
-                ) : (
-                    <SubmittedJobsTable onSelectJob={onSelectJob} />
-                )}
+                <SubmittedJobsTable onSelectJob={onSelectJob} activeJobId={activeJobId} />
             </div>
         </div>
     );
 }
 
-function PendingQueueTable() {
-    const pending = useJobsStore((s) => s.pending);
-    const removePending = useJobsStore((s) => s.removePending);
-    const undoRemove = useJobsStore((s) => s.undoRemove);
-    const movePending = useJobsStore((s) => s.movePending);
-    const editPending = useJobsStore((s) => s.editPending);
-
-    // 单条删除不拦截，改用可撤销提示；只有不可逆的批量操作才值得弹窗。
-    function handleRemove(task: PendingTask) {
-        removePending(task.id);
-        const key = `undo-${task.id}`;
-        message.open({
-            key,
-            type: "success",
-            duration: 5,
-            content: (
-                <span className="task-queue__undo">
-                    {`已移除「${task.displayName}」`}
-                    <Button
-                        type="link"
-                        size="small"
-                        onClick={() => {
-                            undoRemove();
-                            message.destroy(key);
-                        }}
-                    >
-                        撤销
-                    </Button>
-                </span>
-            ),
-        });
-    }
-
-    const columns: TableProps<PendingTask>["columns"] = [
-        {
-            title: "#",
-            key: "index",
-            width: 40,
-            render: (_: unknown, __: PendingTask, index: number) => (
-                <span className="mono">{index + 1}</span>
-            ),
-        },
-        {
-            title: "输入影像名",
-            dataIndex: "displayName",
-            key: "displayName",
-            ellipsis: true,
-            render: (value: string, row) => (
-                <Tooltip title={row.fullPath} placement="topLeft">
-                    <span>
-                        {value}
-                        {row.fromUpload ? <Tag className="task-queue__tag">上传</Tag> : null}
-                    </span>
-                </Tooltip>
-            ),
-        },
-        {
-            title: "地块 ID",
-            dataIndex: "tractId",
-            key: "tractId",
-            ellipsis: true,
-            render: (value: string | undefined, row) =>
-                value ? value : <span className="task-queue__fallback">{stem(row.displayName)}</span>,
-        },
-        {
-            title: "时相",
-            dataIndex: "phaseId",
-            key: "phaseId",
-            width: 96,
-            render: (value: string | undefined) =>
-                value ? (
-                    <span className="mono">{value}</span>
-                ) : (
-                    <span className="task-queue__fallback">读元数据</span>
-                ),
-        },
-        {
-            title: "参数",
-            key: "params",
-            render: (_: unknown, row: PendingTask) => (
-                <Tooltip title={paramsDetail(row)} placement="topLeft">
-                    <span className="task-queue__params mono">{paramsSummary(row)}</span>
-                </Tooltip>
-            ),
-        },
-        {
-            title: "操作",
-            key: "ops",
-            width: 132,
-            render: (_: unknown, row: PendingTask, index: number) => (
-                <div className="task-queue__ops">
-                    <Tooltip title="上移">
-                        <Button
-                            type="text"
-                            size="small"
-                            icon={<ArrowUpOutlined />}
-                            disabled={index === 0}
-                            onClick={() => movePending(row.id, -1)}
-                        />
-                    </Tooltip>
-                    <Tooltip title="下移">
-                        <Button
-                            type="text"
-                            size="small"
-                            icon={<ArrowDownOutlined />}
-                            disabled={index === pending.length - 1}
-                            onClick={() => movePending(row.id, 1)}
-                        />
-                    </Tooltip>
-                    <Tooltip title={row.fromUpload ? "影像有误，无法编辑" : "编辑"}>
-                        <Button
-                            type="text"
-                            size="small"
-                            icon={<EditOutlined />}
-                            disabled={row.fromUpload}
-                            onClick={() => editPending(row.id)}
-                        />
-                    </Tooltip>
-                    <Tooltip title="移除">
-                        <Button
-                            type="text"
-                            size="small"
-                            danger
-                            icon={<CloseOutlined />}
-                            onClick={() => handleRemove(row)}
-                        />
-                    </Tooltip>
-                </div>
-            ),
-        },
-    ];
-
-    return (
-        <Table<PendingTask>
-            rowKey="id"
-            size="small"
-            columns={columns}
-            dataSource={pending}
-            pagination={false}
-            locale={PENDING_LOCALE}
-        />
-    );
-}
-
-function SubmittedJobsTable({ onSelectJob }: { onSelectJob: (jobId: string) => void }) {
+function SubmittedJobsTable({
+    onSelectJob,
+    activeJobId,
+}: {
+    onSelectJob: (jobId: string) => void;
+    activeJobId?: string;
+}) {
     const submitted = useJobsStore((s) => s.submitted);
 
     const columns: TableProps<SubmittedJob>["columns"] = [
         {
-            title: "输入",
-            dataIndex: "filename",
-            key: "filename",
-            ellipsis: true,
-            render: (v: string, r) => (
-                <button className="task-link" type="button" onClick={() => onSelectJob(r.jobId)}>
-                    {v}
+            title: "运行 ID",
+            dataIndex: "jobId",
+            key: "jobId",
+            width: 100,
+            render: (v: string) => (
+                <button
+                    className={`task-link mono ${v === activeJobId ? "is-selected" : ""}`}
+                    type="button"
+                    onClick={() => onSelectJob(v)}
+                    title={v}
+                >
+                    {v.length > 8 ? v.slice(0, 8) : v}
                 </button>
             ),
         },
         {
-            title: "条目",
-            dataIndex: "itemCount",
-            key: "itemCount",
-            width: 72,
-            render: (v: number | undefined) => <span className="mono">{v ?? 1}</span>,
+            title: "输入影像",
+            dataIndex: "filename",
+            key: "filename",
+            ellipsis: true,
+            render: (v: string, r) => (
+                <Tooltip title={r.fullPath || v} placement="topLeft">
+                    <button className="task-link" type="button" onClick={() => onSelectJob(r.jobId)}>
+                        {v}
+                    </button>
+                </Tooltip>
+            ),
         },
         {
             title: "地块 ID",
             dataIndex: "tractId",
             key: "tractId",
             ellipsis: true,
-            render: (v: string | undefined) => v || "-",
+            width: 90,
+            render: (v: string | undefined, r) => v || stem(r.filename) || "-",
+        },
+        {
+            title: "时相 ID",
+            dataIndex: "phaseId",
+            key: "phaseId",
+            width: 130,
+            render: (v: string | undefined) => <span className="mono">{v || "-"}</span>,
+        },
+        {
+            title: "切片尺寸",
+            dataIndex: "tileSize",
+            key: "tileSize",
+            width: 86,
+            render: (v: number | null | undefined) => <span className="mono">{v ? `${v}` : "自适应"}</span>,
+        },
+        {
+            title: "重叠率",
+            dataIndex: "overlapPercent",
+            key: "overlapPercent",
+            width: 76,
+            render: (v: number | null | undefined) => (
+                <span className="mono">{typeof v === "number" ? `${v}%` : "自适应"}</span>
+            ),
         },
         {
             title: "状态",
             key: "status",
+            width: 160,
             render: (_: unknown, r: SubmittedJob) => <JobStatusCell jobId={r.jobId} />,
         },
         {
             title: "提交时间",
             dataIndex: "submittedAt",
             key: "submittedAt",
-            render: (v: number) => new Date(v).toLocaleString(),
+            width: 180,
+            render: (v: number) => <span className="mono">{formatFullDateTime(v)}</span>,
         },
     ];
 
@@ -401,31 +243,14 @@ function SubmittedJobsTable({ onSelectJob }: { onSelectJob: (jobId: string) => v
             dataSource={submitted}
             pagination={false}
             locale={TABLE_LOCALE}
-            expandable={{
-                expandedRowRender: (row) => <SubmittedJobItems jobId={row.jobId} />,
-                rowExpandable: (row) => (row.itemCount ?? 1) > 1,
-            }}
         />
     );
 }
 
-/** 展开行：一个批次内逐张影像的结果。 */
-function SubmittedJobItems({ jobId }: { jobId: string }) {
-    const { data } = useJob(jobId);
-    const items = batchItems(data);
-    if (!items.length) return <span className="task-queue__fallback">暂无明细，作业可能尚未开始。</span>;
-    return <BatchItemList items={items} />;
-}
-
 function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
-    const [searchParams, setSearchParams] = useSearchParams();
-    const phaseId = searchParams.get("phase_id")?.trim() || undefined;
-    const tiffId = searchParams.get("tiff_id")?.trim() || undefined;
-    const hasAssetFilter = Boolean(phaseId || tiffId);
-    const taskType = hasAssetFilter ? JOB_TASK_TYPES_WITH_REVIEW : JOB_TASK_TYPES;
     const { data = [] } = useQuery({
-        queryKey: queryKeys.jobs(taskType, phaseId, tiffId),
-        queryFn: () => endpoints.listJobs({ taskType, phaseId, tiffId, limit: 80 }),
+        queryKey: queryKeys.jobs(JOB_TASK_TYPES),
+        queryFn: () => endpoints.listJobs({ taskType: JOB_TASK_TYPES, limit: 80 }),
         refetchInterval: 5000,
     });
 
@@ -436,8 +261,8 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
             key: "run_id",
             ellipsis: true,
             render: (v: string) => (
-                <button className="task-link" type="button" onClick={() => onSelect(v)}>
-                    {v}
+                <button className="task-link mono" type="button" onClick={() => onSelect(v)}>
+                    {v.length > 10 ? v.slice(0, 10) : v}
                 </button>
             ),
         },
@@ -445,7 +270,7 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
             title: "类型",
             dataIndex: "task_type",
             key: "task_type",
-            width: 76,
+            width: 64,
             render: (value: string) =>
                 value === "review" ? "复核" : value === "infer" ? "推理" : value === "batch" ? "批量" : value,
         },
@@ -453,32 +278,23 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
             title: "状态",
             dataIndex: "status",
             key: "status",
+            width: 76,
             render: (v: JobState) => <StatusTag status={v} />,
         },
         {
             title: "时间",
             dataIndex: "started_at",
             key: "started_at",
-            render: (v: string | null | undefined) => (v ? new Date(v).toLocaleString() : "-"),
-        }
+            width: 116,
+            render: (v: string | null | undefined) => <span className="mono">{formatShortDateTime(v)}</span>,
+        },
     ];
 
     return (
         <>
-            <div className="tasks-panel__header tasks-panel__header--split">
+            <div className="tasks-panel__header">
                 <h2>历史作业</h2>
-                {hasAssetFilter ? (
-                    <Button size="small" type="link" onClick={() => setSearchParams({})}>
-                        清除 TIFF 筛选
-                    </Button>
-                ) : null}
             </div>
-            {hasAssetFilter ? (
-                <div style={{ padding: "0 12px 8px" }}>
-                    <Tag color="blue">时相 {phaseId ?? "全部"}</Tag>
-                    <Tag color="blue">TIFF {tiffId ?? "全部"}</Tag>
-                </div>
-            ) : null}
             <div className="task-scroll-window task-scroll-window--history">
                 <Table<JobHistoryItem>
                     rowKey="run_id"
@@ -496,148 +312,184 @@ function HistoryJobs({ onSelect }: { onSelect: (jobId: string) => void }) {
 function RuntimeView({ jobId }: { jobId?: string }) {
     const { data } = useJob(jobId);
     const navigate = useNavigate();
+
+    return (
+        <>
+            <div className="tasks-panel__header tasks-panel__header--split">
+                <div className="task-runtime__title">
+                    <h2>运行详情</h2>
+                    <span className="mono">{jobId || "未选择"}</span>
+                    {data?.status ? <StatusTag status={data.status} /> : null}
+                </div>
+                {jobId && data?.status === "succeeded" ? (
+                    <Button
+                        size="small"
+                        type="primary"
+                        onClick={() => navigate(`/review?run_id=${encodeURIComponent(jobId)}`)}
+                    >
+                        去复核
+                    </Button>
+                ) : null}
+            </div>
+
+            <div className="task-runtime__grid">
+                <div className="task-runtime__primary">
+                    <RuntimeMetrics status={data} jobId={jobId} />
+                    <RuntimeLogs jobId={jobId} status={data?.status} />
+                    {jobId && data?.status === "succeeded" ? (
+                        <div className="task-result-actions" style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+                            <Button
+                                type="primary"
+                                icon={<FolderOpenOutlined />}
+                                onClick={() => navigate(`/ledger?run_id=${encodeURIComponent(jobId)}`)}
+                            >
+                                查看推理成果
+                            </Button>
+                        </div>
+                    ) : null}
+                </div>
+            </div>
+        </>
+    );
+}
+
+function RuntimeLogs({ jobId, status }: { jobId?: string; status?: JobState }) {
     const [cursor, setCursor] = useState(0);
     const [lines, setLines] = useState<string[]>([]);
+    const isActive = status === "running" || status === "queued";
 
+    // 切换作业时重置日志缓冲区。
     useEffect(() => {
         setCursor(0);
         setLines([]);
     }, [jobId]);
 
+    const { data } = useQuery({
+        queryKey: queryKeys.jobLogs(jobId || "", cursor),
+        queryFn: () => endpoints.getJobLogs(jobId!, cursor),
+        enabled: Boolean(jobId),
+        refetchInterval: isActive ? 1000 : false,
+    });
+
     useEffect(() => {
-        const activeId = jobId ?? "";
-        if (!activeId) return undefined;
-        let cancelled = false;
-
-        async function pull() {
-            try {
-                const res = await endpoints.getJobLogs(activeId, cursor);
-                if (cancelled) return;
-                if (res.lines.length) setLines((old) => [...old, ...res.lines].slice(-800));
-                setCursor(res.cursor);
-            } catch {
-                /* 日志可用性不影响状态轮询。 */
-            }
+        if (!data) return;
+        if (data.lines.length) {
+            setLines((prev) => [...prev, ...data.lines]);
         }
-
-        const terminal =
-            data?.status === "succeeded" || data?.status === "failed" || data?.status === "canceled";
-        void pull();
-        const timer = terminal
-            ? undefined
-            : window.setInterval(() => {
-                if (!document.hidden) {
-                    void pull();
-                }
-            }, 1500);
-        return () => {
-            cancelled = true;
-            if (timer) window.clearInterval(timer);
-        };
-    }, [cursor, data?.status, jobId]);
-
-    if (!jobId) {
-        return (
-            <div className="runtime-empty">
-                <Empty description="暂无活动作业" />
-            </div>
-        );
-    }
+        setCursor(data.cursor);
+    }, [data]);
 
     return (
-        <>
-            <div className="tasks-panel__header tasks-panel__header--split">
-                <div>
-                    <h2>运行追踪</h2>
-                    <span className="mono tasks-job-id">{jobId}</span>
-                </div>
-                <StatusTag status={data?.status ?? "queued"} />
-            </div>
-
-            <MetricsBoard status={data} />
-            <LogConsole lines={lines} />
-            {data?.status === "succeeded" ? (
-                <div className="task-result-actions">
-                    <Button
-                        type="primary"
-                        icon={<ExportOutlined />}
-                        onClick={() => navigate("/ledger?run_id=" + encodeURIComponent(jobId))}
-                    >
-                        成果产出
-                    </Button>
-                </div>
-            ) : null}
-            <BatchItems status={data} />
-        </>
-    );
-}
-
-function MetricsBoard({ status }: { status?: JobStatus }) {
-    const metrics = status?.metrics ?? {};
-    const cards = [
-        ["瓦片", metricText(metrics.tiles_processed, metrics.tiles_total)],
-        ["原始框", metricText(metrics.raw_count)],
-        ["融合后", metricText(metrics.fused_count ?? metrics.total_trees)],
-        ["耗时", durationText(status?.duration_s ?? metrics.duration_s)],
-        ["成功", metricText(metrics.succeeded, metrics.total)],
-        ["失败", metricText(metrics.failed)],
-        ["已取消", metricText(metrics.canceled)],
-    ];
-
-    return (
-        <div className="task-metrics">
-            {cards.map(([label, value]) => (
-                <div className="task-metric" key={label}>
-                    <span>{label}</span>
-                    <strong className="mono">{value}</strong>
-                </div>
-            ))}
-        </div>
-    );
-}
-
-function LogConsole({ lines }: { lines: string[] }) {
-    return (
-        <div className="task-log">
+        <div className="task-log" role="region" aria-label="作业日志输出" tabIndex={0}>
             {lines.length ? (
                 lines.map((line, idx) => (
-                    <div className="task-log__line" key={`${idx}-${line}`}>
+                    <div className="task-log__line" key={idx}>
                         {line}
                     </div>
                 ))
             ) : (
-                <div className="task-log__empty">等待日志输出</div>
+                <div className="task-log__empty">{jobId ? "等待日志输出..." : "选择作业以查看日志"}</div>
             )}
         </div>
     );
 }
 
-function BatchItems({ status }: { status?: JobStatus }) {
-    const items = useMemo(() => batchItems(status), [status]);
-    if (!items.length) return null;
-    return (
-        <div className="task-batch">
-            <div className="task-batch__title">批量明细</div>
-            <BatchItemList items={items} />
-        </div>
-    );
-}
+/** 运行详情指标区：两行四列栅格排布。 */
+function RuntimeMetrics({ status, jobId }: { status?: JobStatus; jobId?: string }) {
+    const submitted = useJobsStore((s) => s.submitted);
+    const currentJob = submitted.find((j) => j.jobId === jobId);
+    const m = status?.metrics || {};
 
-function BatchItemList({ items }: { items: BatchItemRow[] }) {
+    // 像素尺寸
+    const pixelSize =
+        m.image_width && m.image_height
+            ? `${m.image_width}×${m.image_height}`
+            : "-";
+
+    // 切片尺寸：原始大小 → 推理时统一缩放大小 (如 2048 → 640)
+    const rawTile =
+        typeof m.tile_size === "number"
+            ? m.tile_size
+            : currentJob?.tileSize ?? null;
+    const modelInput =
+        typeof m.model_input === "number"
+            ? m.model_input
+            : null;
+
+    const tileSize =
+        rawTile && modelInput
+            ? `${rawTile} → ${modelInput}`
+            : rawTile
+                ? `${rawTile}`
+                : "自适应";
+
+    // 重叠率
+    const overlapRate =
+        typeof m.overlap_rate === "number"
+            ? `${Math.round(m.overlap_rate * 100)}%`
+            : typeof currentJob?.overlapPercent === "number"
+                ? `${currentJob.overlapPercent}%`
+                : "自适应";
+
+    // 切片数：已处理 / 已跳过 / 总数
+    const processed = typeof m.tiles_processed === "number" ? m.tiles_processed : null;
+    const total = typeof m.tiles_total === "number" ? m.tiles_total : null;
+    const skipped =
+        typeof m.tiles_skipped_empty === "number"
+            ? m.tiles_skipped_empty
+            : processed !== null && total !== null
+                ? Math.max(0, total - processed)
+                : null;
+
+    const tilesCount =
+        processed !== null && total !== null
+            ? `${processed}/${skipped ?? 0}/${total}`
+            : "-";
+
+    // 原检测数
+    const rawCount = metricText(m.raw_count);
+
+    // 去重后
+    const fusedCount = metricText(m.fused_count ?? m.total_trees);
+
+    // 执行耗时
+    const duration = durationText(status?.duration_s ?? m.duration_s);
+
     return (
-        <div className="task-batch__rows">
-            {items.map((item, idx) => {
-                const meta = ITEM_STATUS[item.status ?? ""] ?? { color: "default", text: item.status ?? "-" };
-                return (
-                    <div className="task-batch__row" key={item.run_id ?? `${idx}-${item.path ?? ""}`}>
-                        <Tooltip title={item.error || item.path} placement="topLeft">
-                            <span>{item.tract_key ?? item.path ?? "-"}</span>
-                        </Tooltip>
-                        <Tag color={meta.color}>{meta.text}</Tag>
-                        <strong className="mono">{item.tree_count ?? 0}</strong>
-                    </div>
-                );
-            })}
+        <div className="task-metrics">
+            {/* 第一行：影像与切片规格 */}
+            <div className="task-metric">
+                <span>像素尺寸(px)</span>
+                <strong className="mono">{pixelSize}</strong>
+            </div>
+            <div className="task-metric">
+                <Tooltip title="原始大小 → 推理时统一缩放大小" placement="top">
+                    <span>切片尺寸(px)</span>
+                </Tooltip>
+                <strong className="mono">{tileSize}</strong>
+            </div>
+            <div className="task-metric">
+                <span>重叠率</span>
+                <strong className="mono">{overlapRate}</strong>
+            </div>
+            <div className="task-metric">
+                <span>切片数 (已推理 / 已跳过 / 总数)</span>
+                <strong className="mono">{tilesCount}</strong>
+            </div>
+
+            {/* 第二行：单木检测与执行结果 */}
+            <div className="task-metric">
+                <span>原检测株数</span>
+                <strong className="mono">{rawCount}</strong>
+            </div>
+            <div className="task-metric">
+                <span>去重后株数</span>
+                <strong className="mono">{fusedCount}</strong>
+            </div>
+            <div className="task-metric">
+                <span>执行耗时</span>
+                <strong className="mono">{duration}</strong>
+            </div>
         </div>
     );
 }
@@ -654,41 +506,43 @@ function StatusTag({ status }: { status: JobState }) {
     return <Tag color={color}>{STATUS_TEXT[status]}</Tag>;
 }
 
-function batchItems(status?: JobStatus): BatchItemRow[] {
-    const raw = status?.metrics?.items;
-    return Array.isArray(raw) ? (raw as BatchItemRow[]) : [];
-}
-
-/** 待命项参数摘要：切片 / 覆盖率 / 导出格式（+ 辅助数据标记）。 */
-function paramsSummary(task: PendingTask) {
-    const parts = [
-        task.tileSize ? String(task.tileSize) : "自适应",
-        typeof task.overlapRate === "number" ? `${Math.round(task.overlapRate * 100)}%` : "自适应",
-        task.exportFmt ?? "shp",
-    ];
-    const aux = [task.dsm ? "DSM" : "", task.dem ? "DEM" : "", task.las ? "LAS" : ""].filter(Boolean);
-    return aux.length ? `${parts.join(" / ")} +${aux.join(",")}` : parts.join(" / ");
-}
-
-function paramsDetail(task: PendingTask) {
-    const labels = ["切片尺寸", "覆盖率", "导出格式"];
-    if (task.dsm) labels.push("DSM");
-    if (task.dem) labels.push("DEM");
-    if (task.las) labels.push("LAS");
-    return labels.join(" / ");
-}
-
 function stem(name: string) {
     const idx = name.lastIndexOf(".");
     return idx > 0 ? name.slice(0, idx) : name;
 }
 
 function metricText(value: unknown, total?: unknown) {
-    const primary = typeof value === "number" ? value : "-";
-    if (typeof total === "number") return `${primary}/${total}`;
-    return String(primary);
+    if (typeof value === "number") {
+        if (typeof total === "number") return `${value}/${total}`;
+        return value.toLocaleString();
+    }
+    return "-";
 }
 
 function durationText(value: unknown) {
     return typeof value === "number" ? `${value.toFixed(1)}s` : "-";
+}
+
+function formatFullDateTime(val: number | string | null | undefined): string {
+    if (!val) return "-";
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return "-";
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${yyyy}/${mm}/${dd} ${hh}:${min}:${ss}`;
+}
+
+function formatShortDateTime(val: number | string | null | undefined): string {
+    if (!val) return "-";
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return "-";
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    return `${mm}/${dd} ${hh}:${min}`;
 }

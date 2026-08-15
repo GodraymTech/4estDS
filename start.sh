@@ -139,7 +139,7 @@ start_worker() {
   fi
 
   echo "正在启动推理 Worker..."
-  nohup env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 REDIS_URL="$REDIS_URL" forestds_HOME="$forestds_HOME" .venv/bin/dramatiq forestds.worker.actors --processes 1 --threads 1 </dev/null >"$LOG_DIR/worker.log" 2>&1 &
+  nohup env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 REDIS_URL="$REDIS_URL" forestds_HOME="$forestds_HOME" .venv/bin/dramatiq forestds.worker.actors --queues gpu review_gpu default --processes 1 --threads 1 </dev/null >"$LOG_DIR/worker.log" 2>&1 &
   local pid=$!
   echo $pid >"$WORKER_PID_FILE"
   disown $pid 2>/dev/null || true

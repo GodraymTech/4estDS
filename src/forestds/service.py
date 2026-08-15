@@ -1,29 +1,21 @@
-"""应用服务层 (Application Service)。
+"""业务外观层 (Facade / Application Service)。
 
-职责(单一): 把一个 ``InferenceRequest`` 编排成一次完整、可发布的推理作业，
-拥有单一的 run 生命周期所有权(start_run_log -> run_infer_pipeline -> promote_run)。
-
-为什么存在(DRY / 防止重复)：
-- CLI、Worker、未来 SDK 都需要“开 run_log -> 跑管线 -> 失败收尾 / 成功发布”这套
-  生命周期。把它收敛到唯一函数，避免多处拷贝。
-- 不依赖 typer / FastAPI / Dramatiq，保持内核与交付方式解耦。
-异常策略：捕获管线异常 -> 写 run_log 终态 failed -> 包装为 ``InferenceError`` 上抛，
-保留原始异常作为 __cause__，便于上层映射退出码 / HTTP 状态码。
-注意: 沿用引擎约定——不对大型推理帧做 repr(log.opt(exception=False))，避免 C 层段错误。
+职责(单一): 编排核心管线、状态写回与错误映射，为 Worker / API / CLI 提供开箱即用的业务方法。
 """
 from __future__ import annotations
 
-from typing import Optional
+import time
+from typing import Any, Callable, Optional
 
 from loguru import logger as log
 
-from .contracts import BatchInferenceRequest, InferenceRequest, InferenceResult, JobStatus
+from .contracts import InferenceRequest
 
 
-class InferenceError(RuntimeError):
-    """推理作业失败的领域异常，携带 run_id 便于追溯。"""
+class InferenceError(Exception):
+    """推理执行异常，携带 run_id 与根因。"""
 
-    def __init__(self, message: str, *, run_id: str, cause: BaseException | None = None):
+    def __init__(self, message: str, *, run_id: str | None = None, cause: Exception | None = None):
         super().__init__(message)
         self.run_id = run_id
         self.cause = cause
@@ -32,25 +24,13 @@ class InferenceError(RuntimeError):
 def run_inference_job(
     request: InferenceRequest,
     *,
-    settings=None,
+    settings: dict | None = None,
     run_id: Optional[str] = None,
-    detector=None,
-) -> InferenceResult:
-    """执行一次单图推理作业，返回强类型结果。
-
-    Args:
-        request: 推理请求 DTO。
-        settings: 已加载的 Settings；为 None 时自行 ensure_home + load_settings。
-        run_id: 显式指定 run_id；为 None 时自动生成(一作业 = 一 run)。
-        detector: 预加载的检测器(Worker 常驻复用)；为 None 时管线内部自建。
-
-    Returns:
-        InferenceResult
-
-    Raises:
-        InferenceError: 管线任何未捕获异常，已写 run_log 终态 failed。
-    """
+    detector_factory: Optional[Callable[[str], Any]] = None,
+) -> dict:
+    """执行单个影像的完整推理管线，包含状态日志管理与指标写回。"""
     from . import paths
+    from .cancellation import JobCancelled, clear_cancel, unlink_cancel
     from .config import load_settings
     from .db import writer
     from .logging_setup import new_run_id
@@ -60,10 +40,10 @@ def run_inference_job(
         paths.ensure_home()
         settings = load_settings()
 
+    arch_val = request.arch or settings.get("detect.arch", "ultralytics")
     rid = run_id or new_run_id()
     paths.set_run_context(rid, "infer")
     db_url = settings.get("url", None)
-    arch_val = request.arch or settings.get("detect.arch", "ultralytics")
 
     writer.start_run_log(
         rid,
@@ -74,144 +54,72 @@ def run_inference_job(
         url=db_url,
     )
 
+    detector = detector_factory(arch_val) if detector_factory else None
+    t0 = time.time()
+
     try:
-        metrics = run_infer_pipeline(
+        res = run_infer_pipeline(
             request.image_path,
             run_id=rid,
             settings=settings,
             arch=arch_val,
             detector=detector,
-            **request.to_pipeline_kwargs(),
+            phase_id=request.phase_id,
+            tract_id=request.tract_id,
+            tile_size=request.tile_size,
+            overlap_rate=request.overlap_rate,
+            chm=request.chm,
+            dsm=request.dsm,
+            dem=request.dem,
+            las=request.las,
+            las_grid_size=request.las_grid_size,
+            dem_default=request.dem_default,
+            draw_box=request.draw_box,
+            export_fmt=request.export_fmt,
         )
-    except Exception as exc:  # noqa: BLE001 - 需要兵异常都落 run_log 终态
-        writer.finish_run_log(rid, "failed", error=str(exc), url=db_url)
-        # 沿用引擎约定: 不让日志框架 repr 推理帧中的大型 numpy 数组(C 层段错误)。
+        if request.publish:
+            try:
+                writer.promote_run(rid, url=db_url)
+            except Exception as promote_err:
+                log.warning("发布失败，结果已入库但未激活: run_id={} {}", rid, promote_err)
+        return res
+    except JobCancelled as exc:
+        writer.finish_run_log(rid, "failed", error=str(exc), duration_s=time.time() - t0, url=db_url)
+        log.warning("推理作业被用户终止: run_id={} {}", rid, exc)
+        raise InferenceError(str(exc), run_id=rid, cause=exc) from exc
+    except Exception as exc:
+        writer.finish_run_log(rid, "failed", error=str(exc), duration_s=time.time() - t0, url=db_url)
         log.opt(exception=False).error("推理作业失败: run_id={} {} — {}", rid, type(exc).__name__, exc)
         raise InferenceError(str(exc), run_id=rid, cause=exc) from exc
-
-    # 成功后可选发布(规范单木 + 回填 active_run_id)。发布失败不影响已入库的观测。
-    published = False
-    if request.publish:
-        try:
-            writer.promote_run(rid, url=db_url)
-            published = True
-        except Exception as exc:  # noqa: BLE001
-            log.warning("发布(promote_run)失败，结果已入库但未激活: run_id={} {}", rid, exc)
-
-    return InferenceResult.from_metrics(metrics, status=JobStatus.succeeded, published=published)
-
-
-def _to_batch_specs(request: BatchInferenceRequest, default_arch: str) -> list:
-    """把契约层的待命项映射为任务层的 ``BatchItemSpec``。"""
-    from .tasks.batch import BatchItemSpec
-
-    specs = []
-    for item in request.items:
-        specs.append(
-            BatchItemSpec(
-                image_path=item.image_path,
-                arch=item.arch or default_arch,
-                publish=item.publish,
-                **item.to_pipeline_kwargs(),
-            )
-        )
-    return specs
+    finally:
+        clear_cancel(rid)
+        unlink_cancel(rid)
 
 
 def run_batch_inference_job(
-    request: BatchInferenceRequest,
+    request,
     *,
     settings=None,
     run_id: Optional[str] = None,
     detector_factory=None,
 ) -> dict:
-    """执行一次批量推理作业(一串各自携带参数的待命项)，用一个顶层 run_log 表示批次状态。
-
-    顶层终态语义：只要有任何一条失败或被取消，批次即记为 failed（但已完成的单图
-    仍保留各自的 succeeded 子 run与成果），使前端不会把部分失败误读为全部成功。
-    """
-    from . import paths
-    from .cancellation import clear_cancel
-    from .config import load_settings
-    from .db import writer
-    from .logging_setup import new_run_id
-    from .tasks.batch import run_batch_pipeline
-
-    if settings is None:
-        paths.ensure_home()
-        settings = load_settings()
-
-    rid = run_id or new_run_id()
-    paths.set_run_context(rid, "batch")
-    db_url = settings.get("url", None)
-    default_arch = settings.get("detect.arch", "ultralytics")
-
-    specs = _to_batch_specs(request, default_arch)
-    archs = sorted({spec.arch for spec in specs if spec.arch})
-    arch_val = archs[0] if len(archs) == 1 else ",".join(archs)
-    input_label = specs[0].image_path if len(specs) == 1 else f"{len(specs)} 张影像"
-
-    writer.start_run_log(
-        rid,
-        "batch",
-        model_arch=arch_val,
-        input_path=input_label,
-        params=request.model_dump(mode="json"),
-        url=db_url,
-    )
-
-    try:
-        summary = run_batch_pipeline(
-            specs, settings=settings, cancel_run_id=rid, detector_factory=detector_factory
+    """兼容别名：提取单项转发给 run_inference_job。"""
+    items = getattr(request, "items", None)
+    if isinstance(items, list) and items:
+        return run_inference_job(
+            items[0],
+            settings=settings,
+            run_id=run_id,
+            detector_factory=detector_factory,
         )
-    except Exception as exc:  # noqa: BLE001 - 顶层批量任务必须落 failed
-        writer.finish_run_log(rid, "failed", error=str(exc), url=db_url)
-        log.opt(exception=False).error("批量推理作业失败: run_id={} {} — {}", rid, type(exc).__name__, exc)
-        raise InferenceError(str(exc), run_id=rid, cause=exc) from exc
-    finally:
-        # 无论成败都清除取消标志，避免残留标志影响后续作业。
-        clear_cancel(rid)
+    if isinstance(request, InferenceRequest):
+        return run_inference_job(
+            request,
+            settings=settings,
+            run_id=run_id,
+            detector_factory=detector_factory,
+        )
+    raise ValueError("无法解析推理请求")
 
-    metrics = {
-        "job_type": "batch",
-        "total": summary.total,
-        "succeeded": summary.succeeded,
-        "failed": summary.failed,
-        "canceled": summary.canceled,
-        "cancelled": summary.cancelled,
-        "total_trees": summary.total_trees,
-        "duration_s": summary.elapsed_s,
-        "items": [
-            {
-                "path": item.path,
-                "tract_key": item.tract_key,
-                "status": item.status,
-                "run_id": item.run_id,
-                "tract_id": item.tract_id,
-                "tree_count": item.tree_count,
-                "raw_count": item.raw_count,
-                "fused_count": item.fused_count,
-                "report_path": item.report_path,
-                "export_path": item.export_path,
-                "error": item.error,
-            }
-            for item in summary.items
-        ],
-    }
 
-    if summary.failed or summary.canceled:
-        error_msg = (
-            "用户终止作业：成功 {} 条，失败 {} 条，已取消 {} 条".format(
-                summary.succeeded, summary.failed, summary.canceled
-            )
-            if summary.cancelled
-            else "批量推理部分失败：成功 {} 条，失败 {} 条".format(summary.succeeded, summary.failed)
-        )
-        writer.finish_run_log(
-            rid, "failed", metrics=metrics, duration_s=summary.elapsed_s, error=error_msg, url=db_url
-        )
-    else:
-        writer.finish_run_log(
-            rid, "succeeded", metrics=metrics, duration_s=summary.elapsed_s, url=db_url
-        )
-    return metrics
+__all__ = ["run_inference_job", "run_batch_inference_job"]

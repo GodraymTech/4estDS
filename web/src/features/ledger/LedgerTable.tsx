@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
     Alert,
     AutoComplete,
@@ -60,6 +60,8 @@ function formatSeconds(secs: number | null): string {
 
 export function LedgerTable() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const targetRunId = searchParams.get("run_id");
     const queryClient = useQueryClient();
     const [form] = Form.useForm();
     const [q, setQ] = useState("");
@@ -350,6 +352,16 @@ export function LedgerTable() {
         }
         return filtered;
     }, [assets.data, q, sortList]);
+
+    // 当从任务中心等页面携带 ?run_id=xxx 跳转过来时，自动定位并展开对应条目左侧的加号
+    useEffect(() => {
+        if (!targetRunId || !rows.length) return;
+        const matched = rows.find((r) => r.run_id === targetRunId);
+        if (matched) {
+            const key = rowKey(matched);
+            setExpanded((prev) => (prev.includes(key) ? prev : [...prev, key]));
+        }
+    }, [targetRunId, rows]);
 
     const inputPath = Form.useWatch("input_path", form);
     const cityValue = Form.useWatch("city", form);

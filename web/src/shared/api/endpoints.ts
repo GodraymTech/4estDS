@@ -260,7 +260,7 @@ export const endpoints = {
     onProgress?: (percent: number) => void,
   ): Promise<UploadResponse> => apiUpload("/uploads", file, onProgress),
 
-  // 提交异步推理作业(1~N 条待命项串行执行) -> 202 + job_id。
+  // 提交异步推理作业(1~N 张影像串行执行) -> 202 + job_id。
   submitBatch: (body: BatchInferSubmit): Promise<JobRef> =>
     apiPostJson("/jobs/batch", body),
 

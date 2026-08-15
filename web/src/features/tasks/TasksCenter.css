@@ -1,13 +1,17 @@
 .tasks-console {
     display: grid;
     grid-template-columns: minmax(320px, 392px) minmax(0, 1fr);
-    grid-template-areas:
-        "form main"
-        "history main";
     gap: 16px;
     align-items: start;
     width: 100%;
     max-width: 1480px;
+}
+
+.tasks-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
 }
 
 .tasks-panel {
@@ -19,7 +23,7 @@
 }
 
 .tasks-panel--form {
-    grid-area: form;
+    min-width: 0;
 }
 
 .tasks-panel--runtime {
@@ -27,11 +31,10 @@
 }
 
 .tasks-panel--history {
-    grid-area: history;
+    min-width: 0;
 }
 
 .tasks-main {
-    grid-area: main;
     display: flex;
     min-width: 0;
     flex-direction: column;
@@ -52,9 +55,135 @@
 
 .tasks-panel__header--split {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
+}
+
+.task-queue__toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* --------------------------------------------------------------------------
+   项目统一胶囊操作按钮 (Mini 胶囊操作按钮 - 完美居中)
+   -------------------------------------------------------------------------- */
+.task-queue__ops {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.task-pill-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    height: 22px !important;
+    padding: 0 8px !important;
+    border-radius: 9999px !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    cursor: pointer !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    user-select: none !important;
+    outline: none !important;
+    box-sizing: border-box !important;
+}
+
+/* 消除 AntD 默认的 margin 干扰，保证绝对对称居中 */
+.task-pill-btn>.anticon+span,
+.task-pill-btn>span+.anticon {
+    margin-inline-start: 0 !important;
+    margin-inline-end: 0 !important;
+}
+
+.task-pill-btn>span {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+}
+
+.task-pill-btn .anticon {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 11px !important;
+    line-height: 1 !important;
+    margin: 0 !important;
+}
+
+/* 1. 清空记录胶囊按钮 (次要/柔和警示) */
+.task-pill-btn--clear {
+    background: #f1f5f9 !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #475569 !important;
+}
+
+.task-pill-btn--clear:not(:disabled):hover {
+    background: #fee2e2 !important;
+    border-color: #fca5a5 !important;
+    color: #dc2626 !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(220, 38, 38, 0.18) !important;
+}
+
+.task-pill-btn--clear:disabled {
+    opacity: 0.45 !important;
+    cursor: not-allowed !important;
+}
+
+:root[data-theme="dark"] .task-pill-btn--clear,
+[data-theme="dark"] .task-pill-btn--clear {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    color: #94a3b8 !important;
+}
+
+:root[data-theme="dark"] .task-pill-btn--clear:not(:disabled):hover,
+[data-theme="dark"] .task-pill-btn--clear:not(:disabled):hover {
+    background: rgba(239, 68, 68, 0.18) !important;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+    color: #f87171 !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(239, 68, 68, 0.25) !important;
+}
+
+
+
+/* 3. 释放 Worker 胶囊按钮 (主警示赤红胶囊) */
+.task-pill-btn--worker {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+    border: none !important;
+    color: #ffffff !important;
+    box-shadow: 0 1.5px 5px rgba(220, 38, 38, 0.28) !important;
+}
+
+.task-pill-btn--worker:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2.5px 8px rgba(220, 38, 38, 0.4) !important;
+}
+
+.task-pill-btn--worker:not(:disabled):active {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(220, 38, 38, 0.28) !important;
+}
+
+:root[data-theme="dark"] .task-pill-btn--worker,
+[data-theme="dark"] .task-pill-btn--worker {
+    background: linear-gradient(135deg, #e26d4a 0%, #b8472a 100%) !important;
+    border: none !important;
+    color: #ffffff !important;
+    box-shadow: 0 1.5px 5px rgba(226, 109, 74, 0.3) !important;
+}
+
+:root[data-theme="dark"] .task-pill-btn--worker:not(:disabled):hover,
+[data-theme="dark"] .task-pill-btn--worker:not(:disabled):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2.5px 8px rgba(226, 109, 74, 0.45) !important;
 }
 
 .tasks-job-id {
@@ -177,6 +306,27 @@
 
 .task-scroll-window {
     overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--glass-scrollbar-thumb) transparent;
+}
+
+.task-scroll-window::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.task-scroll-window::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.task-scroll-window::-webkit-scrollbar-thumb {
+    background: var(--glass-scrollbar-thumb);
+    border-radius: 9999px;
+    transition: background 0.15s ease;
+}
+
+.task-scroll-window::-webkit-scrollbar-thumb:hover {
+    background: var(--glass-scrollbar-thumb-hover);
 }
 
 .task-scroll-window--history {
@@ -337,6 +487,8 @@
 .task-log {
     height: min(48vh, 460px);
     overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--glass-scrollbar-thumb) transparent;
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
     background: #071412;
@@ -345,6 +497,25 @@
     font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.65;
+}
+
+.task-log::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.task-log::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.task-log::-webkit-scrollbar-thumb {
+    background: var(--glass-scrollbar-thumb);
+    border-radius: 9999px;
+    transition: background 0.15s ease;
+}
+
+.task-log::-webkit-scrollbar-thumb:hover {
+    background: var(--glass-scrollbar-thumb-hover);
 }
 
 .task-log__line {

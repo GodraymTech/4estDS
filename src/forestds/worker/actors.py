@@ -1,7 +1,7 @@
 """Dramatiq actors: GPU 推理作业。
 
 设计要点：
-- batch_actor 是推理作业的**唯一** actor：一个作业 = 1~N 条各自携带参数的待命项，
+- batch_actor 是推理作业的**唯一** actor：一个作业 = 1~N 条各自携带参数的影像条目，
   单图推理即长度为 1 的批量。
 - 进程内常驻缓存 Detector(权重仅加载一次)，GPU 队列 concurrency=1
   (由 worker 启动参数 --processes 1 --threads 1 + queue_name 保证，见 deploy/)。
@@ -18,6 +18,7 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import cv2
 cv2.setNumThreads(0)
@@ -28,8 +29,8 @@ import dramatiq
 from loguru import logger as log
 
 from . import broker as _broker  # noqa: F401  确保 broker 先于 actor 装配
-from ..contracts import BatchInferenceRequest
-from ..service import InferenceError, run_batch_inference_job
+from ..contracts import InferenceRequest
+from ..service import InferenceError
 
 # GPU 专用队列名；worker 以 --processes 1 --threads 1 消费该队列以实现 concurrency=1。
 GPU_QUEUE = os.environ.get("forestds_GPU_QUEUE", "gpu")
@@ -40,12 +41,23 @@ _INFER_TIME_LIMIT_MS = int(os.environ.get("forestds_INFER_TIME_LIMIT_MS", str(24
 import gc
 import time
 
-_MODEL_TTL_SECONDS = int(os.environ.get("forestds_MODEL_TTL_SECONDS", "1800"))
+_MODEL_TTL_SECONDS = int(os.environ.get("forestds_MODEL_TTL_SECONDS", "300"))
 
-# 进程内缓存(模型常驻) —— 仅在 GPU concurrency=1 前提下安全。包含 last_used 时间戳做 30 分钟空闲卸载。
+# 进程内模型独占管理 —— 单 GPU concurrency=1 前提下，确保显存内始终至多驻留 1 个活跃模型。
 _settings: Any = None
 _detector_cache: dict[str, dict[str, Any]] = {}
 _review_adapter_cache: dict[str, dict[str, Any]] = {}
+
+
+def _cleanup_cuda_cache() -> None:
+    """清理 PyTorch CUDA 显存缓存池，将临时激活张量归还给显存驱动。"""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except (ImportError, Exception):
+        pass
 
 
 def _evict_idle_models(ttl_seconds: int = _MODEL_TTL_SECONDS) -> None:
@@ -57,7 +69,12 @@ def _evict_idle_models(ttl_seconds: int = _MODEL_TTL_SECONDS) -> None:
     ]
     for k in expired_detectors:
         log.info("空闲超时卸载检测器模型: arch={}", k)
-        _detector_cache.pop(k, None)
+        item = _detector_cache.pop(k, None)
+        if item and "model" in item:
+            det = item["model"]
+            if hasattr(det, "model"):
+                del det.model
+            del det
 
     expired_adapters = [
         k for k, item in _review_adapter_cache.items()
@@ -65,16 +82,45 @@ def _evict_idle_models(ttl_seconds: int = _MODEL_TTL_SECONDS) -> None:
     ]
     for k in expired_adapters:
         log.info("空闲超时卸载复核适配器模型: key={}", k)
-        _review_adapter_cache.pop(k, None)
+        item = _review_adapter_cache.pop(k, None)
+        if item and "model" in item:
+            adapter = item["model"]
+            if hasattr(adapter, "model"):
+                del adapter.model
+            del adapter
 
     if expired_detectors or expired_adapters:
         gc.collect()
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
+        _cleanup_cuda_cache()
+
+
+def _evict_other_models(target_key: str | None = None) -> None:
+    """确保 GPU 显存互斥独占：卸载除 target_key 之外的所有已缓存模型（包括检测器与复核适配器），并立即回收显存。"""
+    global _detector_cache, _review_adapter_cache
+    evicted = False
+    for k in list(_detector_cache.keys()):
+        if target_key != f"detect:{k}":
+            log.info("互斥卸载批处理检测器模型: arch={}", k)
+            item = _detector_cache.pop(k, None)
+            if item and "model" in item:
+                det = item["model"]
+                if hasattr(det, "model"):
+                    del det.model
+                del det
+            evicted = True
+    for k in list(_review_adapter_cache.keys()):
+        if target_key != f"review:{k}":
+            log.info("互斥卸载复核适配器模型: key={}", k)
+            item = _review_adapter_cache.pop(k, None)
+            if item and "model" in item:
+                adapter = item["model"]
+                if hasattr(adapter, "model"):
+                    del adapter.model
+                del adapter
+            evicted = True
+    if evicted:
+        gc.collect()
+        _cleanup_cuda_cache()
 
 
 def _get_settings():
@@ -90,8 +136,10 @@ def _get_settings():
 
 
 def _get_detector(arch: str, settings):
-    """进程内常驻检测器(权重仅加载一次)，参数与 tasks/batch 保持一致，支持空闲超时卸载。"""
+    """进程内常驻检测器(权重按需加载，跨任务互斥)，保证 GPU 独占。"""
     _evict_idle_models()
+    _evict_other_models(target_key=f"detect:{arch}")
+
     item = _detector_cache.get(arch)
     if item is None:
         from ..detect import get_detector
@@ -107,23 +155,27 @@ def _get_detector(arch: str, settings):
         )
         item = {"model": det, "last_used": time.time()}
         _detector_cache[arch] = item
-        log.info("GPU worker 预热检测器(常驻): arch={}", arch)
+        log.info("GPU worker 加载检测器(互斥独占): arch={}", arch)
     else:
         item["last_used"] = time.time()
     return item["model"]
 
 
 def _get_review_adapter(settings):
+    """进程内常驻复核适配器(权重按需加载，排除 tasks 批量推理模型共存)，保证 GPU 独占。"""
     _evict_idle_models()
     name = str(settings.get("review.adapter", "dinov"))
     variant = str(settings.get("review.dinov_variant" if name == "dinov" else "review.model_variant", ""))
     cache_key = f"{name}:{variant}"
+    _evict_other_models(target_key=f"review:{cache_key}")
+
     item = _review_adapter_cache.get(cache_key)
     if item is None:
         from ..review.inference_service import build_review_adapter
         adapter = build_review_adapter(settings)
         item = {"model": adapter, "last_used": time.time()}
         _review_adapter_cache[cache_key] = item
+        log.info("GPU worker 加载复核适配器(互斥独占): key={}", cache_key)
     else:
         item["last_used"] = time.time()
     return item["model"]
@@ -140,30 +192,40 @@ def _setup_actor_logging(settings, run_id: str, task_type: str) -> None:
 
 
 @dramatiq.actor(queue_name=GPU_QUEUE, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
-def batch_actor(run_id: str, request_dict: dict) -> None:
-    """推理作业(GPU 串行)。一个作业包含 1~N 条各自携带参数的待命项。
+def infer_actor(run_id: str, request_dict: dict) -> None:
+    """单图推理作业(GPU 串行执行)。
 
-    参数均为 JSON 可序列化类型。状态不在此返回，由 runs 表记录，API 轮询获取。
-    向管线注入进程内常驻的检测器工厂，使同一 arch 的权重在多个作业之间也只加载一次。
+    向管线注入进程内常驻的检测器工厂，使同一 arch 的权重在多次推理之间常驻显存。
     """
     settings = _get_settings()
-    _setup_actor_logging(settings, run_id, "batch")
-    request = BatchInferenceRequest.model_validate(request_dict)
+    _setup_actor_logging(settings, run_id, "infer")
+    request = InferenceRequest.model_validate(request_dict)
 
     try:
-        metrics = run_batch_inference_job(
+        from ..service import run_inference_job
+
+        metrics = run_inference_job(
             request,
             settings=settings,
             run_id=run_id,
             detector_factory=lambda arch: _get_detector(arch, settings),
         )
         log.info(
-            "推理作业完成: run_id={} 总数={} 成功={} 失败={} 已取消={} 累计单木={}",
-            run_id, metrics.get("total"), metrics.get("succeeded"),
-            metrics.get("failed"), metrics.get("canceled"), metrics.get("total_trees"),
+            "推理作业完成: run_id={} 单木数={} 耗时={:.2f}s",
+            run_id,
+            metrics.get("fused_count") or metrics.get("raw_count") or 0,
+            metrics.get("duration_s") or 0.0,
         )
     except InferenceError:
         log.warning("推理作业失败已记录: run_id={}", run_id)
+    finally:
+        _cleanup_cuda_cache()
+
+
+@dramatiq.actor(queue_name=GPU_QUEUE, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)
+def batch_actor(run_id: str, request_dict: dict) -> None:
+    """兼容别名：直接转发单图执行。"""
+    infer_actor(run_id, request_dict)
 
 
 def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) -> None:
@@ -189,6 +251,8 @@ def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) ->
         )
     except Exception as exc:  # noqa: BLE001 - 状态已由服务写入草稿，actor 不重试
         log.warning("复核 attempt 失败: session={} attempt={} error={}", session_id, attempt_id, exc)
+    finally:
+        _cleanup_cuda_cache()
 
 
 @dramatiq.actor(queue_name=REVIEW_GPU_QUEUE, priority=0, max_retries=0, time_limit=_INFER_TIME_LIMIT_MS)

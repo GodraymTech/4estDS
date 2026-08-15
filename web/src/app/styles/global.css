@@ -265,3 +265,63 @@ body {
     scrollbar-width: thin;
     scrollbar-color: var(--glass-scrollbar-thumb) transparent;
 }
+
+/* ==========================================================================
+   全局 Modal / Confirm 确认弹窗与 Popconfirm 亮暗主题适配
+   ========================================================================== */
+.ant-modal-content {
+    background: var(--color-surface) !important;
+    border: 1px solid var(--color-border) !important;
+    color: var(--color-text) !important;
+    box-shadow: var(--shadow-2) !important;
+    border-radius: var(--radius-lg) !important;
+}
+
+.ant-modal-header {
+    background: var(--color-surface) !important;
+    color: var(--color-text) !important;
+    border-bottom: 1px solid var(--color-border) !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 12px !important;
+}
+
+.ant-modal-title,
+.ant-modal-confirm-title {
+    color: var(--color-text) !important;
+    font-weight: 600 !important;
+}
+
+.ant-modal-confirm-content,
+.ant-modal-confirm-paragraph {
+    color: var(--color-text-muted) !important;
+    font-size: 13px !important;
+    line-height: 1.6 !important;
+}
+
+.ant-modal-close {
+    color: var(--color-text-muted) !important;
+}
+
+.ant-modal-close:hover {
+    color: var(--color-text) !important;
+}
+
+.ant-popconfirm .ant-popover-inner,
+.ant-popover .ant-popover-inner {
+    background: var(--color-surface) !important;
+    border: 1px solid var(--color-border) !important;
+    color: var(--color-text) !important;
+    box-shadow: var(--shadow-2) !important;
+    border-radius: var(--radius) !important;
+}
+
+.ant-popconfirm-message-title,
+.ant-popover-title {
+    color: var(--color-text) !important;
+    font-weight: 600 !important;
+}
+
+.ant-popconfirm-description,
+.ant-popover-inner-content {
+    color: var(--color-text-muted) !important;
+}

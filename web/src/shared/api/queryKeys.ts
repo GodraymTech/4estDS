@@ -13,6 +13,7 @@ export const queryKeys = {
   jobs: (taskType: string | null = "infer", phaseId?: string, tiffId?: string) =>
     ["jobs", taskType ?? "all", phaseId ?? "", tiffId ?? ""] as const,
   job: (jobId: string) => ["job", jobId] as const,
+  jobLogs: (jobId: string, cursor: number) => ["job-logs", jobId, cursor] as const,
   imagery: (tractId: string, phaseId?: string, tiffRef?: string) =>
     ["imagery", tractId, phaseId ?? "", tiffRef ?? ""] as const,
   tractSummary: (tractId: string) => ["tract-summary", tractId] as const,

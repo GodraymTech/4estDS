@@ -1,7 +1,7 @@
 """异步推理作业端点。
 
 - POST /jobs/batch -> 202 + job_id(即顶层 run_id)，作业入 GPU 队列异步串行执行。
-  一个作业 = 1~N 条**各自携带完整参数**的待命项；单图推理即长度为 1 的批量，
+  一个作业 = 1~N 条**各自携带完整参数**的推理条目；单图推理即长度为 1 的批量，
   因此提交推理只有这一个端点。
 - GET  /jobs/:job_id -> 从 runs 轮询状态(无行=queued)。
 
@@ -65,6 +65,16 @@ def _metrics_from_run(run: dict) -> dict:
         return {}
 
 
+def _params_from_run(run: dict) -> dict:
+    raw = run.get("params_json")
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+
+
 def _job_status(value: str | None) -> JobStatus:
     try:
         return JobStatus(value or "running")
@@ -77,17 +87,29 @@ def list_jobs(
     task_type: str | None = Query(None),
     phase_id: str | None = Query(None),
     tiff_id: str | None = Query(None),
+    parent_run_id: str | None = Query(None),
+    top_level_only: bool = Query(True),
     limit: int = Query(50, ge=1, le=200),
     db_url: str | None = Depends(get_db_url),
 ) -> list[JobHistoryItem]:
     from ...db import reader
 
+    resolved_task_type = task_type if isinstance(task_type, str) else None
+    resolved_phase_id = phase_id if isinstance(phase_id, str) else None
+    resolved_tiff_id = tiff_id if isinstance(tiff_id, str) else None
+    resolved_parent = parent_run_id if isinstance(parent_run_id, str) else None
+    resolved_top_level = top_level_only if isinstance(top_level_only, bool) else True
+    resolved_limit = limit if isinstance(limit, int) else 50
+    resolved_db_url = db_url if isinstance(db_url, str) else None
+
     rows = reader.list_runs(
-        url=db_url,
-        task_type=task_type,
-        phase_id=phase_id,
-        tiff_id=tiff_id,
-        limit=limit,
+        url=resolved_db_url,
+        task_type=resolved_task_type,
+        phase_id=resolved_phase_id,
+        tiff_id=resolved_tiff_id,
+        parent_run_id=resolved_parent,
+        top_level_only=resolved_top_level,
+        limit=resolved_limit,
     )
     return [
         JobHistoryItem(
@@ -154,7 +176,7 @@ _IMAGE_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
 
 
 def _resolve_item_image(item: BatchInferItem, label: str, storage) -> str:
-    """把一条待命项的输入解析为 Worker 可读的**单个影像文件**本地路径。"""
+    """把一个条目的输入解析为 Worker 可读的**单个影像文件**本地路径。"""
     if bool(item.image_key) == bool(item.input_path):
         raise HTTPException(status_code=400, detail=f"{label}：image_key 与 input_path 必须且只能提供一个")
 
@@ -174,7 +196,7 @@ def _resolve_item_image(item: BatchInferItem, label: str, storage) -> str:
     if kind != "file":
         raise HTTPException(
             status_code=400,
-            detail=f"{label}：目录需在加入队列时展开为逐张影像，请重新选择具体的影像文件",
+            detail=f"{label}：目录需展开为逐张影像具体文件路径，请重新选择",
         )
     if Path(normalized_path).suffix.lower() not in _IMAGE_SUFFIXES:
         raise HTTPException(status_code=400, detail=f"{label}：不支持的影像格式: {normalized_path}")
@@ -185,20 +207,17 @@ def _resolve_item_image(item: BatchInferItem, label: str, storage) -> str:
     "/batch",
     response_model=JobRef,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="提交推理作业(异步，1~N 条待命项串行执行)",
+    summary="提交推理作业(异步入队执行)",
 )
 def submit_batch(
     body: BatchInferSubmit,
     response: Response,
     storage=Depends(get_storage_dep),
 ) -> JobRef:
-    """提交推理作业。单图直接推理即 ``items`` 长度为 1，与批量完全同路。
-
-    整批参数先全部校验通过再入队：避免“前几条已入队、后一条报错”的半提交状态。
-    """
+    """提交推理作业。每张影像作为一个独立的单图作业投递到异步工作队列。"""
     requests: list[InferenceRequest] = []
     for index, item in enumerate(body.items, 1):
-        label = f"第 {index} 条待命项"
+        label = f"第 {index} 张影像"
         requests.append(
             InferenceRequest(
                 image_path=_resolve_item_image(item, label, storage),
@@ -215,15 +234,18 @@ def submit_batch(
             )
         )
 
-    from ...worker import enqueue_batch_inference
+    from ...worker import enqueue_inference
 
+    job_ids: list[str] = []
     try:
-        job_id = enqueue_batch_inference(BatchInferenceRequest(items=requests))
+        for req in requests:
+            job_ids.append(enqueue_inference(req))
     except Exception as exc:  # noqa: BLE001
         raise _queue_unavailable(exc) from exc
 
-    response.headers["Location"] = f"/api/v1/jobs/{job_id}"
-    return JobRef(job_id=job_id, status=JobStatus.queued)
+    first_job_id = job_ids[0] if job_ids else ""
+    response.headers["Location"] = f"/api/v1/jobs/{first_job_id}"
+    return JobRef(job_id=first_job_id, status=JobStatus.queued)
 
 
 @router.get("/{job_id}/logs", response_model=JobLogsOut, summary="读取作业增量日志")
@@ -255,13 +277,45 @@ def get_job(job_id: str, db_url: str | None = Depends(get_db_url)) -> JobStatusO
     metrics = _metrics_from_run(run)
     job_status = _job_status(run.get("status"))
 
+    # 针对单图或运行中作业：若 metrics 中缺少参数字段，从 params 中自动补齐
+    params = _params_from_run(run)
+    param_items = params.get("items")
+    if isinstance(param_items, list) and len(param_items) == 1 and isinstance(param_items[0], dict):
+        first = param_items[0]
+        if "tile_size" not in metrics and first.get("tile_size") is not None:
+            metrics["tile_size"] = first["tile_size"]
+        if "overlap_rate" not in metrics and first.get("overlap_rate") is not None:
+            metrics["overlap_rate"] = first["overlap_rate"]
+        if "export_fmt" not in metrics and first.get("export_fmt") is not None:
+            metrics["export_fmt"] = first["export_fmt"]
+    elif isinstance(params, dict):
+        if "tile_size" not in metrics and params.get("tile_size") is not None:
+            metrics["tile_size"] = params["tile_size"]
+        if "overlap_rate" not in metrics and params.get("overlap_rate") is not None:
+            metrics["overlap_rate"] = params["overlap_rate"]
+        if "export_fmt" not in metrics and params.get("export_fmt") is not None:
+            metrics["export_fmt"] = params["export_fmt"]
+
+    # 动态计算运行中的执行耗时 duration_s
+    started_at = run.get("started_at")
+    ended_at = run.get("ended_at")
+    duration_s = run.get("duration_s")
+    if duration_s is None and started_at and job_status == JobStatus.running:
+        try:
+            from datetime import datetime, timezone
+            st = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            duration_s = max(0.1, round((now - st).total_seconds(), 1))
+        except Exception:
+            pass
+
     return JobStatusOut(
         job_id=job_id,
         status=job_status,
         tract_id=metrics.get("tract_id"),
-        started_at=run.get("started_at"),
-        ended_at=run.get("ended_at"),
-        duration_s=run.get("duration_s"),
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_s=duration_s,
         error=run.get("error"),
         metrics=metrics,
     )

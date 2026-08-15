@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Button, Progress, Tag, message } from "antd";
-import { CheckOutlined, CloseCircleOutlined, CloseOutlined, ExpandOutlined } from "@ant-design/icons";
+import { App, Button, Progress, Tag } from "antd";
+import { CheckOutlined, CloseOutlined, ExpandOutlined, WarningOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReviewAttempt, ReviewItem, ReviewMergeMode } from "../../shared/api";
 import { endpoints, queryKeys } from "../../shared/api";
@@ -23,6 +23,7 @@ export function AttemptPanel({
     onPreview: (items: ReviewItem[]) => void;
     onApplied: (revision: number, items: ReviewItem[]) => void;
 }) {
+    const { modal, message } = App.useApp();
     const client = useQueryClient();
     const [selectedId, setSelectedId] = useState<string>();
     const [dismissedId, setDismissedId] = useState<string | null>(null);
@@ -129,7 +130,7 @@ export function AttemptPanel({
                 <div className="review-attempt-title-area">
                     <span className="review-attempt-title">识别结果</span>
                     <Tag color={statusColor(current.status)} bordered={false} style={{ margin: 0 }}>
-                        {statusLabel(current.status)}
+                        {statusLabel(current.status, current.queue_ahead_count)}
                     </Tag>
                 </div>
                 <button
@@ -179,16 +180,23 @@ export function AttemptPanel({
             {current.error ? (
                 <div className="review-attempt-error-box">
                     <div className="error-box-top">
-                        <div className="error-box-headline">
-                            <CloseCircleOutlined style={{ color: "#ef4444" }} />
-                            <span>识别异常</span>
-                        </div>
+                        <span className="error-box-headline">
+                            <WarningOutlined />
+                            <span>探测失败</span>
+                        </span>
                         <button
                             type="button"
                             className="error-box-btn"
-                            onClick={() => setDismissedId(selectedId ?? null)}
+                            onClick={() => modal.error({
+                                title: "AI 识别异常详情",
+                                content: (
+                                    <pre style={{ maxHeight: 300, overflow: "auto", fontSize: 11, background: "rgba(0,0,0,0.05)", padding: 8, borderRadius: 4 }}>
+                                        {current.error}
+                                    </pre>
+                                ),
+                            })}
                         >
-                            关闭
+                            详情
                         </button>
                     </div>
                     <div className="error-box-content">{current.error}</div>
@@ -249,6 +257,9 @@ function statusColor(status: ReviewAttempt["status"]): string {
     return "processing";
 }
 
-function statusLabel(status: ReviewAttempt["status"]): string {
-    return ({ queued: "排队中", running: "识别中", succeeded: "待确认", failed: "已失败", canceled: "已取消", applied: "已采纳" })[status];
+function statusLabel(status: ReviewAttempt["status"], queueAheadCount?: number): string {
+    if (status === "queued") {
+        return queueAheadCount && queueAheadCount > 0 ? `排队中 (还需等待 ${queueAheadCount} 个作业)` : "排队中";
+    }
+    return ({ running: "识别中", succeeded: "待确认", failed: "已失败", canceled: "已取消", applied: "已采纳" })[status] ?? status;
 }

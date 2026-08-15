@@ -19,11 +19,11 @@ class UploadResponse(BaseModel):
 
 
 class BatchInferItem(BaseModel):
-    """作业队列中的**一条待命项**：一张影像 + 它自己完整的一套参数。
+    """作业队列中的**一个影像条目**：一张影像 + 它自己完整的一套参数。
 
     ``image_key`` 来自 /uploads；``input_path`` 是后端/Worker 可访问的本地文件路径。
-    二者二选一，路由层负责校验存在性。目录由前端在加入队列时展开为多条待命项，
-    后端只接受具体文件，以保证每张影像的参数都可被用户单独审阅与修改。
+    二者二选一，路由层负责校验存在性。目录在提交时展开为多条具体文件条目，
+    后端只接受具体文件，以保证每张影像的参数都保持纯粹独立。
     """
 
     image_key: Optional[str] = Field(None, description="已上传影像的存储 key")
@@ -40,12 +40,12 @@ class BatchInferItem(BaseModel):
 
 
 class BatchInferSubmit(BaseModel):
-    """提交推理作业的唯一请求体：按顺序串行执行的待命项列表。
+    """提交推理作业的唯一请求体：按顺序串行执行的推理条目列表。
 
     单图直接推理即 ``len(items) == 1``，与批量共用同一条服务端路径。
     """
 
-    items: list[BatchInferItem] = Field(..., min_length=1, description="待命项列表")
+    items: list[BatchInferItem] = Field(..., min_length=1, description="推理条目列表")
 
 
 class InputInspectRequest(BaseModel):
@@ -336,6 +336,7 @@ class ReviewAttemptOut(BaseModel):
     total_windows: int = 0
     candidate_count: int = 0
     candidates: list[dict[str, Any]] = Field(default_factory=list)
+    queue_ahead_count: int = 0
     error: Optional[str] = None
 
 

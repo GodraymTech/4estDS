@@ -165,7 +165,7 @@ class DINOvReviewAdapter:
             pil_ref = Image.fromarray(ref_clean)
             pil_mask = Image.fromarray(mask_np.squeeze(-1))
 
-            resize_transform = transforms.Resize(self.imgsz, interpolation=Image.BICUBIC)
+            resize_transform = transforms.Resize((self.imgsz, self.imgsz), interpolation=Image.BICUBIC)
             img_ref_resized = resize_transform(pil_ref)
             mask_ref_resized = resize_transform(pil_mask)
 
@@ -193,6 +193,9 @@ class DINOvReviewAdapter:
                 "padded_h": padded_h,
                 "padded_w": padded_w,
             }
+            del t_ref, t_mask, data_ref, feat_ref_ms, query_bbox
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         except Exception as exc:
             log.warning("DINOv 提取参考特征失败: %s", exc)
             embedding_data = None
@@ -223,7 +226,7 @@ class DINOvReviewAdapter:
         point_coords[:, :2] = 0.0
         query_bbox_init = _inverse_sigmoid(point_coords[None])
 
-        resize_transform = transforms.Resize(self.imgsz, interpolation=Image.BICUBIC)
+        resize_transform = transforms.Resize((self.imgsz, self.imgsz), interpolation=Image.BICUBIC)
 
         with torch.inference_mode():
             for win in windows:
@@ -272,6 +275,12 @@ class DINOvReviewAdapter:
                         score=score,
                         category_id=category,
                     ))
+
+                # 及时释放单次窗口切片前向传播生成的 GPU 张量
+                del t_tgt, data_tgt, feat_tgt_ms, mask_feat_tgt, masks, ious, ori_masks, scores
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return predictions
 

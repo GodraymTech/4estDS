@@ -67,11 +67,33 @@ class InferenceResult:
     meta: dict = field(default_factory=dict)
 
 
+def _is_empty_or_nodata_window(pixels, local_mask=None, min_valid_ratio: float = 0.05) -> bool:
+    """微秒级检测切片是否为纯空 / 全黑 / NoData / 边界有效部分低于阈值。"""
+    if pixels is None:
+        return True
+    import numpy as np
+    arr = np.asarray(pixels)
+    if arr.size == 0:
+        return True
+    if local_mask is not None:
+        mask_arr = np.asarray(local_mask)
+        if mask_arr.size > 0:
+            valid_ratio = np.count_nonzero(mask_arr) / float(mask_arr.size)
+            if valid_ratio < min_valid_ratio:
+                return True
+    # 步长采样检测是否全 0 / 纯背景
+    sample = arr[:: max(1, arr.shape[0] // 32), :: max(1, arr.shape[1] // 32)]
+    if not np.any(sample):
+        return True
+    return False
+
+
 def run_inference(
     image_source,
     detector: BaseDetector,
     config: InferenceConfig,
     run_id: str | None = None,
+    db_url: str | None = None,
     window_filter=None,
 ) -> InferenceResult:
     """对一幅影像执行切片->推理->去重全流程（引擎核心）。
@@ -106,6 +128,29 @@ def run_inference(
     skipped_outside = 0
     bs = max(1, config.batch_size)
     detector_loaded = False
+
+    # 实时写回初始指标，使前端一进入运行状态即可看到尺寸与总切片数
+    model_input = int(getattr(detector, "imgsz", 0) or getattr(detector, "model_input", 0) or 1024)
+    if run_id:
+        try:
+            from ..db import writer
+            writer.update_run_metrics(
+                run_id,
+                {
+                    "image_width": width,
+                    "image_height": height,
+                    "tile_size": config.root_size,
+                    "model_input": model_input,
+                    "overlap_rate": config.overlap_rate,
+                    "tiles_total": len(coords),
+                    "tiles_processed": 0,
+                    "tiles_skipped_empty": 0,
+                    "raw_count": 0,
+                },
+                url=db_url,
+            )
+        except Exception:
+            pass
     
     total_raw_predicts = 0
     from ..utils.progress import track_progress
@@ -121,13 +166,20 @@ def run_inference(
                 skipped_outside += 1
                 continue
             pixels = read(x, y, w, h) if callable(read) else None
+            local_mask = None
             if pixels is not None and window_filter is not None:
                 local_mask = window_filter.local_mask((x, y, w, h))
-                if local_mask is not None:
-                    import numpy as np
 
-                    pixels = np.asarray(pixels).copy()
-                    pixels[~local_mask] = 0
+            # 过滤纯黑/NoData/非有效区域/边界有效面积过低的无效切片
+            if _is_empty_or_nodata_window(pixels, local_mask=local_mask):
+                skipped_outside += 1
+                continue
+
+            if pixels is not None and local_mask is not None:
+                import numpy as np
+
+                pixels = np.asarray(pixels).copy()
+                pixels[~local_mask] = 0
             win = Window(x=x, y=y, w=w, h=h, pixels=pixels)
             # 记录瓦片的源文件路径（主要针对物理瓦片，方便溯源）
             if hasattr(image_source, "_coord_to_file"):
@@ -139,7 +191,21 @@ def run_inference(
             windows.append(win)
 
         if not windows:
+            if run_id:
+                try:
+                    from ..db import writer
+                    writer.update_run_metrics(
+                        run_id,
+                        {
+                            "tiles_processed": processed,
+                            "tiles_skipped_empty": skipped_outside,
+                        },
+                        url=db_url,
+                    )
+                except Exception:
+                    pass
             continue
+
         if not detector_loaded:
             detector.ensure_loaded()
             detector_loaded = True
@@ -166,6 +232,21 @@ def run_inference(
                 }
                 global_items.append(gd)
             processed += 1
+
+        if run_id:
+            try:
+                from ..db import writer
+                writer.update_run_metrics(
+                    run_id,
+                    {
+                        "tiles_processed": processed,
+                        "tiles_skipped_empty": skipped_outside,
+                        "raw_count": len(global_items),
+                    },
+                    url=db_url,
+                )
+            except Exception:
+                pass
 
     raw_count = len(global_items)
 

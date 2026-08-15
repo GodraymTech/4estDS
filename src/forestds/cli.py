@@ -118,13 +118,18 @@ def cmd_infer(
         # if result.get("export_path"):
         #     logger.info("[infer] 导出 → {}", result["export_path"])
         return 0
-    else:
-        # 批量推理：把每张影像展开为一条待命项(CLI 场景下整批共用同一套参数)。
-        from .tasks.batch import BatchItemSpec, resolve_images, run_batch_pipeline
+        # 依次对每张影像执行单图推理管线
+        valid_suffixes = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+        resolved: list[Path] = []
+        for img in images:
+            p = Path(img).expanduser().resolve()
+            if p.is_dir():
+                resolved.extend(sorted(f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in valid_suffixes))
+            elif p.is_file() and p.suffix.lower() in valid_suffixes:
+                resolved.append(p)
 
-        resolved = resolve_images(images)
         if not resolved:
-            logger.warning("[infer] 批量推理未找到任何有效的影像文件。")
+            logger.warning("[infer] 未找到任何有效的影像文件。")
             return 0
 
         # 地块 ID 必须唯一，多图时不能共用同一个显式值，回落为每张影像的文件名。
@@ -133,12 +138,19 @@ def cmd_infer(
                 "[infer] --tract-id 仅在单图时生效；本次共 {} 张影像，地块 ID 将按文件名自动生成。",
                 len(resolved),
             )
-        item_tract_id = tract_id if len(resolved) == 1 else None
 
-        batch_summary = run_batch_pipeline(
-            [
-                BatchItemSpec(
-                    image_path=str(path),
+        success_count = 0
+        fail_count = 0
+        total_trees = 0
+        start_all = time.time()
+
+        for idx, img_path in enumerate(resolved, 1):
+            item_tract_id = tract_id if len(resolved) == 1 else None
+            try:
+                logger.info("[infer] [{}/{}] 开始推理: {}", idx, len(resolved), img_path)
+                res = run_infer_pipeline(
+                    str(img_path),
+                    settings=settings,
                     arch=arch,
                     phase_id=phase_id,
                     tract_id=item_tract_id,
@@ -153,17 +165,19 @@ def cmd_infer(
                     draw_box=act_draw_box,
                     export_fmt=export_format,
                 )
-                for path in resolved
-            ],
-            settings=settings,
-        )
+                tree_cnt = res.get("fused_count") or res.get("raw_count") or 0
+                total_trees += tree_cnt
+                success_count += 1
+                logger.info("[infer] [{}/{}] 成功: {} (检出单木={} 株)", idx, len(resolved), img_path.name, tree_cnt)
+            except Exception as e:
+                fail_count += 1
+                logger.error("[infer] [{}/{}] 失败: {}，原因: {}", idx, len(resolved), img_path.name, e)
 
         logger.info(
-            "[infer] 批量推理完成！总数={} 成功={} 失败={} 已取消={} 累计单木={} 耗时={:.1f}s",
-            batch_summary.total, batch_summary.succeeded, batch_summary.failed,
-            batch_summary.canceled, batch_summary.total_trees, batch_summary.elapsed_s
+            "[infer] 全部推理完成！总数={} 成功={} 失败={} 累计单木={} 耗时={:.1f}s",
+            len(resolved), success_count, fail_count, total_trees, time.time() - start_all,
         )
-        return 0 if batch_summary.failed == 0 else 1
+        return 0 if fail_count == 0 else 1
 
 
 @app.command("preprocess", help="影像预处理(自适应切片与 COG 转换)")
@@ -395,8 +409,6 @@ def cmd_batch(
     settings, run_id = _bootstrap(args.log_level, task_type="batch")
     logger.warning("[batch] 仅支持 RGB;批量推理串行执行。")
     from pathlib import Path
-    from .tasks.batch import BatchItemSpec, run_batch_pipeline
-
     arch_val = args.arch or settings.get("arch", "ultralytics")
     base = Path(args.input_dir)
     if not base.exists():
@@ -417,25 +429,36 @@ def cmd_batch(
         logger.warning(
             f"[batch] --tract-id 仅在单图时生效；本次共 {len(inputs)} 张影像，地块 ID 将按文件名自动生成。"
         )
-    item_tract_id = args.tract_id if len(inputs) == 1 else None
 
-    res = run_batch_pipeline(
-        [
-            BatchItemSpec(
-                image_path=path,
+    from .tasks.infer import run_infer_pipeline
+
+    success_cnt = 0
+    fail_cnt = 0
+    total_trees = 0
+    t0 = time.time()
+
+    for idx, path in enumerate(inputs, 1):
+        item_tract_id = args.tract_id if len(inputs) == 1 else None
+        try:
+            logger.info("[batch] [{}/{}] 开始推理: {}", idx, len(inputs), path)
+            res = run_infer_pipeline(
+                path,
+                settings=settings,
                 arch=arch_val,
                 phase_id=args.phase_id,
                 tract_id=item_tract_id,
             )
-            for path in inputs
-        ],
-        settings=settings,
-    )
+            tree_cnt = res.get("fused_count") or res.get("raw_count") or 0
+            total_trees += tree_cnt
+            success_cnt += 1
+        except Exception as e:
+            fail_cnt += 1
+            logger.error("[batch] [{}/{}] 失败: {}，原因: {}", idx, len(inputs), path, e)
+
     logger.info(
-        f"[batch] 完成: 成功={res.succeeded} 失败={res.failed} 已取消={res.canceled} "
-        f"总株数={res.total_trees} 耗时={res.elapsed_s:.2f}s"
+        f"[batch] 完成: 成功={success_cnt} 失败={fail_cnt} 总株数={total_trees} 耗时={time.time() - t0:.2f}s"
     )
-    return 0 if res.failed == 0 else 1
+    return 0 if fail_cnt == 0 else 1
 
 
 @app.command("db", help="数据库管理")

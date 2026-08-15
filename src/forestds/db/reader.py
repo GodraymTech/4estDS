@@ -416,11 +416,17 @@ def list_runs(
     task_type: str | None = None,
     phase_id: str | None = None,
     tiff_id: str | None = None,
+    parent_run_id: str | None = None,
+    top_level_only: bool = True,
     limit: int = 50,
 ) -> list[dict]:
     conn = _connect(url)
     try:
-        bounded_limit = max(1, min(int(limit), 200))
+        try:
+            bounded_limit = max(1, min(int(limit), 200))
+        except (ValueError, TypeError):
+            bounded_limit = 50
+
         select_sql = (
             "SELECT r.*, "
             "(SELECT COUNT(*) FROM tree_observations o WHERE o.run_id=r.run_id) AS observation_count, "
@@ -431,17 +437,27 @@ def list_runs(
         )
         clauses: list[str] = []
         params: list[object] = []
-        task_types = tuple(part.strip() for part in (task_type or "").split(",") if part.strip())
+        task_types = (
+            tuple(part.strip() for part in task_type.split(",") if part.strip())
+            if isinstance(task_type, str)
+            else ()
+        )
         if task_types:
             placeholders = ", ".join("?" for _ in task_types)
             clauses.append(f"r.task_type IN ({placeholders})")
             params.extend(task_types)
-        if phase_id:
+        if isinstance(phase_id, str) and phase_id:
             clauses.append("r.phase_id=?")
             params.append(phase_id)
-        if tiff_id:
+        if isinstance(tiff_id, str) and tiff_id:
             clauses.append("r.tiff_id=?")
             params.append(tiff_id)
+        if isinstance(parent_run_id, str) and parent_run_id:
+            clauses.append("r.parent_run_id=?")
+            params.append(parent_run_id)
+        elif top_level_only is True:
+            clauses.append("r.parent_run_id IS NULL")
+
         where = "WHERE " + " AND ".join(clauses) + " " if clauses else ""
         rows = conn.execute(
             select_sql + where + "ORDER BY r.started_at DESC LIMIT ?",

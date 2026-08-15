@@ -160,7 +160,7 @@ export interface UploadResponse {
   size: number;
 }
 
-// 作业队列中的一条待命项(对应 schemas.BatchInferItem)。
+// 作业请求中的一个影像条目(对应 schemas.BatchInferItem)。
 export interface BatchInferItem {
   image_key?: string;
   input_path?: string;
@@ -559,6 +559,8 @@ export interface ReviewAttempt {
   dropped_outside?: number;
   /** 模型名称。 */
   model_name?: string;
+  /** 前序排队作业数。 */
+  queue_ahead_count?: number;
   /** 推理耗时(秒)。 */
   elapsed_seconds?: number;
 }

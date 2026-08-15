@@ -43,7 +43,7 @@ review:
   conf_threshold: 0.15    # attempt 候选最低置信度 (DINOv 开集视觉提示单木得分通常在 0.15~0.35)
   default_scope: region   # region | full；前端新 attempt 默认范围，无需重启前端
   default_merge_mode: append # append | replace_all；前端默认合并方式
-  tile_size: 1024         # 视口/整图 attempt 的动态读取窗口边长（像素）
+  tile_size: 640         # 视口/整图 attempt 的动态读取窗口边长（像素）
   batch_size: 4           # review_gpu 初始批大小；OOM 时仅减半重试一次
   viewport_max_windows: 256 # 单个视口 attempt 最大窗口数(>=1)；限制交互任务时延
   max_candidates_per_attempt: 50000 # 单 attempt 候选硬上限(>=1)；限制草稿内存与响应体

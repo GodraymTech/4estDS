@@ -48,7 +48,7 @@ class JobStatus(str, Enum):
 class InferenceRequest(BaseModel):
     """单图推理请求。字段与 ``run_infer_pipeline`` 的关键入参一一对应。
 
-    同时也是批量作业中的**一条待命项**：一张影像携带它自己完整的一套参数。
+    同时也是批量作业中的**一个条目**：一张影像携带它自己完整的一套参数。
     这样「单图直接推理」天然等价于长度为 1 的批量，服务端只有一条代码路径。
 
     ``image_path`` 在入队前应已被解析为 Worker 可读的本地路径
@@ -95,7 +95,7 @@ class InferenceRequest(BaseModel):
 
 
 class BatchInferenceRequest(BaseModel):
-    """批量推理请求：一串**各自携带完整参数**的待命项，按顺序串行执行。
+    """批量推理请求：一串**各自携带完整参数**的影像条目，按顺序串行执行。
 
     这是提交推理的唯一契约。单图推理即 ``len(items) == 1``，不存在第二条路径，
     因此也不再有「整批共用一套参数」的目录模式与地块 ID 前缀拼接等历史包袱。
@@ -106,7 +106,7 @@ class BatchInferenceRequest(BaseModel):
     items: list[InferenceRequest] = Field(
         ...,
         min_length=1,
-        description="待命项列表(每项一张影像 + 它自己的一整套参数)，按数组顺序串行执行",
+        description="推理条目列表(每项一张影像 + 它自己的一整套参数)，按数组顺序串行执行",
     )
 
 

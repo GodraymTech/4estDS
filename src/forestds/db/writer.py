@@ -405,6 +405,27 @@ def finish_run_log(
         log.info("「runs」表更新终态: run_id={} status={} 耗时={}s", run_id, normalized_status, f"{duration_s:.2f}" if duration_s is not None else "?")
 
 
+def update_run_metrics(
+    run_id: str,
+    metrics: dict,
+    *,
+    url: str | None = None,
+) -> None:
+    """在运行过程中更新 runs.metrics_json，使前端能实时轮询到中间进度明细（支持字段增量合并）。"""
+    if not run_id:
+        return
+    conn = _connect(url)
+    try:
+        _ensure_run_exists(conn, run_id)
+        row = conn.execute("SELECT metrics_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        existing = _loads(row[0] if row else None, {})
+        existing.update(metrics or {})
+        conn.execute("UPDATE runs SET metrics_json=? WHERE run_id=?", (_dump(existing), run_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def update_tiles_dir(run_id: str, tiles_dir, *, url: str | None = None) -> None:
     """切片落盘成功后，将目录绝对路径写入 runs.tiles_dir。"""
     conn = _connect(url)

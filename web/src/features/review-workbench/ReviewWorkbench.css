@@ -333,9 +333,9 @@
     position: absolute;
     z-index: 12;
     border: 1px solid var(--glass-border);
-    background: var(--glass-bgreview-attempt-panel);
+    background: var(--glass-bg);
     box-shadow: var(--glass-shadow), var(--glass-inner);
-    backdrop-filter: blur(10px) saturate(150%);
+    backdrop-filter: blur(3px) saturate(150%);
     -webkit-backdrop-filter: blur(10px) saturate(150%);
     color: var(--glass-text);
 }
@@ -1069,6 +1069,7 @@ kbd {
     z-index: 10;
     display: flex;
     flex-direction: column;
+    align-items: flex-end;
     gap: 0px;
     text-shadow: 0 1px 2px #000000, 0 0 3px #000000;
     font-family: "IBM Plex Mono", monospace;
@@ -1077,11 +1078,13 @@ kbd {
     user-select: none;
     padding: 0;
     margin: 0;
+    text-align: right;
 }
 
 .review-region-metric-row {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 2px;
     white-space: nowrap;
 }

@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import type { DragEvent } from "react";
 import {
+    App,
     Button,
     Input,
     InputNumber,
-    Modal,
     Progress,
     Select,
     Space,
     Tooltip,
-    message,
+    message as staticMessage,
 } from "antd";
 import {
     DownOutlined,
@@ -18,7 +18,6 @@ import {
     InfoCircleOutlined,
     InboxOutlined,
     PlayCircleOutlined,
-    PlusOutlined,
     RightOutlined,
     StopOutlined,
 } from "@ant-design/icons";
@@ -29,7 +28,7 @@ import {
     type BatchInferItem,
     type InputInspectResult,
 } from "../../shared/api";
-import { newPendingId, useJobsStore, type PendingTask } from "./jobsStore";
+import { EMPTY_DRAFT, useJobsStore } from "./jobsStore";
 import { ServerFileBrowserModal } from "../../shared/ui/ServerFileBrowserModal";
 
 const EXPORT_OPTIONS = [
@@ -40,9 +39,13 @@ const EXPORT_OPTIONS = [
 ];
 
 const PATH_TIP =
-    "如果是“文件夹”，点击“加入队列”后会自动寻找所有“.tif”加入「待命列表」";
+    "仅支持单张 .tif 影像";
 const TRACT_TIP =
     "默认为文件名，建议修改为所属「项目名」";
+
+interface FormInferItem extends BatchInferItem {
+    displayName: string;
+}
 
 export function UploadForm({
     activeJobId,
@@ -53,18 +56,16 @@ export function UploadForm({
     onSubmitted?: (jobId: string) => void;
     onCancelled?: (jobId: string) => void;
 }) {
+    const { modal, message } = App.useApp();
     const [searchParams] = useSearchParams();
 
-    // 表单参数存在 store 里(持久化)：台账页与任务页来回跳转时不能丢失正在填写的内容。
     const draft = useJobsStore((s) => s.draft);
     const patchDraft = useJobsStore((s) => s.patchDraft);
+    const resetDraft = useJobsStore((s) => s.resetDraft);
     const clearDraftInput = useJobsStore((s) => s.clearDraftInput);
-    const pending = useJobsStore((s) => s.pending);
-    const enqueue = useJobsStore((s) => s.enqueue);
-    const clearPending = useJobsStore((s) => s.clearPending);
     const addJob = useJobsStore((s) => s.addJob);
 
-    // File 对象无法持久化，只能留在本地状态。
+    // File 对象无法持久化，留在本地状态。
     const [uploadFile, setUploadFile] = useState<File | null>(null);
     const [inspect, setInspect] = useState<InputInspectResult | null>(null);
     const [inspectBusy, setInspectBusy] = useState(false);
@@ -90,15 +91,21 @@ export function UploadForm({
     };
 
     useEffect(() => {
-        const nextInputPath = searchParams.get("input_path") || "";
-        const nextTractId = searchParams.get("tract_id") || "";
-        const nextPhaseId = searchParams.get("phase_id") || "";
-        const patch: Record<string, string> = {};
-        if (nextInputPath) patch.inputPath = nextInputPath;
-        if (nextTractId) patch.tractId = nextTractId;
-        if (nextPhaseId) patch.phaseId = nextPhaseId;
-        if (Object.keys(patch).length) patchDraft(patch);
-    }, [patchDraft, searchParams]);
+        const nextInputPath = searchParams.get("input_path")?.trim() || "";
+        const nextTractId = searchParams.get("tract_id")?.trim() || "";
+        const nextPhaseId = searchParams.get("phase_id")?.trim() || "";
+
+        if (nextInputPath || nextTractId || nextPhaseId) {
+            patchDraft({
+                ...EMPTY_DRAFT,
+                ...(nextInputPath ? { inputPath: nextInputPath } : {}),
+                ...(nextTractId ? { tractId: nextTractId } : {}),
+                ...(nextPhaseId ? { phaseId: nextPhaseId } : {}),
+            });
+        } else {
+            resetDraft();
+        }
+    }, [patchDraft, resetDraft, searchParams]);
 
     useEffect(() => {
         const path = draft.inputPath.trim();
@@ -118,9 +125,8 @@ export function UploadForm({
     const suggestedPhaseId = inspect?.suggested_phase_id || undefined;
     const hasInput = Boolean(draft.inputPath.trim() || uploadFile);
 
-
-    // 「开始推理」将要执行的条数 = 待命队列 + 当前表单(若已填输入)。
-    const runCount = pending.length + (hasInput ? (isBatch ? inspect?.images.length || 1 : 1) : 0);
+    // 本次提交将要执行的条数
+    const runCount = hasInput ? (isBatch ? inspect?.images.length || 1 : 1) : 0;
 
     async function inspectPath(path: string) {
         setInspectBusy(true);
@@ -137,13 +143,8 @@ export function UploadForm({
         }
     }
 
-    /**
-     * 把当前表单构造成待命项。
-     *
-     * 目录在**前端**展开为逐张影像：只有这样用户才能对其中某一张单独改参数或删除，
-     * 后端因此只需接受具体文件，契约保持简单。
-     */
-    async function buildTasksFromForm(): Promise<PendingTask[] | null> {
+    /** 把当前表单构造成待提交的推理条目列表。 */
+    async function buildItemsFromForm(): Promise<FormInferItem[] | null> {
         const cleanPhaseId = draft.phaseId.replace(/[^\d]/g, "");
         if (draft.phaseId && cleanPhaseId.length !== 8) {
             message.warning("时相 ID 需为 8 位 YYYYMMDD");
@@ -155,28 +156,25 @@ export function UploadForm({
         }
 
         const shared = {
-            phaseId: cleanPhaseId || undefined,
-            tileSize: typeof draft.tileSize === "number" ? draft.tileSize : undefined,
-            overlapRate:
+            phase_id: cleanPhaseId || undefined,
+            tile_size: typeof draft.tileSize === "number" ? draft.tileSize : undefined,
+            overlap_rate:
                 typeof draft.overlapPercent === "number" ? draft.overlapPercent / 100 : undefined,
             dsm: draft.dsmOpen && draft.dsm.trim() ? draft.dsm.trim() : undefined,
             dem: draft.demOpen && draft.dem.trim() ? draft.dem.trim() : undefined,
             las: draft.lasOpen && draft.las.trim() ? draft.las.trim() : undefined,
-            exportFmt: draft.exportFmt,
+            export_fmt: draft.exportFmt,
         };
         const tractId = draft.tractId.trim() || undefined;
 
-        // 本地文件：先上传拿到 key，待命项才有稳定的服务端引用。
+        // 本地上传文件
         if (uploadFile && !draft.inputPath.trim()) {
             const up = await endpoints.uploadImage(uploadFile, setProgress);
             return [
                 {
-                    id: newPendingId(),
-                    imageKey: up.key,
+                    image_key: up.key,
                     displayName: uploadFile.name,
-                    fullPath: uploadFile.name,
-                    fromUpload: true,
-                    tractId,
+                    tract_id: tractId,
                     ...shared,
                 },
             ];
@@ -191,20 +189,16 @@ export function UploadForm({
             }
             if (inspect && inspect.image_count > images.length) {
                 message.warning(
-                    `目录内共 ${inspect.image_count} 张影像，本次仅加入前 ${images.length} 张，可分批加入`
+                    `目录内共 ${inspect.image_count} 张影像，本次将提交前 ${images.length} 张`
                 );
             }
-            // 地块 ID 必须唯一，多张影像不能共用同一个显式值。
             if (tractId) {
                 message.info("目录展开为多张影像，地块 ID 将按各自文件名生成");
             }
             return images.map((img) => ({
-                id: newPendingId(),
-                inputPath: img.path,
+                input_path: img.path,
                 displayName: basename(img.path),
-                fullPath: img.path,
-                fromUpload: false,
-                tractId: undefined,
+                tract_id: undefined,
                 ...shared,
             }));
         }
@@ -212,12 +206,9 @@ export function UploadForm({
         const filePath = inspect?.normalized_path || rawPath;
         return [
             {
-                id: newPendingId(),
-                inputPath: filePath,
+                input_path: filePath,
                 displayName: basename(filePath),
-                fullPath: filePath,
-                fromUpload: false,
-                tractId,
+                tract_id: tractId,
                 ...shared,
             },
         ];
@@ -230,49 +221,40 @@ export function UploadForm({
         setProgress(0);
     }
 
-    async function addToQueue() {
-        setBusy(true);
-        try {
-            const tasks = await buildTasksFromForm();
-            if (!tasks) return;
-            enqueue(tasks);
-            message.success(`已加入待命队列：${tasks.length} 条`);
-            resetInput();
-        } catch (e) {
-            message.error(e instanceof ApiError ? e.message : "加入队列失败");
-        } finally {
-            setBusy(false);
-        }
-    }
-
     async function submit() {
         setBusy(true);
         try {
-            // 表单里还留着未入队的输入时，把它当作队列的最后一条一起提交。
-            let tasks = pending;
-            if (hasInput) {
-                const extra = await buildTasksFromForm();
-                if (!extra) return;
-                tasks = [...pending, ...extra];
-            }
-            if (!tasks.length) {
-                message.warning("请先输入路径，或先加入待命队列");
-                return;
-            }
+            const items = await buildItemsFromForm();
+            if (!items || !items.length) return;
 
-            const ref = await endpoints.submitBatch({ items: tasks.map(toBatchItem) });
-            addJob({
-                jobId: ref.job_id,
-                filename: tasks.length === 1 ? tasks[0].displayName : `${tasks.length} 张影像`,
-                itemCount: tasks.length,
-                tractId: tasks.length === 1 ? tasks[0].tractId : undefined,
-                phaseId: tasks[0].phaseId,
-                submittedAt: Date.now(),
-            });
-            clearPending();
+            let firstJobId: string | undefined;
+            for (const item of items) {
+                const { displayName, ...payload } = item;
+                const ref = await endpoints.submitBatch({
+                    items: [payload],
+                });
+                if (!firstJobId) firstJobId = ref.job_id;
+                addJob({
+                    jobId: ref.job_id,
+                    filename: displayName,
+                    fullPath: item.input_path,
+                    tractId: item.tract_id,
+                    phaseId: item.phase_id,
+                    tileSize: item.tile_size ?? null,
+                    overlapPercent:
+                        typeof item.overlap_rate === "number"
+                            ? Math.round(item.overlap_rate * 100)
+                            : null,
+                    submittedAt: Date.now(),
+                });
+            }
             resetInput();
-            onSubmitted?.(ref.job_id);
-            message.success(`作业已提交（${tasks.length} 条）：${ref.job_id}`);
+            if (firstJobId) onSubmitted?.(firstJobId);
+            message.success(
+                items.length === 1
+                    ? `作业已提交：${items[0].displayName}`
+                    : `已提交 ${items.length} 个推理作业`
+            );
         } catch (e) {
             message.error(e instanceof ApiError ? e.message : "提交失败");
         } finally {
@@ -281,10 +263,10 @@ export function UploadForm({
     }
 
     function cancelActiveJob() {
-        Modal.confirm({
+        modal.confirm({
             title: "终止全部推理作业",
             content:
-                "已完成的影像保留为「成功」，正在推理的记为「失败」，尚未开始的记为「已取消」。待命队列中未提交的条目将保留。",
+                "已完成的影像保留为「成功」，正在推理的记为「失败」，尚未开始的记为「已取消」。",
             okText: "终止",
             okButtonProps: { danger: true },
             cancelText: "取消",
@@ -326,7 +308,7 @@ export function UploadForm({
                         <Input
                             value={draft.inputPath}
                             onChange={(e) => patchDraft({ inputPath: e.target.value })}
-                            placeholder="图像路径或文件夹路径"
+                            placeholder="图像路径"
                             prefix={isBatch ? <FolderOpenOutlined /> : <FileImageOutlined />}
                             disabled={busy}
                             allowClear
@@ -360,7 +342,7 @@ export function UploadForm({
                     <Input
                         value={draft.phaseId}
                         onChange={(e) => patchDraft({ phaseId: e.target.value })}
-                        placeholder={suggestedPhaseId ? `默认 ${suggestedPhaseId}` : "默认读取元数据"}
+                        placeholder={suggestedPhaseId ? `默认 ${suggestedPhaseId}` : "自动"}
                         disabled={busy}
                     />
                 </div>
@@ -374,7 +356,7 @@ export function UploadForm({
                                 ? "目录展开后按文件名生成"
                                 : suggestedTractId
                                     ? `默认 ${suggestedTractId}`
-                                    : "默认图像文件名"
+                                    : "自动"
                         }
                         disabled={busy || isBatch}
                     />
@@ -392,7 +374,7 @@ export function UploadForm({
                     />
                 </div>
                 <div className="task-field-row">
-                    <FieldLabel title="覆盖率" />
+                    <FieldLabel title="重叠率" />
                     <InputNumber
                         value={draft.overlapPercent}
                         onChange={(v) => patchDraft({ overlapPercent: typeof v === "number" ? v : null })}
@@ -470,17 +452,7 @@ export function UploadForm({
             {busy && progress > 0 ? <Progress percent={progress} size="small" /> : null}
 
             <div className="task-action-row">
-                <Tooltip title="加入待命队列">
-                    <Button
-                        icon={<PlusOutlined />}
-                        loading={busy}
-                        disabled={!hasInput}
-                        onClick={addToQueue}
-                        className="task-action-btn task-action-btn--queue"
-                        aria-label="加入待命队列"
-                    />
-                </Tooltip>
-                <Tooltip title={runCount > 0 ? `开始推理 (${runCount}个作业)` : "开始推理"}>
+                <Tooltip title={runCount > 0 ? `开始推理 (${runCount} 张影像)` : "开始推理"}>
                     <Button
                         type="primary"
                         icon={<PlayCircleOutlined />}
@@ -500,28 +472,12 @@ export function UploadForm({
                         disabled={busy}
                         onClick={cancelActiveJob}
                         className="task-action-btn task-action-btn--danger"
-                        aria-label="一键终止"
+                        aria-label="一键终止全部作业"
                     />
                 </Tooltip>
             </div>
         </div>
     );
-}
-
-/** 待命项 -> 后端待命项载荷(丢弃空值，保持请求体干净)。 */
-function toBatchItem(task: PendingTask): BatchInferItem {
-    const item: BatchInferItem = {};
-    if (task.imageKey) item.image_key = task.imageKey;
-    if (task.inputPath) item.input_path = task.inputPath;
-    if (task.phaseId) item.phase_id = task.phaseId;
-    if (task.tractId) item.tract_id = task.tractId;
-    if (typeof task.tileSize === "number") item.tile_size = task.tileSize;
-    if (typeof task.overlapRate === "number") item.overlap_rate = task.overlapRate;
-    if (task.dsm) item.dsm = task.dsm;
-    if (task.dem) item.dem = task.dem;
-    if (task.las) item.las = task.las;
-    if (task.exportFmt) item.export_fmt = task.exportFmt;
-    return item;
 }
 
 function FieldLabel({ title, tooltip }: { title: string; tooltip?: string }) {
@@ -661,7 +617,7 @@ function applyPickedPath(
         onChange(path);
         return;
     }
-    message.warning("当前浏览器无法读取真实路径，请手动输入；桌面版拖拽/点选可自动填入。");
+    staticMessage.warning("当前浏览器无法读取真实路径，请手动输入；桌面版拖拽/点选可自动填入。");
 }
 
 function extractTransferPath(e: DragEvent<HTMLElement>) {

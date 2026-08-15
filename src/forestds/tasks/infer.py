@@ -132,6 +132,25 @@ def run_infer_pipeline(
         overlap_rate=prep["overlap_rate"],
     )
 
+    model_input = int(getattr(detector, "imgsz", 0) or getattr(detector, "model_input", 0) or settings.get("detect.model_input", 1024))
+    if run_id:
+        try:
+            writer.update_run_metrics(
+                run_id,
+                {
+                    "image_width": width,
+                    "image_height": height,
+                    "tile_size": prep["tile_size"],
+                    "model_input": model_input,
+                    "overlap_rate": prep["overlap_rate"],
+                    "tract_id": final_tract_id,
+                    "phase_id": final_phase_id,
+                },
+                url=db_url,
+            )
+        except Exception:
+            pass
+
     # 2.3 路由并初始化对应的影像源适配器 (ImageSource)
     if mode == "physical_slice":
         log.info("【推理模式路由】-->「已落盘切片推理模式」")
@@ -177,6 +196,7 @@ def run_infer_pipeline(
             detector,
             config,
             run_id=run_id,
+            db_url=db_url,
             window_filter=window_filter,
         )
     finally:
@@ -308,6 +328,11 @@ def run_infer_pipeline(
     # ── 7. 运行指标 & run_log 终态 ─────────────────────────────────────────────
     dur = time.time() - t0
     metrics = {
+        "image_width": width,
+        "image_height": height,
+        "tile_size": prep.get("tile_size"),
+        "model_input": model_input,
+        "overlap_rate": prep.get("overlap_rate"),
         "tiles_total": result.tiles_total,
         "tiles_processed": result.tiles_processed,
         "tiles_skipped_empty": result.tiles_skipped_empty,
@@ -316,6 +341,7 @@ def run_infer_pipeline(
         "observations_written": written,
         "tract_id": tract_id,
         "phase_id": final_phase_id,
+        "export_fmt": resolved_export_fmt,
     }
     if window_filter is not None:
         metrics["effective_area_hm2"] = window_filter.effective_area_hm2

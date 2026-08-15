@@ -211,7 +211,39 @@ class ReviewInferenceService:
         attempt = next((item for item in self.sessions.workspace(session_id).attempts if item.get("attempt_id") == attempt_id), None)
         if attempt is None:
             raise ReviewNotFound("attempt 不存在。", code="attempt_not_found", details={"attempt_id": attempt_id})
-        return dict(attempt)
+        res = dict(attempt)
+        if res.get("status") == "queued":
+            res["queue_ahead_count"] = self._calculate_queue_ahead_count(session_id, attempt_id, res.get("created_at"))
+        else:
+            res["queue_ahead_count"] = 0
+        return res
+
+    def _calculate_queue_ahead_count(self, session_id: str, attempt_id: str, created_at: str | None) -> int:
+        """计算排在当前 attempt 前面的未完成作业数（包括 tasks 批量推理任务 + 同期前置的复核探测任务）。"""
+        import sqlite3
+        count = 0
+        try:
+            db_path = resolve_db_path(self.db_url)
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM runs WHERE status IN ('queued', 'running')")
+                row = cur.fetchone()
+                if row:
+                    count += int(row[0])
+        except Exception as exc:
+            log.warning("计算前序作业数失败: %s", exc)
+
+        try:
+            workspace = self.sessions.workspace(session_id)
+            if created_at:
+                for att in workspace.attempts:
+                    if att.get("attempt_id") != attempt_id and att.get("status") in {"queued", "running"}:
+                        if (att.get("created_at") or "") < created_at:
+                            count += 1
+        except Exception:
+            pass
+
+        return count
 
     def cancel_attempt(self, session_id: str, attempt_id: str) -> dict[str, Any]:
         attempt = self.get_attempt(session_id, attempt_id)
