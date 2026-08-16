@@ -37,6 +37,7 @@ export interface ReviewWorkbenchState {
   regionMetricsVisible: boolean;
   mergeMode: ReviewMergeMode;
   autoTrigger: boolean;
+  candidateThreshold: number;
 
   // 方法
   hydrate: (workspace: ReviewWorkspace) => void;
@@ -63,6 +64,7 @@ export interface ReviewWorkbenchState {
   setRegionMetricsVisible: (visible: boolean) => void;
   setMergeMode: (mode: ReviewMergeMode) => void;
   setAutoTrigger: (enabled: boolean) => void;
+  setCandidateThreshold: (threshold: number) => void;
 }
 
 function indexItems(items: ReviewItem[]) {
@@ -92,21 +94,33 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
   regionMetricsVisible: false,
   mergeMode: "append",
   autoTrigger: true,
+  candidateThreshold: 0.25,
 
-  hydrate: (workspace) => set({
-    revision: workspace.revision,
-    itemsById: indexItems(workspace.items),
-    order: workspace.items.map((item) => item.id),
-    selectedIds: [],
-    activeId: workspace.items[0]?.id ?? null,
-    activeCategory: workspace.active_category ?? workspace.category_catalog[0]?.id ?? null,
-    hiddenItemIds: [],
-    // 后端给出显式可见列表时取其补集作为隐藏项, 未给出则视为全部可见。
-    hiddenCategories: workspace.visible_categories?.length
-      ? workspace.category_catalog
-          .filter((category) => !workspace.visible_categories.includes(category.id))
-          .map((category) => category.id)
-      : [],
+  hydrate: (workspace) => set((state) => {
+    const nextCatalog = workspace.category_catalog ?? [];
+    const preservedActiveCat = state.activeCategory && nextCatalog.some((cat) => cat.id === state.activeCategory)
+      ? state.activeCategory
+      : (workspace.active_category ?? nextCatalog[0]?.id ?? null);
+
+    return {
+      revision: workspace.revision,
+      itemsById: indexItems(workspace.items),
+      order: workspace.items.map((item) => item.id),
+      selectedIds: state.selectedIds.filter((id) => workspace.items.some((item) => item.id === id)),
+      activeId: state.activeId && workspace.items.some((item) => item.id === state.activeId)
+        ? state.activeId
+        : workspace.items[0]?.id ?? null,
+      activeCategory: preservedActiveCat,
+      hiddenItemIds: state.hiddenItemIds.filter((id) => workspace.items.some((item) => item.id === id)),
+      // 仅当首次加载未初始化时使用服务端的可见性默认值，避免重绘覆盖用户当前的勾选
+      hiddenCategories: state.hiddenCategories.length > 0
+        ? state.hiddenCategories
+        : (workspace.visible_categories?.length
+            ? nextCatalog
+                .filter((category) => !workspace.visible_categories.includes(category.id))
+                .map((category) => category.id)
+            : []),
+    };
   }),
   replaceItems: (revision, items) => set((state) => ({
     revision,
@@ -151,7 +165,14 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
   })),
   setSelectedIds: (ids) => set({ selectedIds: ids, activeId: ids[0] ?? null }),
   clearSelection: () => set({ selectedIds: [], activeId: null }),
-  setActiveTool: (tool) => set({ activeTool: tool }),
+  setActiveTool: (tool) => set((state) => ({
+    activeTool: tool,
+    candidateThreshold: tool === "ai_visual" && state.candidateThreshold === 0.25
+      ? 0.05
+      : tool === "ai_text" && state.candidateThreshold === 0.05
+        ? 0.25
+        : state.candidateThreshold,
+  })),
   toggleSelectPanInversion: () => set((state) => ({ selectPanInverted: !state.selectPanInverted })),
   setSelectPanInverted: (selectPanInverted) => set({ selectPanInverted }),
   setZoom: (zoom) => set((state) => ({ zoom: typeof zoom === "function" ? zoom(state.zoom) : zoom })),
@@ -177,4 +198,5 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
   setRegionMetricsVisible: (regionMetricsVisible) => set({ regionMetricsVisible }),
   setMergeMode: (mergeMode) => set({ mergeMode }),
   setAutoTrigger: (autoTrigger) => set({ autoTrigger }),
+  setCandidateThreshold: (candidateThreshold) => set({ candidateThreshold }),
 }));

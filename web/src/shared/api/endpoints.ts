@@ -123,9 +123,10 @@ export const endpoints = {
     attemptId: string,
     revision: number,
     mergeMode: ReviewMergeMode,
+    threshold?: number,
   ): Promise<ReviewPatch> => apiPostJson(
     `/reviews/${encodeURIComponent(sessionId)}/attempts/${encodeURIComponent(attemptId)}/apply`,
-    { revision, merge_mode: mergeMode },
+    { revision, merge_mode: mergeMode, threshold },
   ),
 
   expandReviewAttempt: (sessionId: string, attemptId: string, revision: number): Promise<ReviewAttempt> =>

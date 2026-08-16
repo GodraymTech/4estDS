@@ -107,8 +107,10 @@ export function AttemptPanel({
         },
     });
 
+    const candidateThreshold = useReviewWorkbenchStore((state) => state.candidateThreshold);
+
     const apply = useMutation({
-        mutationFn: () => endpoints.applyReviewAttempt(sessionId, selectedId as string, storeRevision ?? revision, mergeMode),
+        mutationFn: () => endpoints.applyReviewAttempt(sessionId, selectedId as string, storeRevision ?? revision, mergeMode, candidateThreshold),
         onSuccess: (patch) => {
             onApplied(patch.revision, patch.items);
             onPreview([]);
@@ -122,6 +124,11 @@ export function AttemptPanel({
     const isAiTool = activeTool === "ai_text" || activeTool === "ai_visual";
 
     if (!isAiTool || !attempts.length || !current || dismissedId === selectedId) return null;
+
+    const allCount = current.candidates?.length ?? current.candidate_count ?? 0;
+    const filteredCount = current.candidates?.length
+        ? current.candidates.filter((c) => c.confidence == null || c.confidence >= candidateThreshold).length
+        : current.candidate_count ?? 0;
 
     return (
         <section className="review-attempt-panel" aria-label="AI 识别结果">
@@ -172,7 +179,9 @@ export function AttemptPanel({
                 </div>
                 <div className="stat-item">
                     <span className="stat-k">候选</span>
-                    <span className="stat-v">{current.candidate_count ?? 0}</span>
+                    <span className="stat-v">
+                        {filteredCount === allCount ? `${filteredCount}` : `${filteredCount}/${allCount}`}
+                    </span>
                 </div>
             </div>
 

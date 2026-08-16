@@ -164,9 +164,20 @@ def _get_detector(arch: str, settings):
 def _get_review_adapter(settings):
     """进程内常驻复核适配器(权重按需加载，排除 tasks 批量推理模型共存)，保证 GPU 独占。"""
     _evict_idle_models()
-    name = str(settings.get("review.adapter", "dinov"))
-    variant = str(settings.get("review.dinov_variant" if name == "dinov" else "review.model_variant", ""))
-    cache_key = f"{name}:{variant}"
+    adapter_str = str(settings.get("review.adapter", "dinov")).strip()
+    if "-" in adapter_str:
+        name, variant = adapter_str.split("-", 1)
+    elif ":" in adapter_str:
+        name, variant = adapter_str.split(":", 1)
+    else:
+        name = adapter_str
+        default_variant = "swin_l" if name == "dinov" else ("26x" if name == "yoloe" else "")
+        variant = str(
+            settings.get("review.variant")
+            or settings.get("review.dinov_variant" if name == "dinov" else "review.model_variant")
+            or default_variant
+        )
+    cache_key = f"{name.lower().strip()}:{variant.lower().strip()}"
     _evict_other_models(target_key=f"review:{cache_key}")
 
     item = _review_adapter_cache.get(cache_key)

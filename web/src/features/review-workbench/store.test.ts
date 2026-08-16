@@ -51,4 +51,40 @@ describe("review workbench incremental patch", () => {
     expect(state.itemsById["item-9999"]).toBe(untouched);
     expect(state.order).toHaveLength(10_000);
   });
+
+  it("preserves user-selected activeCategory across workspace hydration", () => {
+    useReviewWorkbenchStore.getState().hydrate({
+      revision: 0,
+      items: [],
+      category_catalog: [
+        { id: "cat-1", display_name: "树种1", model_prompt: "树种1", color: "#3b82f6" },
+        { id: "cat-2", display_name: "树种2", model_prompt: "树种2", color: "#f97316" },
+      ],
+      visible_categories: [],
+      text_prompts: [],
+      visual_exemplars: [],
+      attempts: [],
+    });
+    // 初始默认为首个树种
+    expect(useReviewWorkbenchStore.getState().activeCategory).toBe("cat-1");
+
+    // 用户手动设定为树种2
+    useReviewWorkbenchStore.getState().setActiveCategory("cat-2");
+    expect(useReviewWorkbenchStore.getState().activeCategory).toBe("cat-2");
+
+    // 画框或收到新 revision 再次触发 hydrate，不应被重置为首个树种
+    useReviewWorkbenchStore.getState().hydrate({
+      revision: 1,
+      items: [item(0)],
+      category_catalog: [
+        { id: "cat-1", display_name: "树种1", model_prompt: "树种1", color: "#3b82f6" },
+        { id: "cat-2", display_name: "树种2", model_prompt: "树种2", color: "#f97316" },
+      ],
+      visible_categories: [],
+      text_prompts: [],
+      visual_exemplars: [],
+      attempts: [],
+    });
+    expect(useReviewWorkbenchStore.getState().activeCategory).toBe("cat-2");
+  });
 });

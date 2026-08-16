@@ -13,6 +13,13 @@ import type { ReviewAttempt, ReviewCategory, ReviewItem } from "../../entities/r
 import { endpoints, queryKeys, type ReviewMapContext } from "../../shared/api";
 import { useReviewWorkbenchStore, MIN_REGION_SIDE_PX } from "./store";
 
+interface ReviewVisualExemplar {
+    item_id: string;
+    category_id: string;
+    box_px: number[];
+    [key: string]: unknown;
+}
+
 export function PromptPanel({
     sessionId,
     revision,
@@ -45,6 +52,8 @@ export function PromptPanel({
     const setMergeMode = useReviewWorkbenchStore((state) => state.setMergeMode);
     const autoTrigger = useReviewWorkbenchStore((state) => state.autoTrigger);
     const setAutoTrigger = useReviewWorkbenchStore((state) => state.setAutoTrigger);
+    const candidateThreshold = useReviewWorkbenchStore((state) => state.candidateThreshold);
+    const setCandidateThreshold = useReviewWorkbenchStore((state) => state.setCandidateThreshold);
     const latestRevision = useReviewWorkbenchStore((state) => state.revision);
 
     // 文本 Prompt: 自定义输入项 + 勾选的已有树种（默认全不选）
@@ -57,8 +66,6 @@ export function PromptPanel({
     const [targetSpecies, setTargetSpecies] = useState<string>(categories[0]?.id || "");
     const [drawnSampleBoxes, setDrawnSampleBoxes] = useState<Array<{ id: string; box_px: number[] }>>([]);
 
-    const [threshold, setThreshold] = useState(0.25);
-
     const promptType = activeTool === "ai_visual" ? "visual" : "text";
     const open = activeTool === "ai_text" || activeTool === "ai_visual";
     const maxSide = Math.max(MIN_REGION_SIDE_PX, mapContext.pixel_width, mapContext.pixel_height);
@@ -68,22 +75,11 @@ export function PromptPanel({
     // 模式切换时自适应置信度初始值（视觉 Prompt 零样本分数通常在 0.02~0.15 之间）
     useEffect(() => {
         if (activeTool === "ai_visual") {
-            setThreshold((prev) => (prev === 0.25 ? 0.05 : prev));
+            setCandidateThreshold(candidateThreshold === 0.25 ? 0.05 : candidateThreshold);
         } else if (activeTool === "ai_text") {
-            setThreshold((prev) => (prev === 0.05 ? 0.25 : prev));
+            setCandidateThreshold(candidateThreshold === 0.05 ? 0.25 : candidateThreshold);
         }
     }, [activeTool]);
-
-    // 捕获外部在地图上直接画下的视觉 Prompt 框（单一样本模式：直接设为当前样本）
-    useEffect(() => {
-        if (visualBoxSample && visualBoxSample.length === 4) {
-            const sampleId = `sample_${Date.now()}`;
-            setDrawnSampleBoxes([{ id: sampleId, box_px: visualBoxSample }]);
-            setVisualExemplarIds([]);
-            onClearVisualSample?.();
-            message.success("已捕获当前视觉单木样例");
-        }
-    }, [visualBoxSample, onClearVisualSample]);
 
     useEffect(() => {
         if (categories.length && (!targetSpecies || !categories.some((c) => c.id === targetSpecies))) {
@@ -104,8 +100,8 @@ export function PromptPanel({
         return [...fromCategories, ...fromCustom];
     }, [categories, selectedCategoryIds, customTextPrompts]);
 
-    // 组合视觉样例：单一目标样本模式
-    const allVisualExemplars = useMemo(() => {
+    // 组合视觉样例：自动模式单样本，手动模式支持多样本（最多 8 个）
+    const allVisualExemplars = useMemo<ReviewVisualExemplar[]>(() => {
         const fromExisting = items
             .filter((item) => visualExemplarIds.includes(item.id) && item.box_px?.length === 4)
             .map((item) => ({
@@ -118,8 +114,9 @@ export function PromptPanel({
             category_id: targetSpecies || categories[0]?.id || "tree",
             box_px: sample.box_px,
         }));
-        return [...fromExisting, ...fromDrawn].slice(-1);
-    }, [items, visualExemplarIds, drawnSampleBoxes, targetSpecies, categories]);
+        const combined = [...fromExisting, ...fromDrawn];
+        return autoTrigger ? combined.slice(-1) : combined.slice(-8);
+    }, [items, visualExemplarIds, drawnSampleBoxes, targetSpecies, categories, autoTrigger]);
 
     const hasValidInputs = promptType === "text" ? combinedTextPrompts.length > 0 : allVisualExemplars.length > 0;
 
@@ -141,23 +138,35 @@ export function PromptPanel({
             message.warning("选中的对象缺少矩形几何");
             return;
         }
-        setVisualExemplarIds([validBoxes[0].id]);
-        setDrawnSampleBoxes([]);
-        message.success("已采纳选中框作为视觉样例");
+        const targetId = validBoxes[0].id;
+        if (autoTrigger) {
+            setVisualExemplarIds([targetId]);
+            setDrawnSampleBoxes([]);
+            message.success("已采纳选中框作为单一样例");
+        } else {
+            setVisualExemplarIds((prev) => (prev.includes(targetId) ? prev : [...prev, targetId].slice(-8)));
+            message.success("已将选中框追加为视觉样例");
+        }
     };
 
-    const create = useMutation({
-        mutationFn: () => {
+    const create = useMutation<
+        ReviewAttempt,
+        Error,
+        { prompts?: Array<Record<string, unknown>>; visual_exemplars?: ReviewVisualExemplar[] } | void
+    >({
+        mutationFn: (overrideParams) => {
             const center = getCenterPx();
             if (!center && !isFull) throw new Error("地图正在准备中，请稍候");
+            const promptsPayload = overrideParams?.prompts ?? combinedTextPrompts;
+            const exemplarsPayload = overrideParams?.visual_exemplars ?? allVisualExemplars;
             return endpoints.createReviewAttempt(sessionId, {
                 revision: latestRevision ?? revision,
                 prompt_type: promptType,
-                prompts: combinedTextPrompts,
-                visual_exemplars: allVisualExemplars,
+                prompts: promptsPayload,
+                visual_exemplars: exemplarsPayload,
                 scope: isFull ? { type: "full" } : { type: "region", center_px: center as [number, number], side_px: regionSidePx },
                 merge_mode: mergeMode,
-                threshold,
+                threshold: candidateThreshold,
             });
         },
         onSuccess: (attempt) => {
@@ -170,14 +179,47 @@ export function PromptPanel({
         },
     });
 
-    // 视觉画框或参数变更后自动触发（若开启了 autoTrigger）
+    // 捕获外部在地图上直接画下的视觉 Prompt 框
+    useEffect(() => {
+        if (visualBoxSample && visualBoxSample.length === 4) {
+            const sampleId = `sample_${Date.now()}`;
+            const targetCat = targetSpecies || categories[0]?.id || "tree";
+            const newExemplar: ReviewVisualExemplar = {
+                item_id: sampleId,
+                category_id: targetCat,
+                box_px: visualBoxSample,
+            };
+            if (autoTrigger) {
+                // 自动模式：单样本覆盖，秒级立即发射探测
+                setDrawnSampleBoxes([{ id: sampleId, box_px: visualBoxSample }]);
+                setVisualExemplarIds([]);
+                onClearVisualSample?.();
+                create.mutate({ visual_exemplars: [newExemplar] });
+            } else {
+                // 手动多样本模式：追加样本（上限 8 个）
+                setDrawnSampleBoxes((prev) => [...prev, { id: sampleId, box_px: visualBoxSample }].slice(-8));
+                onClearVisualSample?.();
+                message.success("已添加视觉样例，可继续框选或点击开始探测");
+            }
+        }
+    }, [visualBoxSample, autoTrigger, targetSpecies, categories, onClearVisualSample]);
+
+    const promptsKey = useMemo(() => {
+        return combinedTextPrompts.map((p) => `${p.category_id}:${p.model_prompt}`).join("|");
+    }, [combinedTextPrompts]);
+
+    const exemplarsKey = useMemo(() => {
+        return allVisualExemplars.map((e) => `${e.item_id}:${e.box_px.join(",")}:${e.category_id}`).join("|");
+    }, [allVisualExemplars]);
+
+    // 参数微调后自动触发（例如调节范围或树种时；置信度滑杆仅做候选框实时留存过滤，不自动重新发起模型探测）
     useEffect(() => {
         if (!open || !autoTrigger || !hasValidInputs || create.isPending) return;
         const timer = window.setTimeout(() => {
             create.mutate();
         }, 600);
         return () => window.clearTimeout(timer);
-    }, [open, autoTrigger, hasValidInputs, promptType, combinedTextPrompts.length, allVisualExemplars.length, regionSidePx, threshold, mergeMode]);
+    }, [open, autoTrigger, hasValidInputs, promptType, promptsKey, exemplarsKey, regionSidePx, mergeMode]);
 
     const [isComposing, setIsComposing] = useState(false);
 
@@ -309,18 +351,36 @@ export function PromptPanel({
 
                     {allVisualExemplars.length ? (
                         <div className="review-ai-tags-box">
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                                <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
+                                    样例：
+                                </span>
+                                {!autoTrigger && allVisualExemplars.length > 1 ? (
+                                    <Button
+                                        type="link"
+                                        size="small"
+                                        style={{ padding: 0, height: "auto", fontSize: 11 }}
+                                        onClick={() => {
+                                            setVisualExemplarIds([]);
+                                            setDrawnSampleBoxes([]);
+                                        }}
+                                    >
+                                        清空全部
+                                    </Button>
+                                ) : null}
+                            </div>
                             <Space size={[4, 4]} wrap>
-                                {allVisualExemplars.map((ex) => (
+                                {allVisualExemplars.map((ex, idx) => (
                                     <Tag
                                         key={ex.item_id}
                                         closable
                                         color="purple"
                                         onClose={() => {
-                                            setVisualExemplarIds([]);
-                                            setDrawnSampleBoxes([]);
+                                            setVisualExemplarIds((prev) => prev.filter((id) => id !== ex.item_id));
+                                            setDrawnSampleBoxes((prev) => prev.filter((s) => s.id !== ex.item_id));
                                         }}
                                     >
-                                        当前样本框
+                                        {`#${idx + 1}`}
                                     </Tag>
                                 ))}
                             </Space>
@@ -372,12 +432,12 @@ export function PromptPanel({
                         min={0.01}
                         max={0.95}
                         step={0.01}
-                        value={threshold}
+                        value={candidateThreshold}
                         tooltip={{ formatter: (v) => `${Number(v).toFixed(2)}` }}
-                        onChange={(v) => setThreshold(Number(v))}
+                        onChange={(v) => setCandidateThreshold(Number(v))}
                         className="review-inline-slider-control"
                     />
-                    <span className="review-ai-val-text">{threshold.toFixed(2)}</span>
+                    <span className="review-ai-val-text">{candidateThreshold.toFixed(2)}</span>
                 </div>
 
                 {/* 范围：文字 [范围👁️] ===[滑杆]=== [14.7m/全图] 同一行 */}
@@ -411,7 +471,7 @@ export function PromptPanel({
             {/* 当开启了自动触发就隐匿“开始”按钮，未开启时才显示 */}
             {!autoTrigger ? (
                 <Button
-                    style={{ width: "60%", margin: "8px auto 0", alignSelf: "center" }}
+                    style={{ width: "70%", margin: "8px auto 0", alignSelf: "center" }}
                     type="primary"
                     size="middle"
                     icon={<ThunderboltOutlined />}

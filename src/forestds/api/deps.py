@@ -20,9 +20,13 @@ def get_settings():
     return load_settings()
 
 
-def get_db_url() -> str | None:
-    """当前数据库 URL(None 表示默认本地 sqlite)。"""
-    return get_settings().get("url", None)
+def get_db_url() -> str:
+    """当前数据库 URL（默认显式返回本地 sqlite 的绝对路径 URL，确保双环境共享 Worker 时定位准确）。"""
+    url = get_settings().get("url", None)
+    if url:
+        return url
+    from .. import paths
+    return f"sqlite:///{paths.default_db_path().resolve()}"
 
 
 def get_tenant_id(

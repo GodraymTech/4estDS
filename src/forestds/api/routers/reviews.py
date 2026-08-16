@@ -330,7 +330,11 @@ def apply_review_attempt(
 
     try:
         return ReviewInferenceService(db_url).apply_attempt(
-            session_id, attempt_id, revision=body.revision, merge_mode=body.merge_mode
+            session_id,
+            attempt_id,
+            revision=body.revision,
+            merge_mode=body.merge_mode,
+            threshold=body.threshold,
         )
     except ReviewError as exc:
         raise _http_error(exc) from exc

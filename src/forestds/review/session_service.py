@@ -213,6 +213,12 @@ def _restore(workspace: ReviewWorkspace, snapshot: Mapping[str, Any]) -> None:
 class ReviewSessionService:
     def __init__(self, db_url: str | None = None, *, draft_root: Path | None = None):
         self.db_url = db_url
+        if draft_root is None and db_url:
+            try:
+                resolved_db = resolve_db_path(db_url)
+                draft_root = resolved_db.parent.parent / "tmp" / "review_drafts"
+            except Exception:
+                draft_root = None
         self.drafts = DraftStore(draft_root)
 
     def create(

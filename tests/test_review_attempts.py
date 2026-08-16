@@ -90,7 +90,7 @@ def test_attempt_stays_out_of_runs_and_applies_candidates(review_db: tuple[str, 
     assert completed["candidate_count"] == 1
 
     current_revision = sessions.get(session.session_id).revision
-    applied = service.apply_attempt(session.session_id, attempt["attempt_id"], revision=current_revision)
+    applied = service.apply_attempt(session.session_id, attempt["attempt_id"], revision=current_revision, threshold=0.8)
     assert applied["status"] == "applied"
     assert len(applied["items"]) == 1
 
@@ -141,3 +141,73 @@ def test_oom_reduces_batch_once_and_keeps_completed_result(review_db: tuple[str,
     assert result["status"] == "succeeded"
     assert result["oom_batch_reduced"] is True
     assert adapter.calls == 2
+
+
+def test_build_review_adapter_configurations() -> None:
+    from forestds.config import Settings
+    from forestds.review.inference_service import build_review_adapter
+
+    # 1. DINOv 变体解析 (显式分离写法)
+    dinov_cfg = Settings({
+        "review": {
+            "adapter": "dinov",
+            "variant": "swin_l",
+            "models": {
+                "dinov": {
+                    "variants": {
+                        "swin_l": {
+                            "weights": ".4estDS/models/dinov/model_swinL.pth",
+                            "config": "configs/dinov/dinov_sam_coco_swinl_train.yaml",
+                        },
+                    },
+                },
+            },
+        },
+    })
+    dinov_adapter = build_review_adapter(dinov_cfg)
+    assert dinov_adapter.capabilities()["name"] == "dinov"
+    assert "model_swinL.pth" in dinov_adapter.capabilities()["weights"]
+
+    # 2. YOLOE 变体解析 (简写复合写法: yoloe-26x)
+    yoloe_cfg = Settings({
+        "review": {
+            "adapter": "yoloe-26x",
+            "models": {
+                "yoloe": {
+                    "text_encoder": ".4estDS/models/multimodal/mobileclip2_b.ts",
+                    "variants": {
+                        "26x": {"weights": ".4estDS/models/multimodal/yoloe-26x-seg.pt"},
+                        "26l": {"weights": ".4estDS/models/multimodal/yoloe-26l-seg.pt"},
+                    },
+                },
+            },
+        },
+    })
+    yoloe_adapter = build_review_adapter(yoloe_cfg)
+    assert yoloe_adapter.capabilities()["name"] == "yoloe"
+    assert "yoloe-26x-seg.pt" in yoloe_adapter.capabilities()["weights"]
+    assert "mobileclip2_b.ts" in (yoloe_adapter.capabilities()["mobileclip"] or "")
+
+    # 3. YOLOE 变体解析 (显式分离写法: adapter=yoloe, variant=26l)
+    yoloe_26l_cfg = Settings({
+        "review": {
+            "adapter": "yoloe",
+            "variant": "26l",
+            "models": {
+                "yoloe": {
+                    "text_encoder": ".4estDS/models/multimodal/mobileclip2_b.ts",
+                    "variants": {
+                        "26l": {"weights": ".4estDS/models/multimodal/yoloe-26l-seg.pt"},
+                    },
+                },
+            },
+        },
+    })
+    yoloe_26l_adapter = build_review_adapter(yoloe_26l_cfg)
+    assert "yoloe-26l-seg.pt" in yoloe_26l_adapter.capabilities()["weights"]
+
+    # 4. Mock Adapter 解析
+    mock_cfg = Settings({"review": {"adapter": "mock_review"}})
+    mock_adapter = build_review_adapter(mock_cfg)
+    assert mock_adapter.capabilities()["name"] == "mock_review"
+

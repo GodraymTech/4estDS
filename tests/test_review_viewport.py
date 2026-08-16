@@ -68,3 +68,57 @@ def test_candidate_nms_is_category_aware() -> None:
         {"id": "c", "species": "B", "box_px": [1, 1, 11, 11], "confidence": 0.4},
     ]
     assert [item["id"] for item in non_max_suppression(candidates, 0.6)] == ["a", "c"]
+
+
+def test_weighted_box_fusion_fuses_nested_containment_and_adjacent_boxes() -> None:
+    from forestds.review.merge_service import weighted_box_fusion
+
+    # 包含嵌套框：小框(30x30)完全在外部大框(50x50)内部，标准IoU只有0.36，但通过包含度/中心距离能被准确识别并融合为1个
+    nested_candidates = [
+        {"id": "outer", "species": "红树", "box_px": [0, 0, 50, 50], "confidence": 0.8},
+        {"id": "inner", "species": "红树", "box_px": [10, 10, 40, 40], "confidence": 0.9},
+    ]
+    fused = weighted_box_fusion(nested_candidates)
+    assert len(fused) == 1
+    assert fused[0]["species"] == "红树"
+    assert fused[0]["confidence"] == 0.9
+
+
+def test_filter_candidates_by_existing_single_and_cumulative_coverage() -> None:
+    from forestds.review.merge_service import _calculate_union_area, filter_candidates_by_existing
+
+    # 1. 测试多矩形并集面积算法
+    # 两个 10x10 的矩形，重叠 5x10，总并集面积应为 100 + 100 - 50 = 150
+    b1 = (0.0, 0.0, 10.0, 10.0)
+    b2 = (5.0, 0.0, 15.0, 10.0)
+    assert _calculate_union_area([b1, b2]) == 150.0
+
+    # 2. 单框覆盖测试
+    existing = [
+        {"id": "ex1", "species": "红树", "box_px": [0, 0, 100, 100]},
+    ]
+    candidates = [
+        # cand1: 80% 落在 ex1 内 (0~80, 0~100) -> 面积 8000 / 10000 = 80% >= 50% -> 剔除
+        {"id": "c1", "species": "红树", "box_px": [0, 0, 80, 100], "confidence": 0.9},
+        # cand2: 40% 落在 ex1 内 (60~100, 0~100) -> 面积 4000 / 10000 = 40% < 50% -> 保留
+        {"id": "c2", "species": "红树", "box_px": [60, 0, 160, 100], "confidence": 0.85},
+        # cand3: 0% 落在 ex1 内 -> 保留
+        {"id": "c3", "species": "红树", "box_px": [200, 200, 250, 250], "confidence": 0.8},
+    ]
+    filtered = filter_candidates_by_existing(candidates, existing, max_coverage_ratio=0.50)
+    assert [c["id"] for c in filtered] == ["c2", "c3"]
+
+    # 3. 多框拼接累积覆盖测试 (双树夹缝中的虚假候选框)
+    existing_pair = [
+        {"id": "tree_left", "species": "红树", "box_px": [0, 0, 50, 100]},
+        {"id": "tree_right", "species": "红树", "box_px": [70, 0, 120, 100]},
+    ]
+    # candidate 跨在两者中间: [20, 0, 100, 100] (总宽80, 面积8000)
+    # tree_left 覆盖 [20, 0, 50, 100] -> 宽30, 面积3000 (37.5%)
+    # tree_right 覆盖 [70, 0, 100, 100] -> 宽30, 面积3000 (37.5%)
+    # 单框均未达到 50%，但两框联合覆盖 6000 / 8000 = 75% >= 50% -> 必须剔除！
+    mid_candidate = [{"id": "c_mid", "species": "红树", "box_px": [20, 0, 100, 100], "confidence": 0.7}]
+    res = filter_candidates_by_existing(mid_candidate, existing_pair, max_coverage_ratio=0.50)
+    assert len(res) == 0
+
+

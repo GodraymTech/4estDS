@@ -14,12 +14,12 @@ fi
 if [[ "$ENV_MODE" == "dev" ]]; then
   PORT_API="${PORT_API:-8001}"
   PORT_WEB="${PORT_WEB:-5174}"
-  START_WORKER="${START_WORKER:-false}"
+  START_WORKER="${START_WORKER:-true}"
   ENV_LABEL="开发环境 (DEV)"
 else
   PORT_API="${PORT_API:-8000}"
   PORT_WEB="${PORT_WEB:-5173}"
-  START_WORKER="${START_WORKER:-true}"
+  START_WORKER="${START_WORKER:-false}"
   ENV_LABEL="生产环境 (PROD)"
 fi
 
@@ -127,7 +127,7 @@ start_redis() {
 
 start_worker() {
   if [[ "$START_WORKER" != "true" ]]; then
-    echo "推理 Worker: [DEV 模式跳过独立启动，共享生产 GPU 队列与 Worker]"
+    echo "推理 Worker: [PROD 模式跳过独立启动，共享开发 GPU 队列与 Worker]"
     return
   fi
 
@@ -221,7 +221,7 @@ stop_one() {
 }
 
 stop_redis() {
-  if [[ "$ENV_MODE" == "prod" ]]; then
+  if [[ "$ENV_MODE" == "dev" ]]; then
     if stop_one "Redis" "$REDIS_PID_FILE"; then
       return
     fi

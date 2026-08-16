@@ -1,5 +1,4 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { message } from "antd";
 import maplibregl, { type MapMouseEvent } from "maplibre-gl";
 import type { EffectiveAreaGeometry, ReviewCategory, ReviewItem, ReviewMapContext } from "../../shared/api";
 import { basemapById, ROAD_OVERLAY } from "../../shared/map-core";
@@ -348,8 +347,6 @@ export const CanvasViewer = forwardRef<ReviewMapHandle, CanvasViewerProps>(funct
                 return;
             }
 
-            const hasPendingCandidates = candidateItems.length > 0;
-
             // 未拖拽时的 Hover 与光标状态自适应
             if (spacePanRef.current) {
                 map.getCanvas().style.cursor = "grab";
@@ -357,7 +354,7 @@ export const CanvasViewer = forwardRef<ReviewMapHandle, CanvasViewerProps>(funct
             }
 
             if (activeTool === "draw") {
-                map.getCanvas().style.cursor = hasPendingCandidates ? "not-allowed" : "crosshair";
+                map.getCanvas().style.cursor = "crosshair";
                 return;
             }
 
@@ -365,7 +362,7 @@ export const CanvasViewer = forwardRef<ReviewMapHandle, CanvasViewerProps>(funct
                 const currentPx = lngLatToPixel([event.lngLat.lng, event.lngLat.lat], mapContext);
                 const hit = findItemAtPx(currentPx);
                 setHoveredId(hit ? hit.id : null);
-                map.getCanvas().style.cursor = hasPendingCandidates ? "not-allowed" : hit ? "pointer" : "crosshair";
+                map.getCanvas().style.cursor = hit ? "pointer" : "crosshair";
                 return;
             }
 
@@ -438,11 +435,6 @@ export const CanvasViewer = forwardRef<ReviewMapHandle, CanvasViewerProps>(funct
             const isDrawAction = (activeTool as string) === "draw" || (activeTool as string) === "ai_visual";
             if (isDrawAction) {
                 if (button === 0) {
-                    if (candidateItems.length > 0) {
-                        message.warning("当前有待确认的 AI 识别候选，请先采纳或关闭本轮结果");
-                        event.preventDefault();
-                        return;
-                    }
                     const hit = (activeTool as string) === "ai_visual" ? findItemAtPx(pointPx) : null;
                     mouseOpRef.current = {
                         type: (activeTool as string) === "ai_visual" ? "visual_prompt_draw" : "draw",
@@ -1064,7 +1056,7 @@ function addReviewLayers(map: maplibregl.Map, effectiveGeometry?: EffectiveAreaG
         },
     });
 
-    // 候选预览图层
+    // 候选预览图层（实线·内接中点平行四边形）
     map.addSource(CANDIDATE_SOURCE, { type: "geojson", data: featureCollection() });
     map.addLayer({
         id: "review-candidates-fill",
@@ -1076,7 +1068,7 @@ function addReviewLayers(map: maplibregl.Map, effectiveGeometry?: EffectiveAreaG
         id: "review-candidates-line",
         type: "line",
         source: CANDIDATE_SOURCE,
-        paint: { "line-color": ["get", "color"], "line-width": 2, "line-dasharray": [3, 2] },
+        paint: { "line-color": ["get", "color"], "line-width": 1.8 },
     });
 }
 
@@ -1092,10 +1084,13 @@ function itemCollection(
             const box = item.box_wgs84;
             const pixelBox = item.box_px?.length === 4 ? (item.box_px.map(Number) as Box) : null;
             if ((!box || box.length !== 4) && !pixelBox) return [];
-            const geometry =
-                box && box.length === 4
+            const geometry = candidate
+                ? (box && box.length === 4
+                    ? geographicDiamondPolygon(box.map(Number) as Box)
+                    : pixelDiamondPolygon(pixelBox as Box, context))
+                : (box && box.length === 4
                     ? geographicBoxPolygon(box.map(Number) as Box)
-                    : pixelBoxPolygon(pixelBox as Box, context);
+                    : pixelBoxPolygon(pixelBox as Box, context));
             return [
                 {
                     type: "Feature",
@@ -1175,6 +1170,20 @@ function pixelBoxPolygon(box: number[], context: ReviewMapContext): GeoJSON.Poly
     return { type: "Polygon", coordinates: [[...corners, corners[0]]] };
 }
 
+function pixelDiamondPolygon(box: number[], context: ReviewMapContext): GeoJSON.Polygon {
+    const clamped = clampBox(box as Box, context);
+    const [x1, y1, x2, y2] = clamped;
+    const xMid = (x1 + x2) / 2;
+    const yMid = (y1 + y2) / 2;
+    const midpoints = [
+        pixelToLngLat([xMid, y1], context),
+        pixelToLngLat([x2, yMid], context),
+        pixelToLngLat([xMid, y2], context),
+        pixelToLngLat([x1, yMid], context),
+    ];
+    return { type: "Polygon", coordinates: [[...midpoints, midpoints[0]]] };
+}
+
 function geographicBoxPolygon([west, south, east, north]: Box): GeoJSON.Polygon {
     return {
         type: "Polygon",
@@ -1185,6 +1194,23 @@ function geographicBoxPolygon([west, south, east, north]: Box): GeoJSON.Polygon 
                 [east, north],
                 [west, north],
                 [west, south],
+            ],
+        ],
+    };
+}
+
+function geographicDiamondPolygon([west, south, east, north]: Box): GeoJSON.Polygon {
+    const lngMid = (west + east) / 2;
+    const latMid = (south + north) / 2;
+    return {
+        type: "Polygon",
+        coordinates: [
+            [
+                [lngMid, north],
+                [east, latMid],
+                [lngMid, south],
+                [west, latMid],
+                [lngMid, north],
             ],
         ],
     };

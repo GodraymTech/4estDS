@@ -50,6 +50,10 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
     const active = store.activeId ? store.itemsById[store.activeId] : undefined;
     const categories = workspace.data?.category_catalog ?? [];
     const visibleItems = items.filter((item) => !store.hiddenCategories.includes(item.species));
+    const filteredCandidates = useMemo(() => {
+        const threshold = store.candidateThreshold;
+        return candidateItems.filter((item) => item.confidence == null || item.confidence >= threshold);
+    }, [candidateItems, store.candidateThreshold]);
 
     const apply = useCallback(async (operations: Array<Record<string, unknown>>, prefix = "edit") => {
         if (!operations.length) return;
@@ -206,7 +210,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
                         mapContext={mapContext.data}
                         tileUrl={endpoints.reviewTileUrl(session.data.phase_id, session.data.tiff_id)}
                         items={items}
-                        candidateItems={candidateItems}
+                        candidateItems={filteredCandidates}
                         categories={categories}
                         effectiveAreaVisible={effectiveAreaVisible}
                         onSelect={(id, additive) => store.select(id, additive)}
@@ -216,7 +220,10 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
                             if (!species) { message.warning("请先创建并选择树种类别"); return; }
                             void apply([{ type: "add", item: { box_px: boxPx, species, source: "manual", confidence: 1.0 } }], "add");
                         }}
-                        onVisualPromptBox={(boxPx) => setVisualBoxSample(boxPx)}
+                        onVisualPromptBox={(boxPx) => {
+                            setCandidateItems([]);
+                            setVisualBoxSample(boxPx);
+                        }}
                         onUpdateBox={(id, boxPx) => void apply([{ type: "update", item_id: id, patch: { box_px: boxPx } }], "resize")}
                     />
                     {/* 右侧面板左侧居中微手柄：靠近出现，点击平滑折叠/展开 */}

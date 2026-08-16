@@ -17,7 +17,7 @@ from pyproj import CRS, Transformer
 from ..db.schema import init_db, resolve_db_path
 from ..effective_area.windows import load_effective_window_filter
 from .domain import ReviewConflict, ReviewNotFound, ReviewValidationError
-from .merge_service import ReviewMergeService, weighted_box_fusion
+from .merge_service import ReviewMergeService, filter_candidates_by_existing, weighted_box_fusion
 from .models import MockReviewAdapter, RasterWindow, ReviewModelAdapter
 from .models.yoloe import YOLOEReviewAdapter
 from .session_service import ReviewSessionService
@@ -381,10 +381,24 @@ class ReviewInferenceService:
                     if candidates_truncated:
                         break
             raw_count = len(candidates)
-            candidates = weighted_box_fusion(candidates, 0.6)
+            candidates = weighted_box_fusion(candidates, 0.45)
+            # 在 append 追加模式下，自动剔除已被工作集存量标注覆盖 >= 50% 面积的候选
+            if attempt.get("merge_mode", "append") == "append":
+                try:
+                    workspace = self.sessions.workspace(session_id)
+                    before_filter = len(candidates)
+                    candidates = filter_candidates_by_existing(candidates, workspace.items, max_coverage_ratio=0.50)
+                    if before_filter > len(candidates):
+                        log.info(
+                            "复核 attempt %s 存量覆盖过滤: 原始融合=%d, 剔除存量重叠=%d, 最终待确认=%d",
+                            attempt_id, before_filter, before_filter - len(candidates), len(candidates)
+                        )
+                except Exception as exc:
+                    log.warning("复核 attempt %s 执行存量覆盖过滤异常: %s", attempt_id, exc)
+
             elapsed = time.perf_counter() - started_at
             log.info(
-                "复核 attempt %s 完成：切片=%d 原始候选=%d 融合后=%d 区外丢弃=%d 耗时=%.1fs",
+                "复核 attempt %s 完成：切片=%d 原始候选=%d 最终候选=%d 区外丢弃=%d 耗时=%.1fs",
                 attempt_id, len(windows), raw_count, len(candidates), dropped_outside, elapsed,
             )
             model_name = adapter.capabilities().get("name", "unknown")
@@ -406,7 +420,15 @@ class ReviewInferenceService:
             self._update_attempt(session_id, {**attempt, "status": "failed", "error": str(exc), "updated_at": _now()})
             raise
 
-    def apply_attempt(self, session_id: str, attempt_id: str, *, revision: int, merge_mode: str | None = None) -> dict[str, Any]:
+    def apply_attempt(
+        self,
+        session_id: str,
+        attempt_id: str,
+        *,
+        revision: int,
+        merge_mode: str | None = None,
+        threshold: float | None = None,
+    ) -> dict[str, Any]:
         attempt = self.get_attempt(session_id, attempt_id)
         if attempt["status"] != "succeeded":
             raise ReviewConflict("只有成功的 attempt 才能应用。", code="attempt_not_succeeded")
@@ -415,7 +437,13 @@ class ReviewInferenceService:
         mode = merge_mode or attempt.get("merge_mode") or "append"
         if mode not in {"append", "replace_all"}:
             raise ReviewValidationError("不支持的候选合并模式。", code="invalid_merge_mode")
-        merged = ReviewMergeService().apply(mode, workspace.items, attempt.get("candidates") or [])
+        raw_candidates = attempt.get("candidates") or []
+        if threshold is not None:
+            raw_candidates = [
+                c for c in raw_candidates
+                if c.get("confidence") is None or float(c.get("confidence")) >= float(threshold)
+            ]
+        merged = ReviewMergeService().apply(mode, workspace.items, raw_candidates)
         target_revision = session.revision
         patch = self.sessions.apply_operations(
             session_id,
@@ -566,32 +594,67 @@ class ReviewInferenceService:
 
 
 def build_review_adapter(settings) -> ReviewModelAdapter:
-    name = str(settings.get("review.adapter", "dinov"))
+    adapter_str = str(settings.get("review.adapter", "dinov")).strip()
+    if "-" in adapter_str:
+        name, variant = adapter_str.split("-", 1)
+    elif ":" in adapter_str:
+        name, variant = adapter_str.split(":", 1)
+    else:
+        name = adapter_str
+        default_variant = "swin_l" if name == "dinov" else ("26x" if name == "yoloe" else "")
+        variant = str(
+            settings.get("review.variant")
+            or settings.get("review.dinov_variant" if name == "dinov" else "review.model_variant")
+            or default_variant
+        )
+
+    name = name.lower().strip()
+    variant = variant.lower().strip()
+
     if name == "mock_review":
         return MockReviewAdapter()
+
     if name == "dinov":
         from .models.dinov import DINOvReviewAdapter
 
-        variant = str(settings.get("review.dinov_variant", "swin_t"))
-        weights = settings.get(
-            f"review.models.dinov.{variant}.weights",
-            settings.get("review.dinov_weights", ".4estDS/models/dinov/model_swinT.pth"),
+        variant = variant or "swin_l"
+        weights = (
+            settings.get(f"review.models.dinov.variants.{variant}.weights")
+            or settings.get(f"review.models.dinov.{variant}.weights")
+            or settings.get("review.dinov_weights")
+            or f".4estDS/models/dinov/model_{variant.capitalize() if 'swin' in variant else variant}.pth"
         )
-        config_path = settings.get(
-            f"review.models.dinov.{variant}.config",
-            settings.get("review.dinov_config", "configs/dinov/dinov_sam_coco_train.yaml"),
+        config_path = (
+            settings.get(f"review.models.dinov.variants.{variant}.config")
+            or settings.get(f"review.models.dinov.{variant}.config")
+            or settings.get("review.dinov_config")
+            or ("configs/dinov/dinov_sam_coco_swinl_train.yaml" if variant == "swin_l" else "configs/dinov/dinov_sam_coco_train.yaml")
         )
         return DINOvReviewAdapter(
             weights=weights,
             config_path=config_path,
             device=settings.get("review.device", settings.get("detect.device")),
-            conf=float(settings.get("review.conf_threshold", 0.50)),
+            conf=float(settings.get("review.conf_threshold", 0.15)),
             imgsz=int(settings.get("review.model_input", 640)),
         )
-    variant = str(settings.get("review.model_variant", "26x"))
+
+    # yoloe (26x / 26l)
+    variant = variant or "26x"
+    weights = (
+        settings.get(f"review.models.yoloe.variants.{variant}.weights")
+        or settings.get(f"review.models.yoloe.{variant}.weights")
+        or settings.get(f"review.models.{variant}.weights")
+        or f".4estDS/models/multimodal/yoloe-{variant}-seg.pt"
+    )
+    mobileclip = (
+        settings.get("review.models.yoloe.text_encoder")
+        or settings.get("review.models.yoloe.mobileclip_weights")
+        or settings.get("review.mobileclip_weights")
+        or ".4estDS/models/multimodal/mobileclip2_b.ts"
+    )
     return YOLOEReviewAdapter(
-        settings.get(f"review.models.{variant}.weights"),
-        mobileclip=settings.get("review.mobileclip_weights"),
+        weights,
+        mobileclip=mobileclip,
         device=settings.get("review.device", settings.get("detect.device")),
         conf=float(settings.get("review.conf_threshold", 0.25)),
         imgsz=int(settings.get("review.model_input", 1024)),

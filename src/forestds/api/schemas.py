@@ -316,6 +316,7 @@ class ReviewAttemptCreate(BaseModel):
 class ReviewAttemptApply(BaseModel):
     revision: int = Field(..., ge=0)
     merge_mode: Optional[Literal["append", "replace_all"]] = None
+    threshold: Optional[float] = None
 
 
 class ReviewAttemptExpand(BaseModel):

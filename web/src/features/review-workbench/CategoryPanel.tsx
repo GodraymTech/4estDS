@@ -123,13 +123,13 @@ export function CategoryPanel({
                             }}
                         />
                     </div>
-                    <Tooltip title="新增树种">
+                    <Tooltip title="新增">
                         <Button
                             type="text"
                             size="small"
                             className="review-icon-button"
                             icon={<PlusOutlined />}
-                            aria-label="新增树种"
+                            aria-label="新增"
                             onClick={() => {
                                 setIsAdding(true);
                                 setTimeout(() => addInputRef.current?.focus(), 60);
