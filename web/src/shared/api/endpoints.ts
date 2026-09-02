@@ -103,7 +103,7 @@ export const endpoints = {
     sessionId: string,
     body: {
       revision: number;
-      prompt_type: "text" | "visual";
+      prompt_type: "text" | "visual" | "direct";
       prompts: Array<Record<string, unknown>>;
       visual_exemplars: Array<Record<string, unknown>>;
       scope: ReviewScope;

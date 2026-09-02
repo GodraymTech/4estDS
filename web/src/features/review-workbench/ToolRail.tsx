@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Button, Divider, Popover, Segmented, Space, Switch, Tooltip, Typography } from "antd";
+import { ThunderboltOutlined } from "@ant-design/icons";
 import {
   ClearIcon,
   CompassIcon,
@@ -49,6 +50,7 @@ interface ToolSpec {
 const TOOLS: ToolSpec[] = [
   { id: "select", icon: <CursorIcon />, title: "选择与拖拽", shortcut: "V" },
   { id: "draw", icon: <FrameIcon />, title: "手绘", shortcut: "R" },
+  { id: "ai_direct", icon: <ThunderboltOutlined />, title: "AI直接辅助", shortcut: "D" },
   { id: "ai_text", icon: <SparkleIcon />, title: "AI文本辅助", shortcut: "T" },
   { id: "ai_visual", icon: <SparkleFrameIcon />, title: "AI视觉辅助", shortcut: "I" },
 ];

@@ -366,7 +366,7 @@ export const CanvasViewer = forwardRef<ReviewMapHandle, CanvasViewerProps>(funct
                 return;
             }
 
-            if (activeTool === "ai_text") {
+            if (activeTool === "ai_text" || activeTool === "ai_direct") {
                 map.getCanvas().style.cursor = "grab";
                 return;
             }
@@ -418,8 +418,8 @@ export const CanvasViewer = forwardRef<ReviewMapHandle, CanvasViewerProps>(funct
                 return;
             }
 
-            // 空格漫游，或文本 Prompt 工具下的自由平移
-            if (spacePanRef.current || activeTool === "ai_text") {
+            // 空格漫游，或文本/直接探测工具下的自由平移
+            if (spacePanRef.current || activeTool === "ai_text" || activeTool === "ai_direct") {
                 mouseOpRef.current = {
                     type: "pan",
                     button,

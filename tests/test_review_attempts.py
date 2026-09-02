@@ -28,10 +28,11 @@ class CandidateAdapter:
         return PromptContext(mode="visual", class_ids=list(category_ids or ["A"]))
 
     def predict_batch(self, windows, context):
+        cat = context.class_ids[0] if context.class_ids else "tree"
         return [ReviewPrediction(
             box_px=[window.x + 2, window.y + 2, window.x + 12, window.y + 12],
             score=0.9,
-            category_id=context.class_ids[0],
+            category_id=cat,
         ) for window in windows]
 
     def normalize(self, results, windows, context):
@@ -206,8 +207,72 @@ def test_build_review_adapter_configurations() -> None:
     yoloe_26l_adapter = build_review_adapter(yoloe_26l_cfg)
     assert "yoloe-26l-seg.pt" in yoloe_26l_adapter.capabilities()["weights"]
 
-    # 4. Mock Adapter 解析
+    # 4. YOLOE 遥感强化变体 (yoloe-26x-m07)
+    yoloe_m07_cfg = Settings({
+        "review": {
+            "adapter": "yoloe-26x-m07",
+            "models": {
+                "yoloe": {
+                    "text_encoder": ".4estDS/models/multimodal/mobileclip2_b.ts",
+                    "variants": {
+                        "26x-m07": {"weights": ".4estDS/models/multimodal/yoloe-26x-m07.pt"},
+                    },
+                },
+            },
+        },
+    })
+    yoloe_m07_adapter = build_review_adapter(yoloe_m07_cfg)
+    assert yoloe_m07_adapter.capabilities()["name"] == "yoloe"
+    assert "yoloe-26x-m07.pt" in yoloe_m07_adapter.capabilities()["weights"]
+
+    # 5. 闭集专家模型 (yolo / m07)
+    yolo_cfg = Settings({
+        "review": {
+            "adapter": "yolo",
+            "variant": "m07",
+            "models": {
+                "yolo": {
+                    "variants": {
+                        "m07": {"weights": ".4estDS/models/m07-yolo26x-7d20f-det-2cls-e152_baseTrain15.pt"},
+                    },
+                },
+            },
+        },
+    })
+    yolo_adapter = build_review_adapter(yolo_cfg)
+    assert yolo_adapter.capabilities()["name"] == "yolo"
+    assert yolo_adapter.capabilities()["direct_detection"] is True
+    assert "m07-yolo26x" in yolo_adapter.capabilities()["weights"]
+
+    # 6. Mock Adapter 解析
     mock_cfg = Settings({"review": {"adapter": "mock_review"}})
     mock_adapter = build_review_adapter(mock_cfg)
     assert mock_adapter.capabilities()["name"] == "mock_review"
+
+
+def test_create_direct_attempt(review_db: tuple[str, Path]) -> None:
+    url, drafts = review_db
+    image = drafts.parent / "attempt_direct.tif"
+    _attach_tiff(url, image)
+    sessions = ReviewSessionService(url, draft_root=drafts)
+    session = sessions.create(PHASE, TIFF, "fresh")
+    service = ReviewInferenceService(url, session_service=sessions, tile_size=64, batch_size=2)
+
+    attempt = service.create_attempt(
+        session.session_id,
+        revision=0,
+        prompt_type="direct",
+        prompts=[],
+        scope={"type": "region", "center_px": [50.0, 50.0], "side_px": 50.0},
+    )
+    assert attempt["prompt_type"] == "direct"
+    assert attempt["status"] == "queued"
+
+    # 执行 direct 探测
+    result = service.run_attempt(session.session_id, attempt["attempt_id"], adapter=CandidateAdapter())
+    assert result["status"] == "succeeded"
+    assert result["candidate_count"] > 0
+
+
+
 

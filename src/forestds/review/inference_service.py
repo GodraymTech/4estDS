@@ -18,7 +18,14 @@ from ..db.schema import init_db, resolve_db_path
 from ..effective_area.windows import load_effective_window_filter
 from .domain import ReviewConflict, ReviewNotFound, ReviewValidationError
 from .merge_service import ReviewMergeService, filter_candidates_by_existing, weighted_box_fusion
-from .models import MockReviewAdapter, RasterWindow, ReviewModelAdapter
+from .models import (
+    MockReviewAdapter,
+    PromptContext,
+    RasterWindow,
+    ReviewModelAdapter,
+    ReviewPrediction,
+    YOLOReviewAdapter,
+)
 from .models.yoloe import YOLOEReviewAdapter
 from .session_service import ReviewSessionService
 
@@ -167,8 +174,8 @@ class ReviewInferenceService:
         visual_exemplars: list[dict[str, Any]] | None = None,
         parent_attempt_id: str | None = None,
     ) -> dict[str, Any]:
-        if prompt_type not in {"text", "visual"}:
-            raise ReviewValidationError("prompt_type 必须是 text 或 visual。", code="invalid_prompt_type")
+        if prompt_type not in {"text", "visual", "direct"}:
+            raise ReviewValidationError("prompt_type 必须是 text、visual 或 direct。", code="invalid_prompt_type")
         if merge_mode not in {"append", "replace_all"}:
             raise ReviewValidationError("不支持的候选合并模式。", code="invalid_merge_mode")
         scope = _normalize_scope(scope)
@@ -544,8 +551,15 @@ class ReviewInferenceService:
 
     @staticmethod
     def _prompt_context(adapter: ReviewModelAdapter, attempt: dict[str, Any], source):
+        if attempt.get("prompt_type") in {"direct", "none", "auto"}:
+            class_ids = [p["category_id"] for p in attempt.get("prompts") or [] if "category_id" in p]
+            if not class_ids and hasattr(adapter, "capabilities"):
+                class_ids = list(adapter.capabilities().get("classes", []))
+            return PromptContext(mode="direct", class_ids=class_ids)
+
         if attempt["prompt_type"] == "text":
             return adapter.prepare_text_prompts(attempt["prompts"])
+
         exemplars = attempt.get("visual_exemplars") or []
         boxes = [list(map(float, item["box_px"])) for item in exemplars]
         categories = list(dict.fromkeys(str(item["category_id"]) for item in exemplars))
@@ -554,10 +568,10 @@ class ReviewInferenceService:
         from rasterio.enums import Resampling
         from rasterio.windows import Window
 
-        left_box = min(box[0] for box in boxes)
-        top_box = min(box[1] for box in boxes)
-        right_box = max(box[2] for box in boxes)
-        bottom_box = max(box[3] for box in boxes)
+        left_box = min(box[0] for box in boxes) if boxes else 0.0
+        top_box = min(box[1] for box in boxes) if boxes else 0.0
+        right_box = max(box[2] for box in boxes) if boxes else 10.0
+        bottom_box = max(box[3] for box in boxes) if boxes else 10.0
         box_w = max(1.0, right_box - left_box)
         box_h = max(1.0, bottom_box - top_box)
         center_x = (left_box + right_box) / 2
@@ -601,7 +615,7 @@ def build_review_adapter(settings) -> ReviewModelAdapter:
         name, variant = adapter_str.split(":", 1)
     else:
         name = adapter_str
-        default_variant = "swin_l" if name == "dinov" else ("26x" if name == "yoloe" else "")
+        default_variant = "swin_l" if name == "dinov" else ("m07" if name == "yolo" else ("26x-m07" if name == "yoloe" else ""))
         variant = str(
             settings.get("review.variant")
             or settings.get("review.dinov_variant" if name == "dinov" else "review.model_variant")
@@ -613,6 +627,23 @@ def build_review_adapter(settings) -> ReviewModelAdapter:
 
     if name == "mock_review":
         return MockReviewAdapter()
+
+    if name in {"yolo", "m07"}:
+        from .models.yolo import YOLOReviewAdapter
+
+        variant = variant or "m07"
+        weights = (
+            settings.get(f"review.models.yolo.variants.{variant}.weights")
+            or settings.get(f"review.models.yolo.{variant}.weights")
+            or settings.get(f"review.models.{variant}.weights")
+            or ".4estDS/models/m07-yolo26x-7d20f-det-2cls-e152_baseTrain15.pt"
+        )
+        return YOLOReviewAdapter(
+            weights,
+            device=settings.get("review.device", settings.get("detect.device")),
+            conf=float(settings.get("review.conf_threshold", 0.25)),
+            imgsz=int(settings.get("review.model_input", 640)),
+        )
 
     if name == "dinov":
         from .models.dinov import DINOvReviewAdapter
@@ -638,13 +669,13 @@ def build_review_adapter(settings) -> ReviewModelAdapter:
             imgsz=int(settings.get("review.model_input", 640)),
         )
 
-    # yoloe (26x / 26l)
-    variant = variant or "26x"
+    # yoloe (26x-m07 / 26x / 26l)
+    variant = variant or "26x-m07"
     weights = (
         settings.get(f"review.models.yoloe.variants.{variant}.weights")
         or settings.get(f"review.models.yoloe.{variant}.weights")
         or settings.get(f"review.models.{variant}.weights")
-        or f".4estDS/models/multimodal/yoloe-{variant}-seg.pt"
+        or (f".4estDS/models/multimodal/yoloe-{variant}.pt" if "m07" in variant else f".4estDS/models/multimodal/yoloe-{variant}-seg.pt")
     )
     mobileclip = (
         settings.get("review.models.yoloe.text_encoder")

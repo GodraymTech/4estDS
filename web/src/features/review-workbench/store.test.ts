@@ -87,4 +87,13 @@ describe("review workbench incremental patch", () => {
     });
     expect(useReviewWorkbenchStore.getState().activeCategory).toBe("cat-2");
   });
+
+  it("defaults autoTrigger to false when switching to ai_direct", () => {
+    useReviewWorkbenchStore.setState({ autoTrigger: true });
+    expect(useReviewWorkbenchStore.getState().autoTrigger).toBe(true);
+
+    useReviewWorkbenchStore.getState().setActiveTool("ai_direct");
+    expect(useReviewWorkbenchStore.getState().activeTool).toBe("ai_direct");
+    expect(useReviewWorkbenchStore.getState().autoTrigger).toBe(false);
+  });
 });

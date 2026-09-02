@@ -161,9 +161,34 @@ def _get_detector(arch: str, settings):
     return item["model"]
 
 
-def _get_review_adapter(settings):
+def _get_review_adapter(settings, prompt_type: str = "visual"):
     """进程内常驻复核适配器(权重按需加载，排除 tasks 批量推理模型共存)，保证 GPU 独占。"""
     _evict_idle_models()
+    if prompt_type == "direct":
+        cache_key = "yolo:m07"
+        _evict_other_models(target_key=f"review:{cache_key}")
+        item = _review_adapter_cache.get(cache_key)
+        if item is None:
+            from ..review.models.yolo import YOLOReviewAdapter
+
+            weights = (
+                settings.get("review.models.yolo.variants.m07.weights")
+                or settings.get("review.models.yolo.m07.weights")
+                or ".4estDS/models/m07-yolo26x-7d20f-det-2cls-e152_baseTrain15.pt"
+            )
+            adapter = YOLOReviewAdapter(
+                weights,
+                device=settings.get("review.device", settings.get("detect.device")),
+                conf=float(settings.get("review.conf_threshold", 0.25)),
+                imgsz=int(settings.get("review.model_input", 640)),
+            )
+            item = {"model": adapter, "last_used": time.time()}
+            _review_adapter_cache[cache_key] = item
+            log.info("GPU worker 加载闭集专家复核适配器(互斥独占): key={}", cache_key)
+        else:
+            item["last_used"] = time.time()
+        return item["model"]
+
     adapter_str = str(settings.get("review.adapter", "dinov")).strip()
     if "-" in adapter_str:
         name, variant = adapter_str.split("-", 1)
@@ -171,7 +196,7 @@ def _get_review_adapter(settings):
         name, variant = adapter_str.split(":", 1)
     else:
         name = adapter_str
-        default_variant = "swin_l" if name == "dinov" else ("26x" if name == "yoloe" else "")
+        default_variant = "swin_l" if name == "dinov" else ("m07" if name == "yolo" else ("26x-m07" if name == "yoloe" else ""))
         variant = str(
             settings.get("review.variant")
             or settings.get("review.dinov_variant" if name == "dinov" else "review.model_variant")
@@ -183,6 +208,7 @@ def _get_review_adapter(settings):
     item = _review_adapter_cache.get(cache_key)
     if item is None:
         from ..review.inference_service import build_review_adapter
+
         adapter = build_review_adapter(settings)
         item = {"model": adapter, "last_used": time.time()}
         _review_adapter_cache[cache_key] = item
@@ -252,7 +278,9 @@ def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) ->
         effective_area_cache_size=int(settings.get("effective_area.mask_cache_size", 32)),
     )
     try:
-        adapter = _get_review_adapter(settings)
+        attempt_obj = service.get_attempt(session_id, attempt_id)
+        prompt_type = attempt_obj.get("prompt_type", "visual")
+        adapter = _get_review_adapter(settings, prompt_type=prompt_type)
         result = service.run_attempt(session_id, attempt_id, adapter=adapter)
         log.info(
             "复核 attempt 完成: session={} attempt={} candidates={}",

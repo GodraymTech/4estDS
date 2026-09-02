@@ -121,7 +121,7 @@ export function AttemptPanel({
     });
 
     const activeTool = useReviewWorkbenchStore((state) => state.activeTool);
-    const isAiTool = activeTool === "ai_text" || activeTool === "ai_visual";
+    const isAiTool = activeTool === "ai_text" || activeTool === "ai_visual" || activeTool === "ai_direct";
 
     if (!isAiTool || !attempts.length || !current || dismissedId === selectedId) return null;
 

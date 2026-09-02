@@ -66,17 +66,17 @@ export function PromptPanel({
     const [targetSpecies, setTargetSpecies] = useState<string>(categories[0]?.id || "");
     const [drawnSampleBoxes, setDrawnSampleBoxes] = useState<Array<{ id: string; box_px: number[] }>>([]);
 
-    const promptType = activeTool === "ai_visual" ? "visual" : "text";
-    const open = activeTool === "ai_text" || activeTool === "ai_visual";
+    const promptType = activeTool === "ai_direct" ? "direct" : activeTool === "ai_visual" ? "visual" : "text";
+    const open = activeTool === "ai_text" || activeTool === "ai_visual" || activeTool === "ai_direct";
     const maxSide = Math.max(MIN_REGION_SIDE_PX, mapContext.pixel_width, mapContext.pixel_height);
     const sliderPosition = regionSidePx >= maxSide ? 100 : sideToSlider(regionSidePx, maxSide);
     const isFull = sliderPosition >= 99.8;
 
-    // 模式切换时自适应置信度初始值（视觉 Prompt 零样本分数通常在 0.02~0.15 之间）
+    // 模式切换时自适应置信度初始值（视觉 Prompt 零样本分数通常在 0.02~0.15 之间，直接/文本探测在 0.25 左右）
     useEffect(() => {
         if (activeTool === "ai_visual") {
             setCandidateThreshold(candidateThreshold === 0.25 ? 0.05 : candidateThreshold);
-        } else if (activeTool === "ai_text") {
+        } else if (activeTool === "ai_text" || activeTool === "ai_direct") {
             setCandidateThreshold(candidateThreshold === 0.05 ? 0.25 : candidateThreshold);
         }
     }, [activeTool]);
@@ -118,7 +118,7 @@ export function PromptPanel({
         return autoTrigger ? combined.slice(-1) : combined.slice(-8);
     }, [items, visualExemplarIds, drawnSampleBoxes, targetSpecies, categories, autoTrigger]);
 
-    const hasValidInputs = promptType === "text" ? combinedTextPrompts.length > 0 : allVisualExemplars.length > 0;
+    const hasValidInputs = promptType === "direct" ? true : promptType === "text" ? combinedTextPrompts.length > 0 : allVisualExemplars.length > 0;
 
     const handleAddCustomText = () => {
         const trimmed = customInputText.trim();
@@ -190,13 +190,11 @@ export function PromptPanel({
                 box_px: visualBoxSample,
             };
             if (autoTrigger) {
-                // 自动模式：单样本覆盖，秒级立即发射探测
-                setDrawnSampleBoxes([{ id: sampleId, box_px: visualBoxSample }]);
                 setVisualExemplarIds([]);
+                setDrawnSampleBoxes([{ id: sampleId, box_px: visualBoxSample }]);
                 onClearVisualSample?.();
                 create.mutate({ visual_exemplars: [newExemplar] });
             } else {
-                // 手动多样本模式：追加样本（上限 8 个）
                 setDrawnSampleBoxes((prev) => [...prev, { id: sampleId, box_px: visualBoxSample }].slice(-8));
                 onClearVisualSample?.();
                 message.success("已添加视觉样例，可继续框选或点击开始探测");
@@ -212,7 +210,7 @@ export function PromptPanel({
         return allVisualExemplars.map((e) => `${e.item_id}:${e.box_px.join(",")}:${e.category_id}`).join("|");
     }, [allVisualExemplars]);
 
-    // 参数微调后自动触发（例如调节范围或树种时；置信度滑杆仅做候选框实时留存过滤，不自动重新发起模型探测）
+    // 参数微调后自动触发
     useEffect(() => {
         if (!open || !autoTrigger || !hasValidInputs || create.isPending) return;
         const timer = window.setTimeout(() => {
@@ -235,8 +233,21 @@ export function PromptPanel({
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
         >
-            {/* 文本模式：无 title，输入树种在输入框左侧，无 placeholder */}
-            {promptType === "text" ? (
+            {promptType === "direct" ? (
+                /* 直接模式：调用已微调专家模型，无需输入或画框 */
+                <div className="review-ai-block" style={{ padding: "8px 10px", background: "rgba(255, 255, 255, 0.04)", borderRadius: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <ThunderboltOutlined style={{ color: "#38bdf8", fontSize: 14 }} />
+                        <span style={{ color: "#38bdf8", fontSize: 12, fontWeight: 600 }}>
+                            闭集专家直接探测
+                        </span>
+                    </div>
+                    <span style={{ fontSize: 11, color: "var(--review-text-secondary, #94a3b8)", display: "block", marginTop: 4, lineHeight: "1.35" }}>
+                        直接调用遥感林木专家模型（如 M07）在当前视口内全自动探测已知树种，无需画框或输入自然语言 Prompt。
+                    </span>
+                </div>
+            ) : promptType === "text" ? (
+                /* 文本模式：无 title，输入树种在输入框左侧，无 placeholder */
                 <div className="review-ai-block">
                     <div className="review-ai-row">
                         <div className="review-ai-inline-label">

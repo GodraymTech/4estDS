@@ -150,6 +150,7 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
                 }
             }
             else if (key === "r") store.setActiveTool("draw");
+            else if (key === "d") store.setActiveTool("ai_direct");
             else if (key === "t") store.setActiveTool("ai_text");
             else if (key === "i") store.setActiveTool("ai_visual");
             else if (/^[1-9]$/.test(key)) {

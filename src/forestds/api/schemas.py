@@ -305,7 +305,7 @@ ReviewAttemptScope = Annotated[
 
 class ReviewAttemptCreate(BaseModel):
     revision: int = Field(..., ge=0)
-    prompt_type: Literal["text", "visual"]
+    prompt_type: Literal["text", "visual", "direct"]
     prompts: list[dict[str, Any]] = Field(default_factory=list)
     visual_exemplars: list[dict[str, Any]] = Field(default_factory=list)
     scope: ReviewAttemptScope

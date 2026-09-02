@@ -3,7 +3,7 @@ import type { ReviewItem, ReviewPatch, ReviewWorkspace } from "../../entities/re
 import type { ReviewMergeMode } from "../../shared/api/types";
 
 /** 选择与平移、手动画框、AI 交互工具 */
-export type WorkbenchTool = "select" | "draw" | "ai_text" | "ai_visual";
+export type WorkbenchTool = "select" | "draw" | "ai_direct" | "ai_text" | "ai_visual";
 
 /** AI 识别范围滑杆左端对应的最小边长(全局像素)。 */
 export const MIN_REGION_SIDE_PX = 1280;
@@ -167,9 +167,10 @@ export const useReviewWorkbenchStore = create<ReviewWorkbenchState>((set) => ({
   clearSelection: () => set({ selectedIds: [], activeId: null }),
   setActiveTool: (tool) => set((state) => ({
     activeTool: tool,
+    autoTrigger: tool === "ai_direct" ? false : state.autoTrigger,
     candidateThreshold: tool === "ai_visual" && state.candidateThreshold === 0.25
       ? 0.05
-      : tool === "ai_text" && state.candidateThreshold === 0.05
+      : (tool === "ai_text" || tool === "ai_direct") && state.candidateThreshold === 0.05
         ? 0.25
         : state.candidateThreshold,
   })),
