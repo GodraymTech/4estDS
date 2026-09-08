@@ -233,6 +233,7 @@ def infer_actor(run_id: str, request_dict: dict) -> None:
     """单图推理作业(GPU 串行执行)。
 
     向管线注入进程内常驻的检测器工厂，使同一 arch 的权重在多次推理之间常驻显存。
+    通过系统级 gpu_exclusive_lock 确保跨进程/跨环境 GPU 互斥与排队。
     """
     settings = _get_settings()
     _setup_actor_logging(settings, run_id, "infer")
@@ -240,13 +241,15 @@ def infer_actor(run_id: str, request_dict: dict) -> None:
 
     try:
         from ..service import run_inference_job
+        from .gpu_lock import gpu_exclusive_lock
 
-        metrics = run_inference_job(
-            request,
-            settings=settings,
-            run_id=run_id,
-            detector_factory=lambda arch: _get_detector(arch, settings),
-        )
+        with gpu_exclusive_lock():
+            metrics = run_inference_job(
+                request,
+                settings=settings,
+                run_id=run_id,
+                detector_factory=lambda arch: _get_detector(arch, settings),
+            )
         log.info(
             "推理作业完成: run_id={} 单木数={} 耗时={:.2f}s",
             run_id,
@@ -268,6 +271,7 @@ def batch_actor(run_id: str, request_dict: dict) -> None:
 def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) -> None:
     settings = _get_settings()
     from ..review.inference_service import ReviewInferenceService
+    from .gpu_lock import gpu_exclusive_lock
 
     service = ReviewInferenceService(
         db_url,
@@ -281,7 +285,8 @@ def _run_review_attempt(session_id: str, attempt_id: str, db_url: str | None) ->
         attempt_obj = service.get_attempt(session_id, attempt_id)
         prompt_type = attempt_obj.get("prompt_type", "visual")
         adapter = _get_review_adapter(settings, prompt_type=prompt_type)
-        result = service.run_attempt(session_id, attempt_id, adapter=adapter)
+        with gpu_exclusive_lock():
+            result = service.run_attempt(session_id, attempt_id, adapter=adapter)
         log.info(
             "复核 attempt 完成: session={} attempt={} candidates={}",
             session_id,

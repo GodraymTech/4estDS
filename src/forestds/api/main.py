@@ -51,7 +51,39 @@ def create_app() -> FastAPI:
     app.include_router(tiles.router, prefix=API_PREFIX)
     app.include_router(reviews.router, prefix=API_PREFIX)
     app.include_router(observations.router, prefix=API_PREFIX)
+
+    # 静态前端 SPA 托管 (制品发布生产模式)
+    static_dir = os.environ.get("FORESTDS_STATIC_DIR")
+    if not static_dir:
+        candidate = os.path.join(os.getcwd(), "dist")
+        if os.path.isdir(candidate):
+            static_dir = candidate
+
+    if static_dir and os.path.isdir(static_dir):
+        from fastapi.staticfiles import StaticFiles
+        from starlette.responses import FileResponse
+
+        assets_dir = os.path.join(static_dir, "assets")
+        if os.path.isdir(assets_dir):
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
+
+        index_file = os.path.join(static_dir, "index.html")
+
+        @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+        async def serve_spa(full_path: str):
+            if full_path.startswith("api/") or full_path.startswith("healthz") or full_path.startswith("health"):
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail="Not Found")
+            file_path = os.path.join(static_dir, full_path)
+            if full_path and os.path.isfile(file_path):
+                return FileResponse(file_path)
+            if os.path.isfile(index_file):
+                return FileResponse(index_file)
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Frontend index.html not found")
+
     return app
 
 
 app = create_app()
+

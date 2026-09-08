@@ -40,34 +40,119 @@ uv run 4estds infer data/多源数据研究_徐闻/DOM/xuwen_1024px.jpg --arch m
 - `outputs/`: 推理报告、可视化、导出文件、静态切片等产物
 - `models/`: 本地模型权重目录
 
-### 3. 启动 API 与前端
+### 3. 服务启动 (开发与生产环境彻底解耦)
 
-终端 1:
+本项目采用业内推荐的 **开发-生产解耦** 架构：开发环境专注按需调试，生产环境基于 **制品发布 (Artifact Release)** 模式并由 `systemd` 守护开机自启。
 
-```bash
-uv run uvicorn forestds.api.main:app --reload --host 127.0.0.1 --port 8000
-```
+#### 方案 A: 本地开发环境 (DEV: 8001 / 5174)
 
-终端 2:
+适合日常编码与热重载调试。由根目录 `./start.sh` 一键管理 Redis、Worker、FastAPI (8001) 与 Vite 前端 (5174):
 
 ```bash
-cd web
-mise exec -- pnpm install --config.store-dir=/tmp/forestds-pnpm-store
-mise exec -- pnpm run dev
+./start.sh start     # 一键拉起开发全服务
+./start.sh status    # 查看开发服务状态
+./start.sh stop      # 停止开发服务释放显存与端口
+./start.sh restart   # 重启开发服务
 ```
+- **Web 界面**: `http://localhost:5174` (带 HMR 热重载)
+- **API 接口**: `http://127.0.0.1:8001/api/v1`
 
-浏览器打开 `http://127.0.0.1:5173`。Vite 会把 `/api` 代理到 `http://127.0.0.1:8000`。
+#### 方案 B: 生产制品发布模式 (PROD: 单端口 8000 SPA)
 
-### 4. 启动异步 Worker
+生产环境采用不可变制品发布体系，**无 `.git` 依赖**，前端编译为静态资源由 FastAPI 同源托管，统一运行在端口 `8000`。
 
-前端任务中心提交推理作业时，需要 Redis 和 Dramatiq worker:
+1. **版本发布打包**:
+   ```bash
+   ./scripts/release.sh v1.0.2
+   ```
+   自动化构建前端 `dist/`、同步 Python 生产依赖，并原子切换至 `/home/ray/rays/release/4estds`。
 
+2. **生产守护与开机自启 (Systemd 用户服务)**:
+   由 Linux 原生 `systemd --user` 托管，开机自动运行且故障自动重启：
+   ```bash
+   systemctl --user status 4estds    # 查看生产服务状态
+   systemctl --user restart 4estds   # 重启生产服务
+   systemctl --user stop 4estds      # 停止生产服务
+   journalctl --user -u 4estds -f    # 实时查看生产日志
+   ```
+- **生产统一入口**: `http://localhost:8000` (同时承载 Web 页面与全部 API，零跨域)
+- **共享持久化数据**: 位于 `/home/ray/rays/release/4estds/shared/`（数据库、日志、私密密钥与模型软链接）
+
+#### 新机器生产标准部署 SOP (跨机器迁移指南)
+
+> [!IMPORTANT]
+> **环境选型准则**：
+> 本系统依赖深度学习与底层 GIS C++ 扩展库（GDAL、rasterio、Dramatiq 异步队列），**强烈建议部署在 Linux (Ubuntu 22.04/24.04) 或 Windows 10/11 的 WSL2 (Ubuntu) 环境中**，切勿在 Windows 原生命令行中直接运行。
+
+若要在全新的一台机器上建立 4estDS 生产环境，按以下 4 步执行：
+
+##### 步骤 1: 准备宿主系统依赖
 ```bash
-redis-server
-REDIS_URL=redis://localhost:6379/0 uv run dramatiq forestds.worker.actors --processes 1 --threads 1
+sudo apt update && sudo apt install -y redis-server git curl
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-GPU 推理建议保持 `--processes 1 --threads 1`，当前 worker 会在进程内缓存检测器权重，避免每个作业重复加载模型。
+##### 步骤 2: 传输大模型权重与环境密钥 (关键卡点)
+大模型权重（几个 GB）与私密密钥（`.env`）不随 Git 代码仓库分发，需从现有机器同步：
+```bash
+# 1. 创建共享数据目录
+mkdir -p /home/ray/rays/release/4estds/shared/.4estDS
+
+# 2. 拷贝大模型权重至新机器对应路径
+# 包含: yoloe-26x-m07.pt, mobileclip2_b.ts, model_SwinL.pth 等
+scp -r <原机器>:/path/to/.4estDS/models /home/ray/rays/release/4estds/shared/.4estDS/models
+
+# 3. 配置生产专属密钥 (高德 Web 服务 Key 等)
+cat > /home/ray/rays/release/4estds/shared/.env <<'EOF'
+AMAP_WEB_SERVICE_KEY=ee652689015156b571b896b22578646a
+EOF
+chmod 600 /home/ray/rays/release/4estds/shared/.env
+```
+
+##### 步骤 3: 获取源码并一键制品打包
+```bash
+# 克隆发布标签代码
+git clone -b v1.0.2 https://github.com/GodraymTech/4estDS.git ~/4estDS_build
+cd ~/4estDS_build
+
+# 执行自动化制品发布构建 (自动构建前端静态 dist、同步生产依赖并建立软链接)
+./scripts/release.sh v1.0.2
+```
+
+##### 步骤 4: 注册 Systemd 开机自启服务
+```bash
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/4estds.service <<'EOF'
+[Unit]
+Description=4estDS Production Service (Artifact Release)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ray/rays/release/4estds/current
+EnvironmentFile=-/home/ray/rays/release/4estds/shared/.env
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+Environment="PORT_API=8000"
+Environment="ENV_MODE=prod"
+Environment="forestds_HOME=/home/ray/rays/release/4estds/shared/.4estDS"
+Environment="FORESTDS_STATIC_DIR=/home/ray/rays/release/4estds/current/dist"
+Environment="REDIS_URL=redis://localhost:6379/0"
+ExecStartPre=/bin/bash -c "ss -ltn | grep -qE ':6379[[:space:]]' || redis-server --bind 127.0.0.1 --port 6379 --save '' --appendonly no --daemonize yes"
+ExecStart=/home/ray/rays/release/4estds/current/.venv/bin/python3 -m uvicorn forestds.api.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+
+# 激活用户级驻留与开机自启
+loginctl enable-linger $USER
+systemctl --user daemon-reload
+systemctl --user enable --now 4estds
+```
+启动后访问 `http://<机器IP>:8000` 即可直接使用完整系统。
 
 ## 完整教程
 

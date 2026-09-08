@@ -74,10 +74,22 @@ def ensure_local_worker() -> bool:
             "--threads",
             "1",
         ]
+        worker_env = {
+            **os.environ,
+            "OMP_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+            "VECLIB_MAXIMUM_THREADS": "1",
+            "NUMEXPR_NUM_THREADS": "1",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
         with log_path.open("a", encoding="utf-8") as log_file:
             process = subprocess.Popen(
                 command,
                 cwd=_PROJECT_ROOT,
+                env=worker_env,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,

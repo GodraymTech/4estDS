@@ -63,9 +63,10 @@ def fuse(
     conf_type: str = "avg",
     center_merge_frac: float = 0.0,
 ) -> list[FusedBox]:
-    """基于 numpy 逐行向量化 + 空间网格 + Union-Find 的加权框融合去重。
+    """基于置信度降序聚类 + 动态空间网格索引的加权框融合 (WBF)。
 
-    可安全处理 10 万级别检测框，无 MemoryError 风险，无纯 Python 热循环。
+    符合标准 WBF 原则：高置信度框引领聚类簇，低置信度框依附加权融合；
+    通过动态局部网格实现 O(N) 线性邻域检索，彻底根除传递闭包引发的 MemoryError。
     """
     n = len(boxes)
     if n == 0:
@@ -73,156 +74,172 @@ def fuse(
 
     labels_list: list[str] = list(labels) if labels is not None else ["tree"] * n
     scores_arr = np.array(scores, dtype=np.float64)
-    weights_arr = np.array(weights, dtype=np.float64) if weights is not None else np.ones(n, dtype=np.float64)
+    weights_arr = (
+        np.array(weights, dtype=np.float64)
+        if weights is not None
+        else np.ones(n, dtype=np.float64)
+    )
 
-    # 将所有框转为连续内存的 numpy 矩阵 [N, 4]
     B = np.asarray(boxes, dtype=np.float64)
     x1, y1, x2, y2 = B[:, 0], B[:, 1], B[:, 2], B[:, 3]
-
-    # 向量化预计算各框的面积、中心、对角线
-    areas = np.maximum(0.0, x2 - x1) * np.maximum(0.0, y2 - y1)  # (N,)
-    cx = (x1 + x2) * 0.5   # (N,)
-    cy = (y1 + y2) * 0.5   # (N,)
-    diags = np.sqrt(np.maximum(0.0, x2 - x1) ** 2 + np.maximum(0.0, y2 - y1) ** 2)  # (N,)
+    cx = (x1 + x2) * 0.5
+    cy = (y1 + y2) * 0.5
+    diags = np.sqrt(np.maximum(0.0, x2 - x1) ** 2 + np.maximum(0.0, y2 - y1) ** 2)
 
     resolved_center_merge = center_merge_frac if center_merge_frac > 0.0 else 0.18
 
-    # ── 1. 空间网格索引 ──────────────────────────────────────────────────────────
-    max_diag = float(diags.max()) if n > 0 else 100.0
-    cell_size = max(max_diag * 1.5, 100.0)
-    gx_idx = (cx // cell_size).astype(np.int32)
-    gy_idx = (cy // cell_size).astype(np.int32)
+    # 聚类网格步长：以冠幅对角线的分位数自适应，上限不超过单 tile 尺寸 2048px，防假阳性异常大框导致网格退化
+    q90_diag = float(np.percentile(diags, 90)) if n > 10 else float(diags.max())
+    cell_size = min(max(q90_diag * 1.8, 100.0), 2048.0)
 
+    # 排序：优先按 effective_weight = score * weight 降序遍历，由高置信引领
+    effective_scores = scores_arr * weights_arr
+    order = np.argsort(-effective_scores)
+
+    # 簇结构定义：
+    # cluster: {
+    #   'box': [x1, y1, x2, y2],
+    #   'area': float,
+    #   'cx': float, 'cy': float, 'diag': float,
+    #   'weighted_box_sum': np.array([4]),
+    #   'weight_sum': float,
+    #   'max_score': float,
+    #   'score_sum': float,
+    #   'count': int,
+    #   'best_idx': int,
+    #   'best_score': float,
+    #   'best_label': str,
+    #   'merge_iou_count': int,
+    #   'merge_center_count': int,
+    # }
+    clusters: list[dict] = []
     grid: dict[tuple[int, int], list[int]] = {}
-    for i in range(n):
-        key = (int(gx_idx[i]), int(gy_idx[i]))
-        if key not in grid:
-            grid[key] = []
-        grid[key].append(i)
 
-    # ── 2. Union-Find 并查集（路径压缩 + 按秩合并） ──────────────────────────────
-    parent = np.arange(n, dtype=np.int32)
-    rank = np.zeros(n, dtype=np.int32)
+    for i in order:
+        box_i = (float(x1[i]), float(y1[i]), float(x2[i]), float(y2[i]))
+        sc_i = float(scores_arr[i])
+        w_eff = max(float(effective_scores[i]), 1e-9)
+        diag_i = float(diags[i])
+        cx_i = float(cx[i])
+        cy_i = float(cy[i])
+        a1 = max(0.0, box_i[2] - box_i[0]) * max(0.0, box_i[3] - box_i[1])
 
-    def _find(u: int) -> int:
-        # 迭代路径压缩，避免深递归
-        root = u
-        while parent[root] != root:
-            root = int(parent[root])
-        # 路径回填
-        while parent[u] != root:
-            nxt = int(parent[u])
-            parent[u] = root
-            u = nxt
-        return root
+        gx = int(cx_i // cell_size)
+        gy = int(cy_i // cell_size)
 
-    def _union(u: int, v: int) -> None:
-        ru, rv = _find(u), _find(v)
-        if ru == rv:
-            return
-        # 按秩合并
-        if rank[ru] < rank[rv]:
-            ru, rv = rv, ru
-        parent[rv] = ru
-        if rank[ru] == rank[rv]:
-            rank[ru] += 1
+        best_c_idx = -1
+        best_overlap = -1.0
+        merge_kind = "none"
 
-    # ── 3. 逐行向量化邻域比较 ──────────────────────────────────────────────────
-    # 对每个格子，收集相邻 9 个格子内所有框 → 对格内每个 i，
-    # 一次性批量计算它与所有 j>i 的 IoU（逐行 numpy，不做二维广播）
-    for (gx, gy), indices in grid.items():
-        # 收集邻居框
-        neighbor_list: list[int] = []
+        # 在当前格子及相邻 8 邻域搜索已有簇
         for ddx in (-1, 0, 1):
             for ddy in (-1, 0, 1):
-                nk = (gx + ddx, gy + ddy)
-                if nk in grid:
-                    neighbor_list.extend(grid[nk])
+                cell = (gx + ddx, gy + ddy)
+                if cell not in grid:
+                    continue
+                for c_idx in grid[cell]:
+                    c_obj = clusters[c_idx]
+                    cb = c_obj["box"]
 
-        if not neighbor_list:
-            continue
+                    # 快速外接框不相交快速剪枝
+                    if box_i[0] > cb[2] or box_i[2] < cb[0] or box_i[1] > cb[3] or box_i[3] < cb[1]:
+                        inter = 0.0
+                    else:
+                        ix1 = box_i[0] if box_i[0] > cb[0] else cb[0]
+                        iy1 = box_i[1] if box_i[1] > cb[1] else cb[1]
+                        ix2 = box_i[2] if box_i[2] < cb[2] else cb[2]
+                        iy2 = box_i[3] if box_i[3] < cb[3] else cb[3]
+                        inter = (ix2 - ix1) * (iy2 - iy1) if (ix2 > ix1 and iy2 > iy1) else 0.0
 
-        j_arr = np.array(neighbor_list, dtype=np.int32)
+                    a2 = c_obj["area"]
+                    union = a1 + a2 - inter
+                    iou_val = inter / union if union > 0.0 else 0.0
 
-        for i in indices:
-            # 只保留 j > i，避免重复
-            valid_j = j_arr[j_arr > i]
-            if len(valid_j) == 0:
-                continue
+                    ci = inter / a1 if a1 > 0.0 else 0.0
+                    cj = inter / a2 if a2 > 0.0 else 0.0
+                    max_cont = ci if ci > cj else cj
 
-            # 批量向量化计算 IoU（一行 i vs 多行 valid_j）
-            xi1 = np.maximum(B[i, 0], B[valid_j, 0])
-            yi1 = np.maximum(B[i, 1], B[valid_j, 1])
-            xi2 = np.minimum(B[i, 2], B[valid_j, 2])
-            yi2 = np.minimum(B[i, 3], B[valid_j, 3])
-            inter = np.maximum(0.0, xi2 - xi1) * np.maximum(0.0, yi2 - yi1)
-            union_arr = areas[i] + areas[valid_j] - inter
-            iou_vals = np.where(union_arr > 0.0, inter / union_arr, 0.0)
+                    # 中心距离合并判定
+                    cb_cx = c_obj["cx"]
+                    cb_cy = c_obj["cy"]
+                    d_c = ((cx_i - cb_cx) ** 2 + (cy_i - cb_cy) ** 2) ** 0.5
+                    ref = max(diag_i if diag_i < c_obj["diag"] else c_obj["diag"], 1.0)
 
-            # 包含度
-            ci = np.where(areas[i] > 0.0, inter / areas[i], 0.0)
-            cj = np.where(areas[valid_j] > 0.0, inter / areas[valid_j], 0.0)
-            max_cont = np.maximum(ci, cj)
+                    # 是否满足合并条件
+                    is_iou_match = (iou_val >= iou_thr) or (max_cont >= 0.45)
+                    is_center_match = (
+                        (d_c <= 0.28 * ref and inter > 0.0)
+                        or (d_c <= resolved_center_merge * ref)
+                    )
 
-            # 中心距离
-            d_c = np.sqrt((cx[i] - cx[valid_j]) ** 2 + (cy[i] - cy[valid_j]) ** 2)
-            ref = np.minimum(diags[i], diags[valid_j])
-            ref = np.where(ref > 0.0, ref, 1.0)
+                    if is_iou_match and iou_val > best_overlap:
+                        best_overlap = iou_val
+                        best_c_idx = c_idx
+                        merge_kind = "iou"
+                    elif is_center_match and best_overlap < 0.0:
+                        best_c_idx = c_idx
+                        merge_kind = "center"
 
-            # 合并判定（向量化布尔掩码）
-            should_merge = (
-                (iou_vals >= 0.35)
-                | (max_cont >= 0.45)
-                | ((d_c <= 0.28 * ref) & (inter > 0.0))
-                | (d_c <= resolved_center_merge * ref)
-            )
-
-            # 对命中的 j 执行 union（仅迭代需合并的对，通常极少）
-            for j in valid_j[should_merge].tolist():
-                _union(i, j)
-
-    # ── 4. 收集连通分量（向量化） ─────────────────────────────────────────────
-    roots = np.fromiter((_find(i) for i in range(n)), dtype=np.int32, count=n)
-    unique_roots, inv = np.unique(roots, return_inverse=True)
-
-    # ── 5. 对每个连通分量加权融合（向量化） ──────────────────────────────────
-    out: list[FusedBox] = []
-    for ridx, root in enumerate(unique_roots.tolist()):
-        comp = np.where(roots == root)[0]   # (m,)
-
-        comp_scores = scores_arr[comp]      # (m,)
-        comp_weights = weights_arr[comp]    # (m,)
-        comp_boxes = B[comp]               # (m, 4)
-
-        best_local = int(np.argmax(comp_scores))
-        best_idx = int(comp[best_local])
-        best_label = labels_list[best_idx]
-
-        ws = np.maximum(comp_scores * comp_weights, 1e-9)  # (m,)
-        wsum = float(ws.sum())
-
-        # 加权融合坐标（矩阵乘法，一次完成）
-        fb = (ws @ comp_boxes) / wsum   # (4,)
-
-        if conf_type == "max":
-            sc = float(comp_scores.max())
+        if best_c_idx >= 0:
+            c = clusters[best_c_idx]
+            c["weighted_box_sum"] += np.array(box_i, dtype=np.float64) * w_eff
+            c["weight_sum"] += w_eff
+            new_box = c["weighted_box_sum"] / c["weight_sum"]
+            bx1, by1, bx2, by2 = float(new_box[0]), float(new_box[1]), float(new_box[2]), float(new_box[3])
+            c["box"] = (bx1, by1, bx2, by2)
+            c["area"] = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+            c["cx"] = (bx1 + bx2) * 0.5
+            c["cy"] = (by1 + by2) * 0.5
+            c["diag"] = ((bx2 - bx1) ** 2 + (by2 - by1) ** 2) ** 0.5
+            c["max_score"] = max(c["max_score"], sc_i)
+            c["score_sum"] += sc_i
+            c["count"] += 1
+            if sc_i > c["best_score"]:
+                c["best_score"] = sc_i
+                c["best_idx"] = i
+                c["best_label"] = labels_list[i]
+            if merge_kind == "iou":
+                c["merge_iou_count"] += 1
+            else:
+                c["merge_center_count"] += 1
         else:
-            sc = float(comp_scores.mean())
+            new_idx = len(clusters)
+            clusters.append({
+                "box": box_i,
+                "area": a1,
+                "cx": cx_i,
+                "cy": cy_i,
+                "diag": diag_i,
+                "weighted_box_sum": np.array(box_i, dtype=np.float64) * w_eff,
+                "weight_sum": w_eff,
+                "max_score": sc_i,
+                "score_sum": sc_i,
+                "count": 1,
+                "best_idx": i,
+                "best_score": sc_i,
+                "best_label": labels_list[i],
+                "merge_iou_count": 0,
+                "merge_center_count": 0,
+            })
+            grid.setdefault((gx, gy), []).append(new_idx)
 
+    # 导出 FusedBox 列表
+    out: list[FusedBox] = []
+    for c in clusters:
+        score_val = c["max_score"] if conf_type == "max" else (c["score_sum"] / c["count"])
         out.append(
             FusedBox(
-                box=(float(fb[0]), float(fb[1]), float(fb[2]), float(fb[3])),
-                score=sc,
-                label=best_label,
-                support=len(comp),
+                box=c["box"],
+                score=float(score_val),
+                label=c["best_label"],
+                support=c["count"],
                 extra={
-                    "best_index": best_idx,
-                    "merge_iou_count": len(comp) - 1,
-                    "merge_center_count": 0,
+                    "best_index": c["best_idx"],
+                    "merge_iou_count": c["merge_iou_count"],
+                    "merge_center_count": c["merge_center_count"],
                 },
             )
         )
-
     return out
 
 
