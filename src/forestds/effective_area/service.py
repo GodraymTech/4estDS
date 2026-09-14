@@ -152,43 +152,65 @@ def _as_multipolygon(geometry: BaseGeometry) -> MultiPolygon:
     )
 
 
-def _parse_geometry(value: Mapping[str, Any] | BaseGeometry) -> MultiPolygon:
+def _parse_geometry(value: Mapping[str, Any] | BaseGeometry | None) -> MultiPolygon | None:
+    if value is None:
+        return None
     if isinstance(value, BaseGeometry):
+        if value.is_empty:
+            return None
         geometry = value
     else:
         if not isinstance(value, Mapping):
             raise EffectiveAreaValidationError("geometry 必须是 GeoJSON 对象。", code="invalid_geometry")
-        declared_crs = _declared_geojson_crs(value)
-        if declared_crs:
-            try:
-                crs = CRS.from_user_input(declared_crs)
-            except Exception as exc:  # noqa: BLE001
-                raise EffectiveAreaValidationError(
-                    "GeoJSON CRS 无法识别。",
-                    code="unsupported_crs",
-                    details={"crs": declared_crs},
-                ) from exc
-            if crs.to_epsg() != 4326:
-                raise EffectiveAreaValidationError(
-                    "保存接口仅接受 EPSG:4326 GeoJSON；GIS 文件请先走导入预检。",
-                    code="unsupported_crs",
-                    details={"crs": declared_crs},
-                )
+        if not value:
+            return None
         geometry_type = value.get("type")
-        if geometry_type not in {"Polygon", "MultiPolygon"}:
+        if geometry_type == "FeatureCollection":
+            features = value.get("features", [])
+            if not features:
+                return None
+            from shapely.ops import unary_union
+            geoms = []
+            for feat in features:
+                fg = feat.get("geometry")
+                if fg and fg.get("coordinates"):
+                    geoms.append(shape(fg))
+            if not geoms:
+                return None
+            geometry = unary_union(geoms)
+        elif geometry_type in {"Polygon", "MultiPolygon"}:
+            if not value.get("coordinates"):
+                return None
+            declared_crs = _declared_geojson_crs(value)
+            if declared_crs:
+                try:
+                    crs = CRS.from_user_input(declared_crs)
+                except Exception as exc:  # noqa: BLE001
+                    raise EffectiveAreaValidationError(
+                        "GeoJSON CRS 无法识别。",
+                        code="unsupported_crs",
+                        details={"crs": declared_crs},
+                    ) from exc
+                if crs.to_epsg() != 4326:
+                    raise EffectiveAreaValidationError(
+                        "保存接口仅接受 EPSG:4326 GeoJSON；GIS 文件请先走导入预检。",
+                        code="unsupported_crs",
+                        details={"crs": declared_crs},
+                    )
+            if _has_duplicate_vertex(value):
+                raise EffectiveAreaValidationError("几何包含重复顶点。", code="duplicate_vertex")
+            try:
+                geometry = shape(value)
+            except Exception as exc:  # noqa: BLE001
+                raise EffectiveAreaValidationError("GeoJSON 几何无法解析。", code="invalid_geometry") from exc
+        else:
             raise EffectiveAreaValidationError(
                 "有效区域只支持 Polygon 或 MultiPolygon。",
                 code="non_polygon_geometry",
                 details={"geometry_type": geometry_type},
             )
-        if _has_duplicate_vertex(value):
-            raise EffectiveAreaValidationError("几何包含重复顶点。", code="duplicate_vertex")
-        try:
-            geometry = shape(value)
-        except Exception as exc:  # noqa: BLE001
-            raise EffectiveAreaValidationError("GeoJSON 几何无法解析。", code="invalid_geometry") from exc
     if geometry.is_empty:
-        raise EffectiveAreaValidationError("有效区域不能为空。", code="empty_geometry")
+        return None
     polygonal = _as_multipolygon(geometry)
     if not polygonal.is_valid:
         polygonal = _as_multipolygon(make_valid(polygonal))
@@ -198,8 +220,8 @@ def _parse_geometry(value: Mapping[str, Any] | BaseGeometry) -> MultiPolygon:
                 code="invalid_geometry",
                 details={"reason": explain_validity(polygonal)},
             )
-    if polygonal.area <= 0:
-        raise EffectiveAreaValidationError("有效区域面积必须大于零。", code="zero_area")
+    if polygonal.area <= 0 or polygonal.is_empty:
+        return None
     minx, miny, maxx, maxy = polygonal.bounds
     if minx < -180 or maxx > 180 or miny < -90 or maxy > 90:
         raise EffectiveAreaValidationError(
@@ -365,16 +387,22 @@ class EffectiveAreaService:
                 )
             boundary = self._boundary(row)
             warnings: tuple[str, ...] = ()
-            if clip_to_boundary:
-                candidate = _as_multipolygon(candidate.intersection(boundary))
-                if candidate.is_empty or candidate.area <= 0:
-                    raise EffectiveAreaValidationError(
-                        "裁剪后有效区域为空。",
-                        code="empty_after_clip",
-                    )
-                warnings = ("已按用户确认将有效区域裁剪到地块边界。",)
+            if candidate is None:
+                candidate = boundary
+                is_default = True
+                warnings = ("已清空有效区域，恢复为默认状态。",)
+            else:
+                if clip_to_boundary:
+                    candidate = _as_multipolygon(candidate.intersection(boundary))
+                    if candidate.is_empty or candidate.area <= 0:
+                        raise EffectiveAreaValidationError(
+                            "裁剪后有效区域为空。",
+                            code="empty_after_clip",
+                        )
+                    warnings = ("已按用户确认将有效区域裁剪到地块边界。",)
 
-            is_default = candidate.equals(boundary)
+                is_default = candidate.equals(boundary)
+
             area_hm2 = geodesic_area_hm2(candidate)
             effective_source = "default" if is_default else "manual"
             updated_at = self._next_updated_at(row["updated_at"])

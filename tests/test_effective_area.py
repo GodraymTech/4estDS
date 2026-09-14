@@ -175,7 +175,6 @@ def test_outside_geometry_is_clipped_only_after_explicit_confirmation(
 @pytest.mark.parametrize(
     ("geometry", "code"),
     [
-        ({"type": "Polygon", "coordinates": []}, "empty_geometry"),
         (
             _polygon(
                 (113.001, 22.001),
@@ -198,6 +197,13 @@ def test_save_rejects_invalid_geometry(
     with pytest.raises(EffectiveAreaValidationError) as invalid:
         service.save(TRACT_PK, geometry, current.updated_at)
     assert invalid.value.code == code
+
+
+def test_save_empty_geometry_resets_to_default(service: EffectiveAreaService) -> None:
+    current = service.get(TRACT_PK)
+    result = service.save(TRACT_PK, {"type": "Polygon", "coordinates": []}, current.updated_at)
+    assert result.is_default is True
+    assert BOUNDARY.equals(shape(result.geometry))
 
 
 def test_save_auto_repairs_self_intersecting_geometry(service: EffectiveAreaService) -> None:

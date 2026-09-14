@@ -8,7 +8,7 @@ import {
 } from "./model";
 
 describe("有效区域展示逻辑", () => {
-  it("按台账规范展示地块面积与有效面积", () => {
+  it("按台账规范展示全图面积与有效面积", () => {
     expect(formatAreaLedgerValue(12.34, 10.84)).toBe("12.3（10.8）");
     expect(formatAreaLedgerValue(12.34, null)).toBe("12.3（—）");
   });

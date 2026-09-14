@@ -36,6 +36,8 @@ export class MapLibreController implements MapController {
   private basemapTileKey = "";
   private basemapSourceId = "basemap";
 
+  private sourceDataRefs = new Map<string, unknown>();
+
   private rasterStyle(
     basemap: MapInitOptions["basemap"],
   ): maplibregl.StyleSpecification {
@@ -66,7 +68,6 @@ export class MapLibreController implements MapController {
         style: this.rasterStyle(opts.basemap),
         center: opts.center,
         zoom: opts.zoom,
-        maxZoom: env.maxZoom,
         interactive,
         attributionControl: false,
       });
@@ -80,6 +81,7 @@ export class MapLibreController implements MapController {
 
   destroy(): void {
     this.clearMarkers();
+    this.sourceDataRefs.clear();
     this.map?.remove();
     this.map = null;
     this.ready = false;
@@ -97,13 +99,17 @@ export class MapLibreController implements MapController {
 
   setGeoJsonLayer(spec: GeoJsonLayerSpec): void {
     const map = this.requireMap();
-    if (!map.getSource(spec.id)) {
-      map.addSource(spec.id, {
+    const sourceId = spec.sourceId ?? spec.id;
+    const existing = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
+    if (!existing) {
+      this.sourceDataRefs.set(sourceId, spec.data);
+      map.addSource(sourceId, {
         type: "geojson",
         data: toMapLibreGeoJson(spec.data),
       });
-    } else {
-      this.setData(spec.id, spec.data);
+    } else if (this.sourceDataRefs.get(sourceId) !== spec.data) {
+      this.sourceDataRefs.set(sourceId, spec.data);
+      existing.setData(toMapLibreGeoJson(spec.data));
     }
     if (map.getLayer(spec.id)) {
       map.moveLayer(spec.id);
@@ -113,7 +119,7 @@ export class MapLibreController implements MapController {
       map.addLayer({
         id: spec.id,
         type: "circle",
-        source: spec.id,
+        source: sourceId,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 2, 16, 6],
           "circle-color": (spec.color ?? DEFAULT_POINT_COLOR) as never,
@@ -132,7 +138,7 @@ export class MapLibreController implements MapController {
       map.addLayer({
         id: spec.id,
         type: "line",
-        source: spec.id,
+        source: sourceId,
         layout: { "line-cap": "round", "line-join": "round" },
         paint,
       });
@@ -140,7 +146,7 @@ export class MapLibreController implements MapController {
       map.addLayer({
         id: spec.id,
         type: "fill",
-        source: spec.id,
+        source: sourceId,
         paint: {
           "fill-color": (spec.color ?? DEFAULT_POLYGON_COLOR) as never,
           "fill-opacity": spec.opacity ?? 0.3,
@@ -156,7 +162,22 @@ export class MapLibreController implements MapController {
     const map = this.map;
     if (!map) return;
     if (map.getLayer(id)) map.removeLayer(id);
-    if (map.getSource(id)) map.removeSource(id);
+    if (map.getSource(id)) {
+      const isUsedByOtherLayers = (map.getStyle()?.layers ?? []).some(
+        (l: any) => l.source === id && l.id !== id,
+      );
+      if (!isUsedByOtherLayers) {
+        map.removeSource(id);
+      }
+    }
+  }
+
+  removeSource(sourceId: string): void {
+    const map = this.map;
+    if (!map) return;
+    if (map.getSource(sourceId)) {
+      map.removeSource(sourceId);
+    }
   }
 
   setData(layerId: string, data: GeoJson): void {

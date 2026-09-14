@@ -229,13 +229,19 @@ function EditorWorkspace({
 
   async function persist(clipToBoundary: boolean) {
     try {
-      await save.mutateAsync({
+      const result = await save.mutateAsync({
         geometry: adapterRef.current?.getDraft() ?? draft,
         updated_at: data.updated_at,
         clip_to_boundary: clipToBoundary,
       });
       setDirty(false);
-      message.success(clipToBoundary ? "已裁剪并保存有效区域" : "有效区域已保存");
+      message.success(
+        result.is_default
+          ? "已清空有效区域，恢复为默认全边界状态"
+          : clipToBoundary
+            ? "已裁剪并保存有效区域"
+            : "有效区域已保存",
+      );
       window.setTimeout(onClose, 0);
     } catch (error) {
       const failure = apiFailure(error);
@@ -380,7 +386,7 @@ function EditorWorkspace({
           <section>
             <h3>面积统计</h3>
             <div className="effective-editor__metric">
-              <span>地块面积</span>
+              <span>全图面积</span>
               <strong>{formatHm2(data.tract_area_hm2)} hm²</strong>
             </div>
             <div className="effective-editor__metric">
@@ -498,7 +504,7 @@ function editorStyle(): maplibregl.StyleSpecification {
 
 function addImagery(map: maplibregl.Map, tile: string, index: number) {
   const id = `editor-tiff-${index}`;
-  map.addSource(id, { type: "raster", tiles: [tile], tileSize: 256, minzoom: 12, maxzoom: 25 });
+  map.addSource(id, { type: "raster", tiles: [tile], tileSize: 256, minzoom: 12, maxzoom: 24 });
   map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": 0.88 } });
 }
 

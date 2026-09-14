@@ -10,7 +10,6 @@ import { TemporalCompare } from "../features/temporal-wipe";
 import { tractCenter } from "../features/overview/tractGeo";
 import { env } from "../shared/config/env";
 import {
-  ROAD_OVERLAY,
   basemapById,
   type LngLat,
 } from "../shared/map-core";
@@ -31,7 +30,6 @@ export function ChangePage() {
   const groups = useMemo(() => buildCompareGroups(tracts ?? []), [tracts]);
   const [tractId, setTractId] = useState<string | undefined>(undefined);
   const [basemapId, setBasemapId] = useState(env.defaultBasemapId);
-  const [roadVisible, setRoadVisible] = useState(false);
   const [wipeApi, setWipeApi] = useState<TemporalWipeApi | null>(null);
   const [showDetections, setShowDetections] = useState(true);
   const [selectedSpecies, setSelectedSpecies] = useState<string[]>([]);
@@ -53,12 +51,6 @@ export function ChangePage() {
   const comparedSpecies = useMemo(
     () => collectSpecies(beforeObs.data, afterObs.data),
     [afterObs.data, beforeObs.data],
-  );
-  const roadOverlay = useMemo(
-    () => roadVisible
-      ? { ...ROAD_OVERLAY, opacity: basemapId === "satellite" ? 0.52 : 0.24 }
-      : null,
-    [basemapId, roadVisible],
   );
 
   const lastTractId = useRef<string | undefined>(undefined);
@@ -99,7 +91,7 @@ export function ChangePage() {
           center={active.center}
           zoom={15}
           basemap={basemapById(basemapId)}
-          roadOverlay={roadOverlay}
+          roadOverlay={null}
           onWipeApi={setWipeApi}
           showDetections={showDetections}
           selectedSpecies={selectedSpecies}
@@ -148,8 +140,6 @@ export function ChangePage() {
       <MapFloatingToolbar
         basemapId={basemapId}
         onBasemapChange={setBasemapId}
-        roadVisible={roadVisible}
-        onRoadVisibleChange={setRoadVisible}
         homeTitle="回到地块视野"
         onZoomIn={() => wipeApi?.zoomIn()}
         onZoomOut={() => wipeApi?.zoomOut()}

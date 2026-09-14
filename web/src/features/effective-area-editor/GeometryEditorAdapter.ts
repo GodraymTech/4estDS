@@ -155,16 +155,15 @@ export class GeometryEditorAdapter {
 
   private syncVertexEdit(): void {
     if (this.rendering || this.tool !== "select") return;
-    const geometry = geometryFromSnapshot(this.draw.getSnapshot());
-    if (geometry) this.recordSnapshot(geometry);
+    const geometry = geometryFromSnapshot(this.draw.getSnapshot()) ?? { type: "MultiPolygon", coordinates: [] };
+    this.recordSnapshot(geometry);
   }
 
   private deleteSelected(id: string | number): void {
     if (this.tool !== "delete") return;
     this.draw.removeFeatures([id]);
-    const geometry = geometryFromSnapshot(this.draw.getSnapshot());
-    if (geometry) this.recordSnapshot(geometry);
-    else this.renderDraft(this.draft);
+    const geometry = geometryFromSnapshot(this.draw.getSnapshot()) ?? { type: "MultiPolygon", coordinates: [] };
+    this.recordSnapshot(geometry);
   }
 
   private commit(geometry: EffectiveAreaGeometry): void {

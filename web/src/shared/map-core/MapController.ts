@@ -28,6 +28,7 @@ export interface MapController {
   /** 新增/替换一个 GeoJSON 矢量图层(单木点 / 树冠面)。 */
   setGeoJsonLayer(spec: GeoJsonLayerSpec): void;
   removeLayer(id: string): void;
+  removeSource?(id: string): void;
   /** 仅更新已有图层的数据(不重建图层)。 */
   setData(layerId: string, data: GeoJson): void;
 

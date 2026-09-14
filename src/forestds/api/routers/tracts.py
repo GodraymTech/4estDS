@@ -407,11 +407,22 @@ def get_observations(
     tract_id: str,
     run_id: str | None = Query(None, description="指定历史 run；缺省使用各 TIFF 已发布 run"),
     geometry: str = Query("point", pattern="^(point|crown)$", description="point 或 crown"),
+    tiff_id: str | None = Query(None, description="指定单张 TIFF，加速单图加载"),
+    phase_id: str | None = Query(None, description="指定时相"),
+    tiff_name: str | None = Query(None, description="指定 TIFF 路由名称"),
     db_url: str | None = Depends(get_db_url),
 ) -> JSONResponse:
     from ...db import reader
 
-    if run_id:
+    actual_tiff_id = tiff_id if isinstance(tiff_id, str) and tiff_id else None
+    actual_phase_id = phase_id if isinstance(phase_id, str) and phase_id else None
+    actual_tiff_name = tiff_name if isinstance(tiff_name, str) and tiff_name else None
+    actual_geom = geometry if isinstance(geometry, str) else "point"
+
+    if not actual_tiff_id and actual_tiff_name:
+        actual_tiff_id = reader.resolve_tiff_id(tract_id, actual_phase_id, actual_tiff_name, url=db_url)
+
+    if run_id and isinstance(run_id, str):
         run_ids = [run_id]
     else:
         run_ids = reader.active_runs_for_tract_phase(tract_id, url=db_url)
@@ -424,13 +435,13 @@ def get_observations(
 
     rows = []
     for rid in run_ids:
-        rows.extend(reader.fetch_observations(run_id=rid, tract_id=tract_id, url=db_url))
+        rows.extend(reader.fetch_observations(run_id=rid, tract_id=tract_id, tiff_id=actual_tiff_id, url=db_url))
 
     tract = reader.get_tract(tract_id, url=db_url) or {}
     return JSONResponse(
         rows_to_featurecollection(
             rows,
-            geometry=geometry,
+            geometry=actual_geom,
             crs_epsg=tract.get("crs_epsg"),
             crs_wkt=tract.get("crs_wkt"),
         )

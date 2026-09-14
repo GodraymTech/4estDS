@@ -67,8 +67,36 @@ port_listening() {
   ss -ltn 2>/dev/null | grep -qE ":$port[[:space:]]"
 }
 
+# 轮询等待端口就绪。应用首轮导入(uvicorn/pnpm)可能耗时十几秒，
+# 支持传入 pid：若进程已死则立即失败退出，避免盲等超时。
+wait_for_port() {
+  local port=$1
+  local timeout=${2:-60}
+  local pid=${3:-}
+  local waited=0
+  while (( waited < timeout )); do
+    if port_listening "$port"; then
+      return 0
+    fi
+    if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+      return 2
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
 worker_pids() {
-  ps -eo pid=,args= | awk '/[d]ramatiq/ && /forestds[.]worker[.]actors/ {print $1}' | sort -u
+  local script_dir
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  for pid in $(pgrep -f "dramatiq.*forestds\.worker\.actors" || true); do
+    local proc_cwd
+    proc_cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)
+    if [[ "$proc_cwd" == "$script_dir"* ]]; then
+      echo "$pid"
+    fi
+  done | sort -u
 }
 
 stop_port() {
@@ -123,7 +151,7 @@ start_worker() {
   fi
 
   echo "正在启动推理 Worker..."
-  nohup env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 REDIS_URL="$REDIS_URL" forestds_HOME="$forestds_HOME" .venv/bin/dramatiq forestds.worker.actors --queues gpu review_gpu default --processes 1 --threads 1 </dev/null >"$LOG_DIR/worker.log" 2>&1 &
+  nohup env PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 REDIS_URL="$REDIS_URL" forestds_HOME="$forestds_HOME" .venv/bin/dramatiq forestds.worker.actors --queues gpu review_gpu default --processes 1 --threads 1 </dev/null >"$LOG_DIR/worker.log" 2>&1 &
   local pid=$!
   echo $pid >"$WORKER_PID_FILE"
   disown $pid 2>/dev/null || true
@@ -144,12 +172,28 @@ start_backend() {
   rm -f "$BACKEND_PID_FILE"
 
   echo "正在启动后端 API 服务 [$ENV_LABEL: 端口 $PORT_API]..."
-  setsid nohup env PYTHONUNBUFFERED=1 PORT_API="$PORT_API" ENV_MODE="$ENV_MODE" forestds_HOME="$forestds_HOME" REDIS_URL="$REDIS_URL" .venv/bin/python3 -m uvicorn forestds.api.main:app --host 0.0.0.0 --port "$PORT_API" </dev/null >"$LOG_DIR/backend.log" 2>&1 &
+  setsid nohup env PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PORT_API="$PORT_API" ENV_MODE="$ENV_MODE" forestds_HOME="$forestds_HOME" REDIS_URL="$REDIS_URL" .venv/bin/python3 -m uvicorn forestds.api.main:app --host 0.0.0.0 --port "$PORT_API" </dev/null >"$LOG_DIR/backend.log" 2>&1 &
   local pid=$!
-  echo $pid >"$BACKEND_PID_FILE"
+  echo "$pid" >"$BACKEND_PID_FILE"
   disown $pid 2>/dev/null || true
-  sleep 1.0
-  echo "后端 API 服务已启动，PID: $(cat "$BACKEND_PID_FILE" 2>/dev/null || echo "$pid") (日志输出到 $LOG_DIR/backend.log)"
+
+  # 等就绪后再按端口回填真实 PID，并以端口为准判定成败(不能提前 exit，
+  # 否则会连前端一起漏启动)。
+  local ret_api=0
+  wait_for_port "$PORT_API" 60 "$pid" || ret_api=$?
+  if [[ $ret_api -eq 0 ]]; then
+    local port_pid
+    port_pid=$(port_pids "$PORT_API" | head -1)
+    if [[ -n "$port_pid" ]]; then
+      echo "$port_pid" >"$BACKEND_PID_FILE"
+    fi
+    echo "后端 API 服务已启动，PID: $(cat "$BACKEND_PID_FILE") (日志输出到 $LOG_DIR/backend.log)"
+  elif [[ $ret_api -eq 2 ]]; then
+    rm -f "$BACKEND_PID_FILE"
+    echo "错误: 后端 API 服务进程 (PID: $pid) 已异常退出！请查看 $LOG_DIR/backend.log"
+  else
+    echo "警告: 后端 API 服务在 60s 内未监听 $PORT_API，请查看 $LOG_DIR/backend.log"
+  fi
 }
 
 start_frontend() {
@@ -162,10 +206,18 @@ start_frontend() {
   echo "正在启动前端 Web 服务 [$ENV_LABEL: 端口 $PORT_WEB]..."
   setsid nohup env CI=true PORT="$PORT_WEB" VITE_PORT="$PORT_WEB" VITE_API_TARGET="http://127.0.0.1:$PORT_API" pnpm --prefix web run dev </dev/null >"$LOG_DIR/frontend.log" 2>&1 &
   local pid=$!
-  echo $pid >"$FRONTEND_PID_FILE"
+  echo "$pid" >"$FRONTEND_PID_FILE"
   disown $pid 2>/dev/null || true
-  sleep 1.0
-  echo "前端 Web 服务已启动，PID: $(cat "$FRONTEND_PID_FILE" 2>/dev/null || echo "$pid") (日志输出到 $LOG_DIR/frontend.log)"
+  local ret_web=0
+  wait_for_port "$PORT_WEB" 30 "$pid" || ret_web=$?
+  if [[ $ret_web -eq 0 ]]; then
+    echo "前端 Web 服务已启动，PID: $(cat "$FRONTEND_PID_FILE") (日志输出到 $LOG_DIR/frontend.log)"
+  elif [[ $ret_web -eq 2 ]]; then
+    rm -f "$FRONTEND_PID_FILE"
+    echo "错误: 前端 Web 服务进程 (PID: $pid) 已异常退出！请查看 $LOG_DIR/frontend.log"
+  else
+    echo "警告: 前端 Web 服务在 30s 内未监听 $PORT_WEB，请查看 $LOG_DIR/frontend.log"
+  fi
 }
 
 start_services() {

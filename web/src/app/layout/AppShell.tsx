@@ -27,6 +27,25 @@ export function AppShell() {
   const editorMode = (pathname.startsWith("/map") && new URLSearchParams(search).has("effective-area"))
     || /^\/review\/[^/]+/.test(pathname);
   const [railPreview, setRailPreview] = useState(false);
+  const [railExpanded, setRailExpanded] = useState(() => {
+    try {
+      return localStorage.getItem("4estds:rail-expanded") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleRailExpanded = () => {
+    setRailExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("4estds:rail-expanded", String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   // 每页同步文档标题: 屏读朗读与浏览器标签页可辨识。
   useEffect(() => {
@@ -37,6 +56,8 @@ export function AppShell() {
   useEffect(() => {
     if (!editorMode) setRailPreview(false);
   }, [editorMode]);
+
+  const siderWidth = editorMode && !railPreview ? 0 : railExpanded ? 180 : 72;
 
   return (
     <Layout style={SHELL}>
@@ -51,15 +72,18 @@ export function AppShell() {
         />
       ) : null}
       <Sider
-        width={editorMode && !railPreview ? 0 : 72}
+        width={siderWidth}
         collapsedWidth={0}
-        style={{ ...SIDER, overflow: "hidden", transition: "width 160ms ease" }}
+        style={{ ...SIDER, overflow: "hidden", transition: "width 180ms cubic-bezier(0.4, 0, 0.2, 1)" }}
         theme="dark"
         onMouseLeave={() => {
           if (editorMode) setRailPreview(false);
         }}
       >
-        <NavRail />
+        <NavRail
+          expanded={railExpanded}
+          onToggleExpand={toggleRailExpanded}
+        />
       </Sider>
       <Layout>
         {!editorMode ? (

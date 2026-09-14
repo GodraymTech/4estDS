@@ -177,7 +177,7 @@ class TractOut(BaseModel):
 class EffectiveAreaPut(BaseModel):
     """保存当前地块唯一有效区域；updated_at 用于乐观并发。"""
 
-    geometry: dict[str, Any]
+    geometry: Optional[dict[str, Any]] = None
     updated_at: str = Field(..., min_length=1)
     clip_to_boundary: bool = False
 

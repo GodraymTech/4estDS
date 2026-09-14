@@ -16,7 +16,7 @@ import "./ConnectionStatus.css";
 
 const { Text } = Typography;
 
-export function ConnectionStatus() {
+export function ConnectionStatus({ style }: { style?: CSSProperties } = {}) {
     const {
         nodeState,
         endpointUrl,
@@ -170,7 +170,7 @@ export function ConnectionStatus() {
                 <Badge status={statusBadge} dot offset={[-3, 3]}>
                     <Button
                         type="text"
-                        style={ACTION_STYLE}
+                        style={{ ...ACTION_STYLE, ...style }}
                         icon={<ApiOutlined />}
                         aria-label="后端服务连接"
                     />

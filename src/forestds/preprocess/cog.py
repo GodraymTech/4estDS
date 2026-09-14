@@ -11,6 +11,7 @@ import os
 import time
 import threading
 import multiprocessing
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from loguru import logger as log
@@ -206,21 +207,9 @@ def check_cog_format(image_path: str | Path) -> str:
     return inspect_tiff_format(image_path)
 
 
-def inspect_tiff_format(image_path: str | Path) -> str:
-    """只检查指定 tif(f) 单文件本体；外部 .ovr 不计入 COG。"""
-    if rasterio is None:
-        log.warning("rasterio 未安装，无法执行 COG 检测。")
-        return TIFF_INVALID
-
-    path = Path(image_path)
-    if not path.exists():
-        log.error(f"文件不存在: {path}")
-        return TIFF_INVALID
-
-    if path.suffix.lower() not in (".tif", ".tiff"):
-        log.debug(f"非 TIFF 后缀，跳过格式检测: {path.name}")
-        return TIFF_INVALID
-
+@lru_cache(maxsize=1024)
+def _inspect_tiff_format_cached(path_str: str, mtime_ns: int) -> str:
+    path = Path(path_str)
     try:
         with rasterio.open(path) as src:
             if not src.is_tiled:
@@ -239,6 +228,28 @@ def inspect_tiff_format(image_path: str | Path) -> str:
     except Exception as e:
         log.error(f"打开并检测 TIFF 格式失败 {path.name}: {e}")
         return TIFF_INVALID
+
+
+def inspect_tiff_format(image_path: str | Path) -> str:
+    """只检查指定 tif(f) 单文件本体；外部 .ovr 不计入 COG。"""
+    if rasterio is None:
+        log.warning("rasterio 未安装，无法执行 COG 检测。")
+        return TIFF_INVALID
+
+    path = Path(image_path)
+    if not path.exists():
+        log.error(f"文件不存在: {path}")
+        return TIFF_INVALID
+
+    if path.suffix.lower() not in (".tif", ".tiff"):
+        log.debug(f"非 TIFF 后缀，跳过格式检测: {path.name}")
+        return TIFF_INVALID
+
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    return _inspect_tiff_format_cached(str(path.resolve()), mtime_ns)
 
 
 def inspect_tiff_error(image_path: str | Path) -> str | None:
@@ -634,30 +645,19 @@ def estimate_effective_area_from_overviews(image_path: str | Path, geo_area: flo
         return None
     try:
         import rasterio
-        import numpy as np
+        from ..geo import estimate_raster_effective_area
+
         p = Path(image_path).expanduser()
         if not p.is_file():
             return None
         with rasterio.open(p) as src:
-            if src.crs and len(src.overviews(1)) > 0:
-                factors = src.overviews(1)
-                max_level = len(factors) - 1
-                data = src.read(1, overview_level=max_level)
-                nodata_val = src.nodata
-                if nodata_val is not None:
-                    if np.isnan(nodata_val):
-                        valid_pixels = np.count_nonzero(~np.isnan(data))
-                    else:
-                        valid_pixels = np.count_nonzero(data != nodata_val)
-                else:
-                    valid_pixels = np.count_nonzero(data != 0)
-                
-                if data.size > 0:
-                    valid_ratio = float(valid_pixels) / data.size
-                    return round((geo_area * valid_ratio) / 10000.0, 2)
+            eff_area, _ = estimate_raster_effective_area(src, geo_area)
+            if eff_area and eff_area > 0:
+                return round(eff_area, 2)
     except Exception as exc:
         log.warning("从金字塔 Overview 估算有效面积失败: {}", exc)
     return None
+
 
 
 def calculate_exact_effective_ratio(image_path: str | Path) -> float:

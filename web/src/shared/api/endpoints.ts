@@ -215,10 +215,16 @@ export const endpoints = {
   getObservations: (
     tractId: string,
     geometry: GeometryKind = "point",
-  ): Promise<FeatureCollection> =>
-    apiGet(
-      `/tracts/${encodeURIComponent(tractId)}/observations?geometry=${geometry}`,
-    ),
+    options?: { tiffId?: string; phaseId?: string; tiffName?: string },
+  ): Promise<FeatureCollection> => {
+    const params = new URLSearchParams({ geometry });
+    if (options?.tiffId) params.set("tiff_id", options.tiffId);
+    if (options?.phaseId) params.set("phase_id", options.phaseId);
+    if (options?.tiffName) params.set("tiff_name", options.tiffName);
+    return apiGet(
+      `/tracts/${encodeURIComponent(tractId)}/observations?${params.toString()}`,
+    );
+  },
 
   getJob: (jobId: string): Promise<JobStatus> =>
     apiGet(`/jobs/${encodeURIComponent(jobId)}`),

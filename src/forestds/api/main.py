@@ -9,6 +9,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from .. import __codename__, __version__
 from ..db.schema import init_db
@@ -25,6 +26,9 @@ def create_app() -> FastAPI:
         version=__version__,
         description="红树林单木智能解译平台 — 一张图服务端",
     )
+
+    # GZip: 自动压缩大于 1KB 的纯文本/JSON，针对几万条检测框要素的 GeoJSON 压缩率可达 80% 以上
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     # CORS: 支持环境变量配置，默认允许本地任意端口(5173, 5174, 3000 等)及跨域访问。
     origins = os.environ.get(

@@ -1497,7 +1497,7 @@ const TOOL_ROW: CSSProperties = {
     gap: 12,
     flexWrap: "wrap",
 };
-const SEARCH: CSSProperties = { width: "min(480px, 100%)" };
+const SEARCH: CSSProperties = { width: "min(350px, 100%)" };
 const PAGINATION = { pageSize: 12, showSizeChanger: false } as const;
 const TREE_PANEL: CSSProperties = {
     border: "1px solid var(--color-border)",

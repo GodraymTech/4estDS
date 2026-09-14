@@ -361,6 +361,7 @@ def fetch_observations(
     *,
     run_id: str | None = None,
     tract_id: str | None = None,
+    tiff_id: str | None = None,
     url: str | None = None,
 ) -> list[dict]:
     """拉取观测记录。run_id / tract_id 至少传一个（可共同限定）。"""
@@ -378,6 +379,9 @@ def fetch_observations(
                 "o.run_id IN (SELECT tf.active_run_id FROM tiffs tf "
                 "WHERE tf.tract_phase_pk=tp.tract_phase_pk AND tf.active_run_id IS NOT NULL)"
             )
+    if tiff_id:
+        clauses.append("o.tiff_id=?")
+        params.append(tiff_id)
     where = " AND ".join(clauses)
     conn = _connect(url)
     try:
@@ -408,6 +412,33 @@ def get_run(run_id: str, *, url: str | None = None) -> dict | None:
     finally:
         conn.close()
     return dict(row) if row else None
+
+
+def resolve_tiff_id(
+    tract_id: str,
+    phase_id: str | None,
+    tiff_name: str,
+    *,
+    url: str | None = None,
+) -> str | None:
+    """根据地块标识、时相和文件名快速反查 tiff_id。"""
+    conn = _connect(url)
+    try:
+        clauses = ["(tp.tract_id=? OR tp.tract_phase_pk=? OR tp.tract_pk=?)"]
+        params = [tract_id, tract_id, tract_id]
+        if phase_id:
+            clauses.append("tf.phase_id=?")
+            params.append(phase_id)
+        clauses.append("(tf.file_name=? OR tf.file_name LIKE ?)")
+        params.extend([tiff_name, f"{tiff_name}%"])
+        row = conn.execute(
+            "SELECT tf.tiff_id FROM tiffs tf JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
+            f"WHERE {' AND '.join(clauses)} LIMIT 1",
+            params,
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
 
 
 def list_runs(

@@ -1,6 +1,6 @@
 """地理仿射变换与真实面积解析（阶段六补全）。
 
-目标：从影像获取仿射变换参数 -> 算出像元地面尺寸(GSD) -> 真实地块面积 -> 密度(株/公顷)。
+目标：从影像获取仿射变换参数 -> 算出像元地面尺寸(GSD) -> 图内有效面积 -> 密度(株/公顷)。
 
 三条获取路径，依可靠性/依赖克制原则依次尝试：
   1. rasterio dataset 的 transform/crs（若调用方已打开）——最权威。
@@ -421,3 +421,68 @@ def compute_tract_geometry(
         f"{out['geo_area']:.1f}" if out["geo_area"] else "?",
     )
     return out
+
+
+def estimate_raster_effective_area(
+    src,
+    inferred_area_m2: float | None = None,
+) -> tuple[float | None, int | float | None]:
+    """从 rasterio 数据集中估算剔除 nodata 及无效背景（包括纯黑边/纯白边）后的真实正射面积(hm²)。
+
+    返回: (estimated_effective_area_hm2, inferred_nodata)
+    """
+    import numpy as np
+
+    if not inferred_area_m2 or inferred_area_m2 <= 0:
+        return None, src.nodata
+
+    try:
+        if len(src.overviews(1)) > 0:
+            factors = src.overviews(1)
+            decim = factors[-1]
+            ov_h = int(src.height // decim)
+            ov_w = int(src.width // decim)
+        else:
+            ov_h = min(src.height, 512)
+            ov_w = min(src.width, 512)
+
+        data = src.read(out_shape=(src.count, ov_h, ov_w))
+        nodata_val = src.nodata
+
+        if nodata_val is not None:
+            if np.isnan(nodata_val):
+                valid_mask = ~np.isnan(data[0])
+            else:
+                valid_mask = (data[0] != nodata_val)
+            inferred_nodata = nodata_val
+        else:
+            # 遥感无人机正射未设 nodata 时的经典特征检测：检查角落与边界
+            corners = [data[:, 0, 0], data[:, 0, -1], data[:, -1, 0], data[:, -1, -1]]
+            all_255 = all(np.all(c == 255) for c in corners)
+            all_0 = all(np.all(c == 0) for c in corners)
+
+            borders = np.concatenate([data[:, 0, :], data[:, -1, :], data[:, :, 0], data[:, :, -1]], axis=1)
+            border_255_ratio = np.count_nonzero(np.all(borders == 255, axis=0)) / borders.shape[1]
+            border_0_ratio = np.count_nonzero(np.all(borders == 0, axis=0)) / borders.shape[1]
+
+            if all_255 or border_255_ratio > 0.5:
+                # 纯白背景 (如部分 GIS 软件白底导出的正射图)
+                valid_mask = ~np.all(data == 255, axis=0)
+                inferred_nodata = 255
+            elif all_0 or border_0_ratio > 0.5:
+                # 纯黑背景 (常见无人机拼接黑边)
+                valid_mask = ~np.all(data == 0, axis=0)
+                inferred_nodata = 0
+            else:
+                valid_mask = np.ones((ov_h, ov_w), dtype=bool)
+                inferred_nodata = None
+
+        valid_pixels = np.count_nonzero(valid_mask)
+        if valid_mask.size > 0 and valid_pixels > 0:
+            valid_ratio = float(valid_pixels) / valid_mask.size
+            eff_area_hm2 = round((inferred_area_m2 * valid_ratio) / 10000.0, 4)
+            return eff_area_hm2, inferred_nodata
+    except Exception as exc:
+        log.warning("估算栅格有效面积失败: {}", exc)
+
+    return round(inferred_area_m2 / 10000.0, 4), src.nodata

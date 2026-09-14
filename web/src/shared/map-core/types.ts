@@ -43,6 +43,7 @@ export type MapColor = string | unknown[];
 
 export interface GeoJsonLayerSpec {
   id: string;
+  sourceId?: string;
   kind: VectorLayerKind;
   data: GeoJson;
   /** 颜色引用设计令牌语义值(由调用方传入), 维持单一真相。 */

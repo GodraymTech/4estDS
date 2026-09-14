@@ -48,7 +48,7 @@ export function HeaderBar() {
             aria-label="帮助"
           />
         </Dropdown>
-        <ConnectionStatus />
+        <ConnectionStatus style={ACTION} />
         <Button
           type="text"
           style={ACTION}

@@ -10,13 +10,14 @@ import {
 export function useObservations(
   tractId: string | undefined,
   geometry: GeometryKind,
+  options?: { tiffId?: string; phaseId?: string; tiffName?: string },
 ) {
   return useQuery<FeatureCollection>({
-    queryKey: queryKeys.observations(tractId ?? "", geometry),
-    queryFn: () => endpoints.getObservations(tractId as string, geometry),
+    queryKey: queryKeys.observations(tractId ?? "", geometry, options),
+    queryFn: () => endpoints.getObservations(tractId as string, geometry, options),
     enabled: Boolean(tractId),
-    staleTime: 15_000,
-    gcTime: 45_000,
+    staleTime: 30_000,
+    gcTime: 60_000,
     structuralSharing: false,
   });
 }

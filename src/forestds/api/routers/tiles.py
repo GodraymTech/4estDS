@@ -104,7 +104,7 @@ def _tile_float_setting(key: str, env_name: str, default: float, *, minimum: flo
         return max(minimum, default)
 
 
-TILE_RENDER_CONCURRENCY = _tile_int_setting("render_concurrency", "FORESTDS_TILE_RENDER_CONCURRENCY", 2, minimum=1)
+TILE_RENDER_CONCURRENCY = _tile_int_setting("render_concurrency", "FORESTDS_TILE_RENDER_CONCURRENCY", 4, minimum=1)
 TILE_GDAL_CACHE_MB = _tile_int_setting("gdal_cache_mb", "FORESTDS_TILE_GDAL_CACHE_MB", 64, minimum=8)
 TILE_WARP_MEM_MB = _tile_int_setting("warp_mem_mb", "FORESTDS_TILE_WARP_MEM_MB", 32, minimum=8)
 TILE_CACHE_ENABLED = _tile_bool_setting("cache_enabled", "FORESTDS_TILE_CACHE_ENABLED", True)

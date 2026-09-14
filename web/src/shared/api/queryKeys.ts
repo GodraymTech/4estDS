@@ -6,8 +6,12 @@ export const queryKeys = {
   tiffs: ["tiffs"] as const,
   assets: ["assets"] as const,
   geoSearch: (q: string, city = "广东") => ["geo-search", city, q] as const,
-  observations: (tractId: string, geometry: GeometryKind) =>
-    ["observations", tractId, geometry] as const,
+  observations: (
+    tractId: string,
+    geometry: GeometryKind,
+    options?: { tiffId?: string; phaseId?: string; tiffName?: string },
+  ) =>
+    ["observations", tractId, geometry, options?.tiffId ?? "", options?.phaseId ?? "", options?.tiffName ?? ""] as const,
   // 前缀键: 用于一次性失效全部作业列表(不必关心当前筛选组合)。
   jobsAll: ["jobs"] as const,
   jobs: (taskType: string | null = "infer", phaseId?: string, tiffId?: string) =>

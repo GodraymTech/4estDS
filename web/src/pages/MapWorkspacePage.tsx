@@ -24,13 +24,12 @@ import {
     SearchOutlined,
     SwapOutlined,
 } from "@ant-design/icons";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { geometryBbox } from "../features/effective-area-editor/geometryOperations";
 import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
 import { MapGlassPanel } from "../shared/ui/MapGlassPanel";
 import { MapStage } from "../shared/ui/MapStage";
 import {
-    ROAD_OVERLAY,
     basemapById,
     boundsOf,
     provinceBoundaryByName,
@@ -75,7 +74,6 @@ const { Text } = Typography;
 
 const DETECTION_PREFIX = "detections-";
 const IMAGERY_LAYER = "tract-imagery";
-const ROAD_LAYER = "road-overlay";
 const MASK_LAYER = "overview-mask";
 const BOUNDARY_LAYER = "overview-boundary";
 const MEASURE_PTS = "measure-pts";
@@ -133,6 +131,7 @@ export function MapWorkspacePage() {
         tiffName,
     } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const [searchParams, setSearchParams] = useSearchParams();
     const { data: tracts, error: tractsError, isError: tractsFailed, isLoading } = useTracts();
     const tiffsQuery = useTiffs();
@@ -141,7 +140,6 @@ export function MapWorkspacePage() {
     const [hovered, setHovered] = useState<HoveredTract | null>(null);
     const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
     const [basemapId, setBasemapId] = useState(env.defaultBasemapId);
-    const [roadVisible, setRoadVisible] = useState(false);
     const [showDetections, setShowDetections] = useState(true);
     const [showEffectiveArea, setShowEffectiveArea] = useState(false);
     const [effectiveMode, setEffectiveMode] = useState<"outline" | "mask">("outline");
@@ -250,11 +248,22 @@ export function MapWorkspacePage() {
         [phaseTiffs],
     );
 
-    const observations = useObservations(activeTractId, "crown");
+    const obsOptions = useMemo(() => {
+        if (!isSingleImageView) return undefined;
+        return {
+            tiffId: requestedTiff?.tiff_id,
+            phaseId: requestedTiff?.phase_id ?? requestedPhaseId,
+            tiffName: requestedTiff?.file_name ?? requestedTiffName,
+        };
+    }, [isSingleImageView, requestedPhaseId, requestedTiff?.file_name, requestedTiff?.phase_id, requestedTiff?.tiff_id, requestedTiffName]);
+
+    const observations = useObservations(activeTractId, "crown", obsOptions);
     const visibleObservations = useMemo(() => {
         const data = observations.data;
         if (!data) return undefined;
-        if (isSingleImageView && requestedTiff) return filterObservationsByTiffs(data, [requestedTiff.tiff_id]);
+        if (isSingleImageView && requestedTiff) {
+            return filterObservationsByTiffs(data, [requestedTiff.tiff_id]);
+        }
         if (!isSingleImageView && selectedPhaseTiffs.length > 0) {
             return filterObservationsByTiffs(data, selectedPhaseTiffs.map((tiff) => tiff.tiff_id));
         }
@@ -458,20 +467,8 @@ export function MapWorkspacePage() {
     useEffect(() => {
         if (!map || !ready) return;
         map.setBasemap(basemapById(basemapId));
-    }, [basemapId, map, ready]);
-
-    useEffect(() => {
-        if (!map || !ready) return;
-        if (roadVisible) {
-            map.setRasterOverlay(ROAD_LAYER, {
-                ...ROAD_OVERLAY,
-                opacity: basemapId === "satellite" ? 0.52 : 0.24,
-            });
-        } else {
-            map.removeRasterOverlay(ROAD_LAYER);
-        }
         syncMask(map);
-    }, [basemapId, map, ready, roadVisible, syncMask]);
+    }, [basemapId, map, ready, syncMask]);
 
     useEffect(() => {
         if (!map || !ready) return;
@@ -511,7 +508,7 @@ export function MapWorkspacePage() {
                         rasterBasemap([tiffTileUrl(tiff)], {
                             tileSize: 256,
                             minZoom: 12,
-                            maxZoom: 25,
+                            maxZoom: 24,
                         }),
                     );
                     return id;
@@ -530,7 +527,7 @@ export function MapWorkspacePage() {
                 rasterBasemap([tiffTileUrl(requestedTiff)], {
                     tileSize: 256,
                     minZoom: 12,
-                    maxZoom: 25,
+                    maxZoom: 24,
                 }),
             );
         } else if (activeTract && imagery.data?.available && imagery.data.tiles?.length) {
@@ -550,15 +547,23 @@ export function MapWorkspacePage() {
 
     useEffect(() => {
         if (!map || !ready) return;
-        clearDetectionLayers(map, detectionLayerIds.current);
-        detectionLayerIds.current = [];
-        if (!showDetections || !visibleObservations) return;
-        if (speciesList.length > 0 && selectedSpecies.length === 0) return;
+        if (!showDetections || !visibleObservations || (speciesList.length > 0 && selectedSpecies.length === 0)) {
+            clearDetectionLayers(map, detectionLayerIds.current);
+            detectionLayerIds.current = [];
+            return;
+        }
         const layers = buildSpeciesLayers(visibleObservations, selectedSpecies, speciesColors);
+        const activeIds = new Set<string>();
         for (const layer of layers) {
             map.setGeoJsonLayer(layer);
-            detectionLayerIds.current.push(layer.id);
+            activeIds.add(layer.id);
         }
+        for (const id of detectionLayerIds.current) {
+            if (!activeIds.has(id)) {
+                map.removeLayer(id);
+            }
+        }
+        detectionLayerIds.current = Array.from(activeIds);
     }, [map, ready, selectedSpecies, showDetections, speciesColors, speciesList.length, visibleObservations]);
 
     // 1. 监听底图鼠标 Hover 悬停检测框
@@ -917,7 +922,7 @@ export function MapWorkspacePage() {
         map.jumpTo({ ...map.getCamera(), bearing: 0, pitch: 0 });
     }
 
-    function returnOverview() {
+    const returnOverview = useCallback(() => {
         navigate("/map");
         setSelectedId(undefined);
         setMeasureMode("idle");
@@ -932,7 +937,21 @@ export function MapWorkspacePage() {
             imageryLayerIds.current = [];
             map.fitBounds(overviewBounds, OVERVIEW_FIT);
         }
-    }
+    }, [map, navigate, overviewBounds]);
+
+    useEffect(() => {
+        const handler = () => {
+            returnOverview();
+        };
+        window.addEventListener("4estds:return-overview", handler);
+        return () => window.removeEventListener("4estds:return-overview", handler);
+    }, [returnOverview]);
+
+    useEffect(() => {
+        if (location.state && (location.state as any).resetOverview) {
+            returnOverview();
+        }
+    }, [location.state, location.key, returnOverview]);
 
     const measure = useMemo(
         () => computeMeasure(measureMode, measureCoords),
@@ -1028,8 +1047,6 @@ export function MapWorkspacePage() {
                 <MapFloatingToolbar
                     basemapId={basemapId}
                     onBasemapChange={setBasemapId}
-                    roadVisible={roadVisible}
-                    onRoadVisibleChange={setRoadVisible}
                     pixelSizeLabel={formatPixelSize(metersPerPixel)}
                     zoomLabel={zoom.toFixed(1)}
                     homeTitle="返回总览"
@@ -1093,7 +1110,7 @@ export function MapWorkspacePage() {
                     phaseTiffs={phaseTiffs}
                     speciesColors={speciesColors}
                     onSelectPhase={selectPhaseTract}
-                    loading={observations.isFetching || imagery.isFetching || summary.isFetching}
+                    loading={summary.isLoading || (isSingleImageView ? imagery.isLoading : false)}
                     tiffName={requestedTiffName}
                     isSingleImageView={isSingleImageView}
                     requestedTiff={requestedTiff}
@@ -1134,14 +1151,14 @@ export function MapWorkspacePage() {
                                         type={effectiveMode === "outline" ? "primary" : "default"}
                                         onClick={() => setEffectiveMode("outline")}
                                     >
-                                        框线模式
+                                        框线
                                     </Button>
                                     <Button
                                         size="small"
                                         type={effectiveMode === "mask" ? "primary" : "default"}
                                         onClick={() => setEffectiveMode("mask")}
                                     >
-                                        遮罩模式
+                                        遮罩
                                     </Button>
                                 </Space>
                             ) : null}
@@ -1615,21 +1632,25 @@ function buildSpeciesLayers(
     if (!features.length) return [];
     const species = [...new Set(features.map(featureSpecies))];
     const colorExpr = speciesColorExpression(species, colors);
+    const data = { type: "FeatureCollection", features } as GeoJson;
+    const sourceId = DETECTION_PREFIX + "source";
     return [
         {
             id: DETECTION_PREFIX + "fill",
+            sourceId,
             kind: "polygon" as const,
             color: colorExpr,
             opacity: 0,
-            data: { type: "FeatureCollection", features } as GeoJson,
+            data,
         },
         {
             id: DETECTION_PREFIX + "line",
+            sourceId,
             kind: "line" as const,
             color: colorExpr,
             opacity: 0.96,
             lineWidth: 2.0,
-            data: { type: "FeatureCollection", features } as GeoJson,
+            data,
         },
     ];
 }
@@ -1650,6 +1671,7 @@ function safeLayerId(value: string): string {
 
 function clearDetectionLayers(map: MapController, ids: string[]) {
     for (const id of ids) map.removeLayer(id);
+    map.removeSource?.(DETECTION_PREFIX + "source");
 }
 
 function clearMeasureLayers(map: MapController) {
@@ -2591,7 +2613,7 @@ const TRACT_TOOLS: CSSProperties = {
     left: 16,
     top: 64,
     zIndex: 8,
-    width: 168,
+    width: 140,
     borderRadius: 16,
     padding: 8,
 };

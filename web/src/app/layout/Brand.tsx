@@ -27,8 +27,23 @@ export function BrandMark({ size = 28 }: { size?: number }) {
 }
 
 export function Brand({ collapsed = false }: { collapsed?: boolean }) {
+  const handleClick = () => {
+    window.dispatchEvent(new CustomEvent("4estds:return-overview"));
+  };
+
   return (
-    <Link to="/map" style={WRAP} aria-label="返回一张图" title="返回一张图">
+    <Link
+      to="/map"
+      state={{ resetOverview: Date.now() }}
+      onClick={handleClick}
+      style={{
+        ...WRAP,
+        justifyContent: collapsed ? "center" : "flex-start",
+        paddingInline: collapsed ? 8 : 16,
+      }}
+      aria-label="返回一张图"
+      title="返回一张图"
+    >
       <BrandMark />
       {collapsed ? null : <span style={NAME}>4estDS</span>}
     </Link>

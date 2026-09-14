@@ -1,15 +1,13 @@
 import type { CSSProperties, ReactNode } from "react";
-import { Button, Select, Space, Switch, Tooltip, Typography } from "antd";
+import { Button, Select, Tooltip } from "antd";
 import { CompassOutlined, HomeOutlined, MinusOutlined, PlusOutlined } from "@ant-design/icons";
 import { BASEMAPS } from "../map-core";
-
-const { Text } = Typography;
 
 export function MapFloatingToolbar({
   basemapId,
   onBasemapChange,
-  roadVisible,
-  onRoadVisibleChange,
+  roadVisible: _roadVisible,
+  onRoadVisibleChange: _onRoadVisibleChange,
   pixelSizeLabel,
   zoomLabel,
   homeTitle = "回到地块视野",
@@ -21,8 +19,8 @@ export function MapFloatingToolbar({
 }: {
   basemapId: string;
   onBasemapChange: (value: string) => void;
-  roadVisible: boolean;
-  onRoadVisibleChange: (value: boolean) => void;
+  roadVisible?: boolean;
+  onRoadVisibleChange?: (value: boolean) => void;
   pixelSizeLabel?: string;
   zoomLabel?: string;
   homeTitle?: string;
@@ -43,10 +41,6 @@ export function MapFloatingToolbar({
             options={BASEMAPS.map((b) => ({ value: b.id, label: b.label }))}
             style={BASEMAP_SELECT}
           />
-          <Space size={8}>
-            <Text style={PANEL_TEXT}>路网</Text>
-            <Switch size="small" checked={roadVisible} onChange={onRoadVisibleChange} />
-          </Space>
         </div>
         <div style={RIGHT_TOOLS}>
           {pixelSizeLabel ? (
@@ -119,7 +113,6 @@ const LAYER_PANEL: CSSProperties = {
   flex: "0 0 auto",
 };
 const BASEMAP_SELECT: CSSProperties = { width: 76 };
-const PANEL_TEXT: CSSProperties = { fontSize: 12, color: "var(--glass-text)" };
 const RIGHT_TOOLS: CSSProperties = {
   ...GLASS,
   height: 42,

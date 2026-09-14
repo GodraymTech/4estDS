@@ -271,33 +271,10 @@ def _compute_tiff_metadata(
             footprint_hm2 = round(inferred_area / 10000.0, 4) if inferred_area is not None else None
             
             # 【方案A】：若带 Overview 或者是 COG，快速估算非 nodata 的有效面积
-            estimated_effective_area_hm2 = footprint_hm2
-            try:
-                if len(src.overviews(1)) > 0:
-                    factors = src.overviews(1)
-                    max_level = len(factors) - 1
-                    decim = factors[max_level]
-                    ov_h = int(src.height // decim)
-                    ov_w = int(src.width // decim)
-                    from rasterio.enums import Resampling
-                    data = src.read(1, out_shape=(ov_h, ov_w), resampling=Resampling.nearest)
-                    nodata_val = src.nodata
-                    import numpy as np
-                    if nodata_val is not None:
-                        if np.isnan(nodata_val):
-                            valid_pixels = np.count_nonzero(~np.isnan(data))
-                        else:
-                            valid_pixels = np.count_nonzero(data != nodata_val)
-                    else:
-                        valid_pixels = data.size
-                    
-                    if data.size > 0 and inferred_area:
-                        valid_ratio = float(valid_pixels) / data.size
-                        estimated_effective_area_hm2 = round((inferred_area * valid_ratio) / 10000.0, 4)
-                        if estimated_effective_area_hm2 <= 0:
-                            estimated_effective_area_hm2 = footprint_hm2
-            except Exception as exc:
-                log.debug("从 Overview 估算有效面积失败: {}", exc)
+            from ..geo import estimate_raster_effective_area
+            estimated_effective_area_hm2, inferred_nodata = estimate_raster_effective_area(src, inferred_area)
+            if not estimated_effective_area_hm2 or estimated_effective_area_hm2 <= 0:
+                estimated_effective_area_hm2 = footprint_hm2
 
             meta.update(
                 {
@@ -316,7 +293,7 @@ def _compute_tiff_metadata(
                     "effective_area_hm2": estimated_effective_area_hm2,
                     "band_count": int(src.count),
                     "dtype": str(src.dtypes[0]) if src.dtypes else None,
-                    "nodata": src.nodata,
+                    "nodata": inferred_nodata if inferred_nodata is not None else src.nodata,
                 }
             )
     except Exception as exc:  # noqa: BLE001
