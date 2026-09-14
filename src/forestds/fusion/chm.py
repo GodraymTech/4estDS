@@ -80,10 +80,128 @@ def load_single_band(path: str):
     return arr, geo
 
 
+def filter_macro_ground_points(
+    gx: np.ndarray,
+    gy: np.ndarray,
+    gz: np.ndarray,
+    macro_sz: float = 10.0,
+    p_low: float = 10.0,
+    p_high: float = 90.0,
+    min_spread: float = 0.15,
+    max_diff: float = 0.12,
+    min_points_ratio: float = 0.3,
+) -> tuple[np.ndarray, np.ndarray]:
+    """宏观网格分位数滤波，剔除被草丛/低矮植被误分类为 Class 2 的假地面点。
+
+    原理：
+      在自然湿地、滩涂或林下草地，激光雷达常被密草表面反射并被误划分为地面点（高出真泥面 20~40cm）。
+      以宏观尺度（如 10m）对区域格网化，统计局部地面点高程的低位分位数（P10）作为泥滩骨架基准；
+      若格网内高程起伏明显（P90 - P10 > min_spread），剔除高于 P10 + max_diff 的草尖假地面点，
+      保证后续 KD-Tree 插值出的 DEM 基准紧贴真实平整泥面。
+    """
+    if len(gz) < 100:
+        return np.column_stack((gx, gy)), gz
+
+    gx_min, gx_max = float(np.min(gx)), float(np.max(gx))
+    gy_min, gy_max = float(np.min(gy)), float(np.max(gy))
+    g_cols = max(1, int(np.ceil((gx_max - gx_min) / macro_sz)))
+    g_rows = max(1, int(np.ceil((gy_max - gy_min) / macro_sz)))
+
+    col_idx = np.clip(((gx - gx_min) / macro_sz).astype(np.int32), 0, g_cols - 1)
+    row_idx = np.clip(((gy_max - gy) / macro_sz).astype(np.int32), 0, g_rows - 1)
+    cell_ids = row_idx * g_cols + col_idx
+
+    sort_order = np.argsort(cell_ids)
+    sorted_cells = cell_ids[sort_order]
+    sorted_z = gz[sort_order]
+
+    unique_cells, split_indices = np.unique(sorted_cells, return_index=True)
+    z_groups = np.split(sorted_z, split_indices[1:])
+
+    keep_mask_sorted = np.ones(len(sorted_z), dtype=bool)
+    offset = 0
+    for grp in z_groups:
+        n_pts = len(grp)
+        if n_pts >= 5:
+            p10 = float(np.percentile(grp, p_low))
+            p90 = float(np.percentile(grp, p_high))
+            if (p90 - p10) > min_spread:
+                keep_mask_sorted[offset : offset + n_pts] = (grp <= (p10 + max_diff))
+        offset += n_pts
+
+    keep_mask = np.empty_like(keep_mask_sorted)
+    keep_mask[sort_order] = keep_mask_sorted
+
+    n_filtered = int(np.sum(keep_mask))
+    if n_filtered >= 100 and n_filtered >= len(gz) * min_points_ratio:
+        n_removed = len(gz) - n_filtered
+        if n_removed > 0:
+            log.info(
+                "宏观泥面基底滤波: 剔除草丛/低矮植被抬升假地面点 {} 个 ({:.1f}%), 保留真实地面骨架点 {} 个",
+                n_removed, 100.0 * n_removed / len(gz), n_filtered
+            )
+        return np.column_stack((gx[keep_mask], gy[keep_mask])), gz[keep_mask]
+
+    return np.column_stack((gx, gy)), gz
+
+
+def filter_vertical_outlier_gap(
+    heights: np.ndarray,
+    gap_threshold: float = 0.35,
+    min_base_height: float = 0.25,
+    max_upper_ratio: float = 0.20,
+) -> np.ndarray:
+    """自下而上检测树冠垂直高度连续性，剔除悬空孤立噪点（如竹竿、标杆、浮空点）。
+
+    原理：
+      自然单木的生物学冠层在垂直方向具备空间连续性；若冠层主体上方出现空气断层（> gap_threshold），
+      且断层上方点数极少（占总有效点数比例 <= max_upper_ratio 或点数 <= 3），
+      判定上方属于测量标杆、细竹竿或悬浮多路径噪点，截断剥除断层上方的浮空点群。
+    """
+    if heights.size <= 3:
+        return heights
+    sorted_h = np.sort(heights)
+    diffs = np.diff(sorted_h)
+    gap_indices = np.where(diffs > gap_threshold)[0]
+    if gap_indices.size == 0:
+        return heights
+
+    for idx in reversed(gap_indices):
+        lower_h = sorted_h[idx]
+        upper_pts = sorted_h[idx + 1 :]
+        upper_ratio = len(upper_pts) / len(sorted_h)
+        if lower_h >= min_base_height and (upper_ratio <= max_upper_ratio or len(upper_pts) <= 3):
+            log.debug(
+                "垂直连续性断层滤波: 截断空气断层 ({:.2f}m -> {:.2f}m, 间隙={:.2f}m), 剥除悬空点 {} 个 ({:.1f}%)",
+                lower_h, sorted_h[idx + 1], diffs[idx], len(upper_pts), upper_ratio * 100
+            )
+            return sorted_h[: idx + 1]
+    return heights
+
+
+def impute_canopy_mask(mask: np.ndarray) -> np.ndarray:
+    """弥合激光点云欠采样在树冠内部形成的漏孔像元。
+
+    原理：
+      航测激光雷达点密度通常在 100~200 点/㎡，以 5cm 网格（需 400 点/㎡）划分时内部天然存在 40%~50% 空隙。
+      利用形态学闭孔洞（binary_fill_holes）与 8 邻域支撑插补（8 邻域中 >= 4 个树冠像元），
+      填补冠层内部由于光斑间隙遗漏的像元，且严格约束在原冠层内部与边缘，绝不向外裸地扩散。
+    """
+    from scipy.ndimage import binary_fill_holes, convolve
+
+    filled = binary_fill_holes(mask)
+    kernel = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.int32)
+    neighbor_count = convolve(filled.astype(np.int32), kernel, mode="constant", cval=0)
+    imputed = filled | (neighbor_count >= 4)
+    return imputed
+
+
 def chm_from_las(
     las_path: str,
     grid_size: float = 0.05,
     rgb_geo: Optional[GeoInfo] = None,
+    macro_ground_filter: bool = True,
+    macro_grid_size: float = 10.0,
 ) -> tuple[np.ndarray, Optional[GeoInfo], Optional[tuple[np.ndarray, np.ndarray, np.ndarray]]]:
     """读取 LAS 点云，进行高度归一化并格网化，生成 CHM 矩阵与 GeoInfo。
 
@@ -144,8 +262,16 @@ def chm_from_las(
         ground_coords = np.column_stack((v_x, v_y))
         ground_z = v_z
     else:
-        ground_coords = np.column_stack((x[ground_mask], y[ground_mask]))
-        ground_z = z[ground_mask]
+        gx = x[ground_mask]
+        gy = y[ground_mask]
+        gz = z[ground_mask]
+        if macro_ground_filter:
+            ground_coords, ground_z = filter_macro_ground_points(
+                gx, gy, gz, macro_sz=macro_grid_size
+            )
+        else:
+            ground_coords = np.column_stack((gx, gy))
+            ground_z = gz
 
     # 2. 地面高程插值与归一化
     log.info("构建地面点树以计算局部 DEM (地面点数={})", len(ground_z))
@@ -249,6 +375,11 @@ class CHMSampler:
     chm_threshold: float = 0.1
     find_real_canopy: bool = True
     max_valid_height: float = 8.0
+    filter_vertical_gap: bool = True
+    vertical_gap_threshold: float = 0.35
+    vertical_gap_min_base: float = 0.25
+    vertical_gap_max_ratio: float = 0.20
+    impute_canopy_holes: bool = True
     
     def __post_init__(self) -> None:
         if self.stat not in _VALID_STATS:
@@ -398,18 +529,31 @@ class CHMSampler:
         if valid_h.size == 0:
             return {"error": "chm_nodata"}
 
+        # 垂直连续性断层滤波（抗孤立悬空竹竿/标杆/浮空点）
+        if self.filter_vertical_gap:
+            valid_h_filtered = filter_vertical_outlier_gap(
+                valid_h,
+                gap_threshold=self.vertical_gap_threshold,
+                min_base_height=self.vertical_gap_min_base,
+                max_upper_ratio=self.vertical_gap_max_ratio,
+            )
+        else:
+            valid_h_filtered = valid_h
+
         # 1. 树高提取
         if self.stat == "max":
-            h_est = float(np.max(valid_h))
+            h_est = float(np.max(valid_h_filtered))
         elif self.stat == "median":
-            h_est = float(np.median(valid_h))
+            h_est = float(np.median(valid_h_filtered))
         elif self.stat == "mean":
-            h_est = float(np.mean(valid_h))
+            h_est = float(np.mean(valid_h_filtered))
         else:
-            h_est = float(np.percentile(valid_h, 95))
+            h_est = float(np.percentile(valid_h_filtered, 95))
 
         if h_est < 0.0 or h_est > self.max_height:
             return {"error": "chm_outlier"}
+
+        h_cutoff = float(np.max(valid_h_filtered))
 
         # 2. 树冠三维体积估算
 
@@ -447,19 +591,32 @@ class CHMSampler:
 
         # B. 真实轨 (real track)
         if self.find_real_canopy:
-            area_px_real = float(valid_h.size)
-            area_geo_real = float(valid_h.size * pixel_area)
+            # 剥除悬空断层上方伪点后的有效冠层二值掩模
+            canopy_mask = (~np.isnan(win)) & (win >= self.chm_threshold) & (win <= (h_cutoff + 0.05))
+
+            # 弥合点云采样脉冲间隔遗漏的内部孔洞
+            if self.impute_canopy_holes and np.any(canopy_mask):
+                canopy_mask_imputed = impute_canopy_mask(canopy_mask)
+            else:
+                canopy_mask_imputed = canopy_mask
+
+            area_px_real = float(np.sum(canopy_mask_imputed))
+            area_geo_real = float(area_px_real * pixel_area)
 
             # 点云/CHM 严重欠采样保底保护: 若点云落入点极少且测得物理面积显著低于估计值的15%
-            if area_geo_est > 0 and (area_geo_real < 0.15 * area_geo_est and valid_h.size < 15):
+            if area_geo_est > 0 and (area_geo_real < 0.15 * area_geo_est and area_px_real < 15):
                 log.warning(
-                    "单木区域 (w_geo={:.2f}m, h_geo={:.2f}m) 点云/CHM严重欠采样(仅{}点)，对真实冠幅面积进行融合下限保护",
-                    w_geo, h_geo, valid_h.size
+                    "单木区域 (w_geo={:.2f}m, h_geo={:.2f}m) 点云/CHM严重欠采样(仅{}像元)，对真实冠幅面积进行融合下限保护",
+                    w_geo, h_geo, area_px_real
                 )
                 area_geo_real = max(area_geo_real, float(0.5 * area_geo_est))
 
             import math
             r_real = math.sqrt(area_geo_real / np.pi) if area_geo_real > 0 else 0.0
+
+            # 欠采样孔洞弥合的体积补偿因子
+            raw_pts_count = max(float(np.sum(canopy_mask)), 1.0)
+            impute_scale = area_px_real / raw_pts_count if self.impute_canopy_holes else 1.0
             
             actual_method = self.volume_method
             if actual_method in ("convex_hull", "voxel") and self.raw_points is None:
@@ -470,14 +627,16 @@ class CHMSampler:
                 actual_method = "cbh"
 
             vol_real = 0.0
+            valid_crown_h = valid_h[(valid_h >= self.chm_threshold) & (valid_h <= (h_cutoff + 0.05))]
+
             if actual_method == "column":
-                forest_h = valid_h[valid_h >= 0.5]
+                forest_h = valid_crown_h[valid_crown_h >= 0.5]
                 if forest_h.size > 0:
-                    vol_real = float(np.sum(forest_h) * pixel_area)
+                    vol_real = float(np.sum(forest_h) * pixel_area) * impute_scale
             elif actual_method == "cbh":
-                crown_pixels = valid_h[valid_h >= cbh]
+                crown_pixels = valid_crown_h[valid_crown_h >= cbh]
                 if crown_pixels.size > 0:
-                    vol_real = float(np.sum(crown_pixels - cbh) * pixel_area)
+                    vol_real = float(np.sum(crown_pixels - cbh) * pixel_area) * impute_scale
             elif actual_method == "paraboloid":
                 vol_real = float(0.5 * np.pi * (r_real ** 2) * h_crown)
             elif actual_method == "cone":
@@ -487,7 +646,7 @@ class CHMSampler:
             elif actual_method == "convex_hull":
                 x_pts, y_pts, h_pts = self.raw_points
                 mask = (x_pts >= wx_min) & (x_pts <= wx_max) & (y_pts >= wy_min) & (y_pts <= wy_max)
-                tree_mask = mask & (h_pts >= cbh) & (h_pts <= self.max_height)
+                tree_mask = mask & (h_pts >= cbh) & (h_pts <= (h_cutoff + 0.05))
                 tx = x_pts[tree_mask]
                 ty = y_pts[tree_mask]
                 th = h_pts[tree_mask]
@@ -499,18 +658,18 @@ class CHMSampler:
                         vol_real = float(hull.volume)
                     except Exception as e:
                         log.warning("凸包体积计算失败(可能是点共面)，回退至 cbh 积分: {}", e)
-                        crown_pixels = valid_h[valid_h >= cbh]
+                        crown_pixels = valid_crown_h[valid_crown_h >= cbh]
                         if crown_pixels.size > 0:
-                            vol_real = float(np.sum(crown_pixels - cbh) * pixel_area)
+                            vol_real = float(np.sum(crown_pixels - cbh) * pixel_area) * impute_scale
                 else:
                     log.warning("边界内有效点数少于4个(实际为 {})，回退至 cbh 积分", len(tx))
-                    crown_pixels = valid_h[valid_h >= cbh]
+                    crown_pixels = valid_crown_h[valid_crown_h >= cbh]
                     if crown_pixels.size > 0:
-                        vol_real = float(np.sum(crown_pixels - cbh) * pixel_area)
+                        vol_real = float(np.sum(crown_pixels - cbh) * pixel_area) * impute_scale
             elif actual_method == "voxel":
                 x_pts, y_pts, h_pts = self.raw_points
                 mask = (x_pts >= wx_min) & (x_pts <= wx_max) & (y_pts >= wy_min) & (y_pts <= wy_max)
-                tree_mask = mask & (h_pts >= cbh) & (h_pts <= self.max_height)
+                tree_mask = mask & (h_pts >= cbh) & (h_pts <= (h_cutoff + 0.05))
                 tx = x_pts[tree_mask]
                 ty = y_pts[tree_mask]
                 th = h_pts[tree_mask]
@@ -522,9 +681,9 @@ class CHMSampler:
                     unique_voxels = set(zip(vx, vy, vh))
                     vol_real = float(len(unique_voxels) * (vs ** 3))
                 else:
-                    crown_pixels = valid_h[valid_h >= cbh]
+                    crown_pixels = valid_crown_h[valid_crown_h >= cbh]
                     if crown_pixels.size > 0:
-                        vol_real = float(np.sum(crown_pixels - cbh) * pixel_area)
+                        vol_real = float(np.sum(crown_pixels - cbh) * pixel_area) * impute_scale
         else:
             area_px_real = area_px_est
             area_geo_real = area_geo_est

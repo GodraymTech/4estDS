@@ -42,8 +42,8 @@ class TestInferencePipeline(unittest.TestCase):
         self.assertEqual(dets.items[0].label, "tree")
 
     def test_in_memory_source_direct(self):
-        # 建立一个 100x100x3 的全黑图像数组
-        array = np.zeros((100, 100, 3), dtype=np.uint8)
+        # 建立一个 100x100x3 的有效图像数组 (非全黑/纯空)
+        array = np.full((100, 100, 3), 128, dtype=np.uint8)
         source = InMemorySource(array)
         detector = MockDetector()
         
@@ -71,13 +71,13 @@ class TestInferencePipeline(unittest.TestCase):
     def test_tiled_directory_source(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             td = Path(tmpdir)
-            # 生成形如 o{x}_{y}__s{tile_size}.jpg 的假文件
+            # 生成形如 o{x}_{y}__s{tile_size}.jpg 的假文件 (有效图像非全黑)
             # 文件1: 坐标 (0, 0), 大小 50x50
             f1 = td / "o0_0__s50.jpg"
-            Image.new("RGB", (50, 50)).save(f1)
+            Image.new("RGB", (50, 50), color="green").save(f1)
             # 文件2: 坐标 (30, 0), 大小 50x50
             f2 = td / "o30_0__s50.jpg"
-            Image.new("RGB", (50, 50)).save(f2)
+            Image.new("RGB", (50, 50), color="green").save(f2)
             
             source = TiledDirectorySource(td, width=80, height=50)
             detector = MockDetector()
