@@ -463,8 +463,9 @@ def cmd_batch(
 
 @app.command("db", help="数据库管理")
 def cmd_db(
-    db_action: str = Argument(..., help="动作 (init / migrate / promote)"),
-    run_id: Optional[str] = Option(None, "--run-id", "-r", help="要激活/发布的推理 run_id (仅在 promote 动作时必需)"),
+    db_action: str = Argument(..., help="动作 (init / migrate / promote / recalc-metrics)"),
+    run_id: Optional[str] = Option(None, "--run-id", "-r", help="目标推理 run_id (promote 时必需，recalc-metrics 时可选)"),
+    dry_run: bool = Option(False, "--dry-run", help="仅演练计算指标，不实际写入数据库"),
 ) -> int:
     args = SimpleNamespace(db_action=db_action)
 
@@ -487,6 +488,18 @@ def cmd_db(
             logger.info(f"[db] 推理任务 {run_id} 已成功发布激活为正式版本。")
         except Exception as e:
             logger.error(f"[db] 发布推理任务失败: {e}")
+            return 1
+    elif args.db_action in ("recalc-metrics", "recalc"):
+        from .tools.recalc_metrics import recalculate_run_metrics, recalculate_all_runs
+        db_url = settings.get("url", None)
+        try:
+            if run_id:
+                recalculate_run_metrics(run_id, db_url=db_url, dry_run=dry_run)
+            else:
+                recalculate_all_runs(db_url=db_url, dry_run=dry_run)
+            logger.info(f"[db] 物理指标原地重算完成 (dry_run={dry_run})")
+        except Exception as e:
+            logger.error(f"[db] 物理指标重算失败: {e}")
             return 1
     else:
         logger.error("[db] 未知子命令")
