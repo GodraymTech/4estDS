@@ -1,0 +1,455 @@
+#AOCI-CODE-VOLUME: 1
+
+===/home/ray/rays/repos/4estDS/.agents/===
+mcp_config.json[FC5T]: F:配置工作区级AOCI MCP服务器进程启动参数 | R:code:AGENTS.md | A:json | S:-
+
+===/home/ray/rays/repos/4estDS/.agents/rules/===
+workspace_rules.md[SC6T]: F:定义工作区AI编码原则与交互规则 | R:- | A:markdown | S:-
+
+===/home/ray/rays/repos/4estDS/===
+.dockerignore[OV4T]: F:声明Docker镜像构建时排除的文件与目录 | R:- | A:- | S:-
+.gitattributes[FV4T]: F:规范全平台检出时的LF行尾换行符与文件属性 | R:- | A:- | S:-
+.gitignore[FV5T]: F:声明Git版本控制忽略的缓存、临时文件与运行期产物 | R:- | A:- | S:-
+.mcp.json[FC5T]: F:声明项目级MCP配置文件供Claude Code等宿主读取 | R:- | A:json | S:-
+AGENTS.md[SC8S]: F:项目全局Agent工作区准则与AOCI运行合同 | R:code:aoci.txt | A:markdown | S:-
+README.md[SG7M]: F:项目架构说明、功能介绍与部署运行指南 | R:- | A:markdown | S:-
+pyproject.toml[FV8T]: F:Python项目元数据、构建系统与依赖包声明 | R:- | A:pyproject | S:-
+start.sh[OV8M]: F:项目快速启动与多服务编排一键引导脚本 | R:- | A:bash | S:-
+uv.lock[FV8L]: F:uv包管理器依赖精确锁定清单 | R:- | A:uv.lock | S:-
+
+===/home/ray/rays/repos/4estDS/.github/workflows/===
+ci.yml[OQ6T]: F:GitHub Actions持续集成流水线定义与自动化检查 | R:- | A:yaml | S:-
+
+===/home/ray/rays/repos/4estDS/.serena/===
+project.yml[XC4T]: F:配置Serena语义分析工具的项目级元数据 | R:- | A:yaml | S:-
+
+===/home/ray/rays/repos/4estDS/configs/===
+default.yaml[FC7T]: F:系统默认全局配置参数声明 | R:- | A:yaml | S:-
+ultralytics_train.yaml[FA6T]: F:Ultralytics YOLO模型训练超参数与数据路径配置 | R:- | A:yaml | S:-
+
+===/home/ray/rays/repos/4estDS/configs/dinov/===
+dinov_sam_ade_eval.yaml[FA6T]: F:DINOv与SAM模型在ADE20K数据集上的评估配置 | R:- | A:yaml | S:-
+dinov_sam_coco_swinl_train.yaml[FA6T]: F:DINOv Swin-L骨干网络在COCO数据集的训练参数配置 | R:- | A:yaml | S:-
+dinov_sam_coco_train.yaml[FA6T]: F:DINOv与SAM在COCO数据集的基础训练配置 | R:- | A:yaml | S:-
+
+===/home/ray/rays/repos/4estDS/deploy/===
+.env.example[FC5T]: F:部署环境环境变量模板与示例声明 | R:- | A:env | S:-
+Dockerfile.api[OV6T]: F:后端API服务的容器化打包定义 | R:- | A:dockerfile | S:-
+Dockerfile.web[OV6T]: F:前端Web应用的容器化多阶段构建打包定义 | R:- | A:dockerfile | S:-
+Dockerfile.worker[OV6T]: F:后台CPU Worker任务处理器的容器化打包定义 | R:- | A:dockerfile | S:-
+Dockerfile.worker.gpu[OV6T]: F:GPU加速Worker任务处理器的容器化打包定义 | R:- | A:dockerfile | S:需CUDA驱动与NVIDIA Container Toolkit支持
+docker-compose.yml[OV7S]: F:容器化部署与编排定义：docker-compose.yml | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/deploy/nginx/===
+nginx.conf[ON6T]: F:Nginx反向代理与静态资源网关路由配置 | R:- | A:nginx.conf | S:-
+
+===/home/ray/rays/repos/4estDS/deploy/postgis/===
+backfill.py[OC5S]: F:部署辅助脚本/配置：backfill.py | R:- | A:- | S:-
+rls.sql[PD7T]: F:PostGIS空间数据库表结构与函数定义：rls.sql | R:- | A:sql | S:-
+schema.sql[PD7S]: F:PostGIS空间数据库表结构与函数定义：schema.sql | R:- | A:sql | S:-
+
+===/home/ray/rays/repos/4estDS/docs/===
+README.md[SG5T]: F:项目文档：README | R:- | A:markdown | S:-
+debug和优化日志.md[SG5S]: F:项目文档：debug和优化日志 | R:- | A:markdown | S:-
+创新点A-基于预推理的自适应切片.md[SG5M]: F:项目文档：创新点A-基于预推理的自适应切片 | R:- | A:markdown | S:-
+完整教程.md[SG5M]: F:项目文档：完整教程 | R:- | A:markdown | S:-
+快速开始.md[SG5S]: F:项目文档：快速开始 | R:- | A:markdown | S:-
+数据库设计.md[SG5S]: F:项目文档：数据库设计 | R:- | A:markdown | S:-
+日志_模型训练.md[SG5M]: F:项目文档：日志_模型训练 | R:- | A:markdown | S:-
+梳理AI标注网站的UI设计.md[SG5T]: F:项目文档：梳理AI标注网站的UI设计 | R:- | A:markdown | S:-
+模型对比.md[SG5S]: F:项目文档：模型对比 | R:- | A:markdown | S:-
+系统并发与资源调度优化实施方案.md[SG5S]: F:项目文档：系统并发与资源调度优化实施方案 | R:- | A:markdown | S:-
+项目工作原理.md[SG5S]: F:项目文档：项目工作原理 | R:- | A:markdown | S:-
+
+===/home/ray/rays/repos/4estDS/docs/superpowers/plans/===
+2026-07-17-effective-area-smart-review.md[SG5L]: F:项目文档：2026-07-17-effective-area-smart-review | R:- | A:markdown | S:-
+
+===/home/ray/rays/repos/4estDS/docs/合同202604/===
+0826-中期进展说明.md[SG5L]: F:项目文档：0826-中期进展说明 | R:- | A:markdown | S:-
+
+===/home/ray/rays/repos/4estDS/docs/项目时间线/===
+实时方案.md[SG5M]: F:项目文档：实时方案 | R:- | A:markdown | S:-
+日志_产品开发.md[SG5L]: F:项目文档：日志_产品开发 | R:- | A:markdown | S:-
+智能复核模块--第三次实施方案.md[SG5L]: F:项目文档：智能复核模块--第三次实施方案 | R:- | A:markdown | S:-
+智能复核模块--第二次实施方案.md[SG5M]: F:项目文档：智能复核模块--第二次实施方案 | R:- | A:markdown | S:-
+有效区域与智能复核使用说明.md[SG5T]: F:项目文档：有效区域与智能复核使用说明 | R:- | A:markdown | S:-
+有效区域与智能复核实施方案.md[SG5L]: F:项目文档：有效区域与智能复核实施方案 | R:- | A:markdown | S:-
+
+===/home/ray/rays/repos/4estDS/scripts/===
+release.sh[XG5M]: F:辅助维护脚本：release.sh | R:- | A:- | S:-
+transplant_weights.py[KA5T]: F:模型权重移植与格式转换工具脚本 | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/===
+__init__.py[EG8T]: F:forestds主包初始化与CLI入口分发 | R:- | A:- | S:-
+__main__.py[EG8T]: F:forestds主包初始化与CLI入口分发 | R:- | A:- | S:-
+cancellation.py[MR7T]: F:长任务协同取消令牌与中断信号控制机制 | R:- | A:- | S:-
+cli.py[EU8L]: F:命令行CLI子命令注册与调度入口 | R:- | A:- | S:-
+config.py[FC8S]: F:系统运行时环境配置与参数模型定义 | R:- | A:- | S:-
+contracts.py[FB7S]: F:核心领域数据契约与接口协议类型声明 | R:- | A:- | S:-
+env.py[FC8T]: F:系统运行时环境配置与参数模型定义 | R:- | A:- | S:-
+geo_admin.py[CD7T]: F:地理空间坐标转换与行政区划边界处理：geo_admin | R:- | A:- | S:-
+geo_coords.py[CD7T]: F:地理空间坐标转换与行政区划边界处理：geo_coords | R:- | A:- | S:-
+logging_setup.py[DB6M]: F:实现 src/forestds/logging_setup.py 相关功能 | R:- | A:- | S:-
+paths.py[CG7S]: F:数据存储目录与系统路径解析辅助 | R:- | A:- | S:-
+service.py[DB6S]: F:实现 src/forestds/service.py 相关功能 | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/api/===
+__init__.py[EN7T]: F:API支持模块：__init__ | R:- | A:- | S:-
+deps.py[CN7T]: F:API请求依赖注入项定义（数据库会话、租户、用户） | R:- | A:- | S:-
+geojson.py[EN7S]: F:API支持模块：geojson | R:- | A:- | S:-
+main.py[EN8T]: F:FastAPI应用实例初始化、中间件挂载与路由注册 | R:- | A:- | S:-
+schemas.py[FD7L]: F:Pydantic请求与响应数据模型Schema定义 | R:- | A:- | S:-
+storage.py[EN7S]: F:API支持模块：storage | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/api/routers/===
+__init__.py[EN7T]: F:FastAPI路由端点：__init__ 业务接口 | R:- | A:- | S:-
+assets.py[EN7L]: F:FastAPI路由端点：assets 业务接口 | R:- | A:- | S:-
+geo.py[EN7M]: F:FastAPI路由端点：geo 业务接口 | R:- | A:- | S:-
+health.py[EN7T]: F:FastAPI路由端点：health 业务接口 | R:- | A:- | S:-
+jobs.py[EN7L]: F:FastAPI路由端点：jobs 业务接口 | R:- | A:- | S:-
+observations.py[EN7T]: F:FastAPI路由端点：observations 业务接口 | R:- | A:- | S:-
+reviews.py[EN7L]: F:FastAPI路由端点：reviews 业务接口 | R:- | A:- | S:-
+tiles.py[EN7L]: F:FastAPI路由端点：tiles 业务接口 | R:- | A:- | S:-
+tracts.py[EN7L]: F:FastAPI路由端点：tracts 业务接口 | R:- | A:- | S:-
+uploads.py[EN7T]: F:FastAPI路由端点：uploads 业务接口 | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/db/===
+__init__.py[PD8T]: F:数据库访问层：__init__ | R:- | A:- | S:-
+models.py[PD8S]: F:SQLAlchemy ORM空间与业务数据模型映射定义 | R:- | A:- | S:-
+reader.py[PD8L]: F:空间数据与业务实体的只读查询封装 | R:- | A:- | S:-
+schema.py[PD8M]: F:SQLAlchemy ORM空间与业务数据模型映射定义 | R:- | A:- | S:-
+tenancy.py[PI8T]: F:多租户数据隔离与上下文管理 | R:- | A:- | S:-
+writer.py[PD8L]: F:事务性业务与空间数据写入及批量更新服务 | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/detect/===
+__init__.py[KA8T]: F:单木与林业目标检测后端及推理封装：__init__ | R:- | A:- | S:-
+base.py[KA8M]: F:单木与林业目标检测后端及推理封装：base | R:- | A:- | S:-
+registry.py[KA8T]: F:单木与林业目标检测后端及推理封装：registry | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/detect/backends/===
+__init__.py[KA8T]: F:单木与林业目标检测后端及推理封装：__init__ | R:- | A:- | S:-
+mock.py[KA8T]: F:单木与林业目标检测后端及推理封装：mock | R:- | A:- | S:-
+ultralytics.py[KA8S]: F:单木与林业目标检测后端及推理封装：ultralytics | R:- | A:- | S:-
+ultralytics_common.py[KA8T]: F:单木与林业目标检测后端及推理封装：ultralytics_common | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/effective_area/===
+__init__.py[DB7T]: F:林区有效作业区域几何计算与窗口过滤服务：__init__ | R:- | A:- | S:-
+importers.py[DB7M]: F:林区有效作业区域几何计算与窗口过滤服务：importers | R:- | A:- | S:-
+service.py[DB7L]: F:林区有效作业区域几何计算与窗口过滤服务：service | R:- | A:- | S:-
+windows.py[DB7M]: F:林区有效作业区域几何计算与窗口过滤服务：windows | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/engine/===
+__init__.py[AW8T]: F:任务执行与推理流水线调度引擎：__init__ | R:- | A:- | S:-
+infer.py[AW8M]: F:任务执行与推理流水线调度引擎：infer | R:- | A:- | S:-
+sources.py[AW8S]: F:任务执行与推理流水线调度引擎：sources | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/export/===
+__init__.py[DB6T]: F:实现 src/forestds/export/__init__.py 相关功能 | R:- | A:- | S:-
+formats.py[DB6M]: F:实现 src/forestds/export/formats.py 相关功能 | R:- | A:- | S:-
+visualize.py[DB6S]: F:实现 src/forestds/export/visualize.py 相关功能 | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/fusion/===
+__init__.py[KA7T]: F:多源遥感数据融合与CHM冠层高度模型计算：__init__ | R:- | A:- | S:-
+chm.py[KA7L]: F:多源遥感数据融合与CHM冠层高度模型计算：chm | R:- | A:- | S:-
+crown.py[KA7M]: F:多源遥感数据融合与CHM冠层高度模型计算：crown | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/geo/===
+__init__.py[CD7L]: F:地理空间坐标转换与行政区划边界处理：__init__ | R:- | A:- | S:-
+admin.py[CD7T]: F:地理空间坐标转换与行政区划边界处理：admin | R:- | A:- | S:-
+coords.py[CD7T]: F:地理空间坐标转换与行政区划边界处理：coords | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/lifecycle/===
+__init__.py[DB7T]: F:树木单体全生命周期追踪与跨时相匹配服务：__init__ | R:- | A:- | S:-
+matching.py[DB7M]: F:树木单体全生命周期追踪与跨时相匹配服务：matching | R:- | A:- | S:-
+tracking.py[DB7S]: F:树木单体全生命周期追踪与跨时相匹配服务：tracking | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/postprocess/===
+__init__.py[KA7T]: F:检测框融合、WBF加权框融合与后处理优化：__init__ | R:- | A:- | S:-
+wbf.py[KA7M]: F:检测框融合、WBF加权框融合与后处理优化：wbf | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/preprocess/===
+__init__.py[AD7T]: F:遥感影像预处理、COG金字塔切片与自适应切块：__init__ | R:- | A:- | S:-
+cog.py[AD7L]: F:遥感影像预处理、COG金字塔切片与自适应切块：cog | R:- | A:- | S:-
+pipeline.py[AD7S]: F:遥感影像预处理、COG金字塔切片与自适应切块：pipeline | R:- | A:- | S:-
+scope.py[AD7L]: F:遥感影像预处理、COG金字塔切片与自适应切块：scope | R:- | A:- | S:-
+slicing.py[AD7M]: F:遥感影像预处理、COG金字塔切片与自适应切块：slicing | R:- | A:- | S:-
+tiling.py[AD7S]: F:遥感影像预处理、COG金字塔切片与自适应切块：tiling | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/report/===
+__init__.py[DB6S]: F:森林资源调查统计指标计算与报表生成：__init__ | R:- | A:- | S:-
+metrics.py[DB6M]: F:森林资源调查统计指标计算与报表生成：metrics | R:- | A:- | S:-
+render.py[DB6L]: F:森林资源调查统计指标计算与报表生成：render | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/review/===
+__init__.py[DB8T]: F:人工/智能复核工作台领域模型与服务逻辑：__init__ | R:- | A:- | S:-
+domain.py[DB8S]: F:人工/智能复核工作台领域模型与服务逻辑：domain | R:- | A:- | S:-
+drafts.py[DB8T]: F:人工/智能复核工作台领域模型与服务逻辑：drafts | R:- | A:- | S:-
+inference_service.py[DB8L]: F:人工/智能复核工作台领域模型与服务逻辑：inference_service | R:- | A:- | S:-
+merge_service.py[DB8M]: F:人工/智能复核工作台领域模型与服务逻辑：merge_service | R:- | A:- | S:-
+publish_service.py[DB8S]: F:人工/智能复核工作台领域模型与服务逻辑：publish_service | R:- | A:- | S:-
+session_service.py[DB8L]: F:人工/智能复核工作台领域模型与服务逻辑：session_service | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/review/models/===
+__init__.py[DB8T]: F:人工/智能复核工作台领域模型与服务逻辑：__init__ | R:- | A:- | S:-
+base.py[DB8T]: F:人工/智能复核工作台领域模型与服务逻辑：base | R:- | A:- | S:-
+dinov.py[DB8M]: F:人工/智能复核工作台领域模型与服务逻辑：dinov | R:- | A:- | S:-
+mock.py[DB8T]: F:人工/智能复核工作台领域模型与服务逻辑：mock | R:- | A:- | S:-
+yolo.py[DB8S]: F:人工/智能复核工作台领域模型与服务逻辑：yolo | R:- | A:- | S:-
+yoloe.py[DB8M]: F:人工/智能复核工作台领域模型与服务逻辑：yoloe | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/tasks/===
+__init__.py[AW7T]: F:异步任务执行器定义：__init__ | R:- | A:- | S:-
+clean.py[AW7M]: F:异步任务执行器定义：clean | R:- | A:- | S:-
+infer.py[AW7L]: F:异步任务执行器定义：infer | R:- | A:- | S:-
+preprocess_train.py[AW7L]: F:异步任务执行器定义：preprocess_train | R:- | A:- | S:-
+preprocess_train_report.py[AW7M]: F:异步任务执行器定义：preprocess_train_report | R:- | A:- | S:-
+train.py[AW7M]: F:异步任务执行器定义：train | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/tools/===
+__init__.py[DB6T]: F:实现 src/forestds/tools/__init__.py 相关功能 | R:- | A:- | S:-
+recalc_metrics.py[DB6M]: F:实现 src/forestds/tools/recalc_metrics.py 相关功能 | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/utils/===
+__init__.py[CG6T]: F:通用图像/TIFF/标注/绘图工具函数：__init__ | R:- | A:- | S:-
+annotations.py[CG6S]: F:通用图像/TIFF/标注/绘图工具函数：annotations | R:- | A:- | S:-
+atomic_io.py[CG6T]: F:通用图像/TIFF/标注/绘图工具函数：atomic_io | R:- | A:- | S:-
+crop_tiff.py[CG6M]: F:通用图像/TIFF/标注/绘图工具函数：crop_tiff | R:- | A:- | S:-
+draw_bbox.py[CG6M]: F:通用图像/TIFF/标注/绘图工具函数：draw_bbox | R:- | A:- | S:-
+draw_common.py[CG6S]: F:通用图像/TIFF/标注/绘图工具函数：draw_common | R:- | A:- | S:-
+draw_dsm.py[CG6M]: F:通用图像/TIFF/标注/绘图工具函数：draw_dsm | R:- | A:- | S:-
+draw_las.py[CG6L]: F:通用图像/TIFF/标注/绘图工具函数：draw_las | R:- | A:- | S:-
+image.py[CG6T]: F:通用图像/TIFF/标注/绘图工具函数：image | R:- | A:- | S:-
+input_inspect.py[CG6M]: F:通用图像/TIFF/标注/绘图工具函数：input_inspect | R:- | A:- | S:-
+progress.py[CG6T]: F:通用图像/TIFF/标注/绘图工具函数：progress | R:- | A:- | S:-
+standardize_dataset.py[CG6L]: F:通用图像/TIFF/标注/绘图工具函数：standardize_dataset | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/src/forestds/worker/===
+__init__.py[MW8T]: F:后台任务队列Broker、Actor与GPU并发锁管理：__init__ | R:- | A:- | S:-
+actors.py[MW8M]: F:后台任务队列Broker、Actor与GPU并发锁管理：actors | R:- | A:- | S:-
+broker.py[MW8T]: F:后台任务队列Broker、Actor与GPU并发锁管理：broker | R:- | A:- | S:-
+control.py[MW8S]: F:后台任务队列Broker、Actor与GPU并发锁管理：control | R:- | A:- | S:-
+gpu_lock.py[MW8T]: F:后台任务队列Broker、Actor与GPU并发锁管理：gpu_lock | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/===
+.env.example[FV7T]: F:前端工程配置与依赖构建定义：.env.example | R:- | A:- | S:-
+.gitignore[FV7T]: F:前端工程配置与依赖构建定义：.gitignore | R:- | A:- | S:-
+index.html[FV7T]: F:前端工程配置与依赖构建定义：index.html | R:- | A:- | S:-
+package.json[FV7T]: F:前端工程配置与依赖构建定义：package.json | R:- | A:- | S:-
+pnpm-lock.yaml[FV7L]: F:前端工程配置与依赖构建定义：pnpm-lock.yaml | R:- | A:- | S:-
+pnpm-workspace.yaml[FV7T]: F:前端工程配置与依赖构建定义：pnpm-workspace.yaml | R:- | A:- | S:-
+tsconfig.json[FV7T]: F:前端工程配置与依赖构建定义：tsconfig.json | R:- | A:- | S:-
+vite.config.ts[FV7T]: F:前端工程配置与依赖构建定义：vite.config.ts | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src-tauri/===
+Cargo.toml[RV7T]: F:Tauri桌面端宿主跨平台壳层实现与配置：Cargo.toml | R:- | A:- | S:-
+README.md[RV7T]: F:Tauri桌面端宿主跨平台壳层实现与配置：README.md | R:- | A:- | S:-
+build.rs[RV7T]: F:Tauri桌面端宿主跨平台壳层实现与配置：build.rs | R:- | A:- | S:-
+tauri.conf.json[RV7T]: F:Tauri桌面端宿主跨平台壳层实现与配置：tauri.conf.json | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src-tauri/capabilities/===
+default.json[RV7T]: F:Tauri桌面端宿主跨平台壳层实现与配置：default.json | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src-tauri/icons/===
+README.md[RV7T]: F:Tauri桌面端宿主跨平台壳层实现与配置：README.md | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src-tauri/src/===
+lib.rs[RV7T]: F:Tauri桌面端宿主跨平台壳层实现与配置：lib.rs | R:- | A:- | S:-
+main.rs[RV7T]: F:Tauri桌面端宿主跨平台壳层实现与配置：main.rs | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/app/===
+App.tsx[AU8T]: F:前端应用根组件、全局布局Shell与路由提供者：App | R:- | A:- | S:-
+ErrorBoundary.tsx[AU8T]: F:前端应用根组件、全局布局Shell与路由提供者：ErrorBoundary | R:- | A:- | S:-
+providers.tsx[AU8T]: F:前端应用根组件、全局布局Shell与路由提供者：providers | R:- | A:- | S:-
+router.tsx[AU8T]: F:前端应用根组件、全局布局Shell与路由提供者：router | R:- | A:- | S:-
+theme.ts[AU8S]: F:前端应用根组件、全局布局Shell与路由提供者：theme | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/app/layout/===
+AboutModal.tsx[AU8T]: F:前端应用根组件、全局布局Shell与路由提供者：AboutModal | R:- | A:- | S:-
+AppFooter.tsx[AU8T]: F:前端应用根组件、全局布局Shell与路由提供者：AppFooter | R:- | A:- | S:-
+AppShell.tsx[AU8S]: F:前端应用根组件、全局布局Shell与路由提供者：AppShell | R:- | A:- | S:-
+Brand.tsx[AU8T]: F:前端应用根组件、全局布局Shell与路由提供者：Brand | R:- | A:- | S:-
+HeaderBar.tsx[AU8T]: F:前端应用根组件、全局布局Shell与路由提供者：HeaderBar | R:- | A:- | S:-
+NavRail.tsx[AU8S]: F:前端应用根组件、全局布局Shell与路由提供者：NavRail | R:- | A:- | S:-
+navItems.ts[AU8T]: F:前端应用根组件、全局布局Shell与路由提供者：navItems | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/app/styles/===
+global.css[AU8M]: F:前端应用根组件、全局布局Shell与路由提供者：global | R:- | A:- | S:-
+tokens.css[AU8S]: F:前端应用根组件、全局布局Shell与路由提供者：tokens | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/entities/effective-area/===
+api.ts[DD7T]: F:前端实体层数据模型与API Hook封装：api | R:- | A:- | S:-
+index.ts[DD7T]: F:前端实体层数据模型与API Hook封装：index | R:- | A:- | S:-
+model.ts[DD7S]: F:前端实体层数据模型与API Hook封装：model | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/entities/observation/===
+hooks.ts[DD7T]: F:前端实体层数据模型与API Hook封装：hooks | R:- | A:- | S:-
+index.ts[DD7T]: F:前端实体层数据模型与API Hook封装：index | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/entities/phase/===
+index.ts[DD7T]: F:前端实体层数据模型与API Hook封装：index | R:- | A:- | S:-
+model.ts[DD7T]: F:前端实体层数据模型与API Hook封装：model | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/entities/review/===
+index.ts[DD7T]: F:前端实体层数据模型与API Hook封装：index | R:- | A:- | S:-
+model.ts[DD7T]: F:前端实体层数据模型与API Hook封装：model | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/entities/tract/===
+hooks.ts[DD7T]: F:前端实体层数据模型与API Hook封装：hooks | R:- | A:- | S:-
+index.ts[DD7T]: F:前端实体层数据模型与API Hook封装：index | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/alerts/===
+AlertsCenter.tsx[AU7S]: F:前端业务功能特性模块：AlertsCenter | R:- | A:- | S:-
+alerts.ts[AU7T]: F:前端业务功能特性模块：alerts | R:- | A:- | S:-
+index.ts[AU7T]: F:前端业务功能特性模块：index | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/change-detect/===
+ChangeDetectView.tsx[AU7M]: F:变化检测与时序指标分析面板组件：ChangeDetectView | R:- | A:- | S:-
+detect.ts[AU7S]: F:变化检测与时序指标分析面板组件：detect | R:- | A:- | S:-
+index.ts[AU7T]: F:变化检测与时序指标分析面板组件：index | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/change-metrics/===
+ChangeMetricsPanel.tsx[AU7S]: F:变化检测与时序指标分析面板组件：ChangeMetricsPanel | R:- | A:- | S:-
+index.ts[AU7T]: F:变化检测与时序指标分析面板组件：index | R:- | A:- | S:-
+metrics.ts[AU7T]: F:变化检测与时序指标分析面板组件：metrics | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/effective-area-editor/===
+EffectiveAreaEditor.css[AU7S]: F:有效作业区域绘制与编辑功能组件：EffectiveAreaEditor | R:- | A:- | S:-
+EffectiveAreaEditor.tsx[AU7L]: F:有效作业区域绘制与编辑功能组件：EffectiveAreaEditor | R:- | A:- | S:-
+GeometryEditorAdapter.ts[AU7M]: F:有效作业区域绘制与编辑功能组件：GeometryEditorAdapter | R:- | A:- | S:-
+geometryOperations.ts[AU7S]: F:有效作业区域绘制与编辑功能组件：geometryOperations | R:- | A:- | S:-
+history.ts[AU7T]: F:有效作业区域绘制与编辑功能组件：history | R:- | A:- | S:-
+index.ts[AU7T]: F:有效作业区域绘制与编辑功能组件：index | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/ledger/===
+LedgerTable.tsx[AU7L]: F:单木观测记录与台账表格数据管理组件：LedgerTable | R:- | A:- | S:-
+index.ts[AU7T]: F:单木观测记录与台账表格数据管理组件：index | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/measure/===
+MeasureToolbar.tsx[AU7S]: F:前端业务功能特性模块：MeasureToolbar | R:- | A:- | S:-
+index.ts[AU7T]: F:前端业务功能特性模块：index | R:- | A:- | S:-
+measureModel.ts[AU7T]: F:前端业务功能特性模块：measureModel | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/observations/===
+ExportColumnsModal.tsx[AU7M]: F:单木观测记录与台账表格数据管理组件：ExportColumnsModal | R:- | A:- | S:-
+ObservationDetailDrawer.tsx[AU7M]: F:单木观测记录与台账表格数据管理组件：ObservationDetailDrawer | R:- | A:- | S:-
+TreeObservationsTable.tsx[AU7L]: F:单木观测记录与台账表格数据管理组件：TreeObservationsTable | R:- | A:- | S:-
+index.ts[AU7T]: F:单木观测记录与台账表格数据管理组件：index | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/overview/===
+DashboardPanel.tsx[AU7T]: F:林区全景概览仪表盘与地图展示组件：DashboardPanel | R:- | A:- | S:-
+OverviewMap.tsx[AU7T]: F:林区全景概览仪表盘与地图展示组件：OverviewMap | R:- | A:- | S:-
+TractMarker.ts[AU7T]: F:林区全景概览仪表盘与地图展示组件：TractMarker | R:- | A:- | S:-
+TractProfileCard.tsx[AU7S]: F:林区全景概览仪表盘与地图展示组件：TractProfileCard | R:- | A:- | S:-
+index.ts[AU7T]: F:林区全景概览仪表盘与地图展示组件：index | R:- | A:- | S:-
+tractGeo.ts[AU7T]: F:林区全景概览仪表盘与地图展示组件：tractGeo | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/reports/===
+ReportHub.tsx[AU7M]: F:前端业务功能特性模块：ReportHub | R:- | A:- | S:-
+index.ts[AU7T]: F:前端业务功能特性模块：index | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/review-workbench/===
+AttemptPanel.tsx[AU8M]: F:智能复核工作台功能组件：AttemptPanel | R:- | A:- | S:-
+CanvasViewer.tsx[AU8L]: F:智能复核工作台功能组件：CanvasViewer | R:- | A:- | S:-
+CategoryPanel.tsx[AU8M]: F:智能复核工作台功能组件：CategoryPanel | R:- | A:- | S:-
+ItemInspector.tsx[AU8S]: F:智能复核工作台功能组件：ItemInspector | R:- | A:- | S:-
+ObjectList.tsx[AU8S]: F:智能复核工作台功能组件：ObjectList | R:- | A:- | S:-
+ObjectThumbnailBar.tsx[AU8S]: F:智能复核工作台功能组件：ObjectThumbnailBar | R:- | A:- | S:-
+PromptPanel.tsx[AU8L]: F:智能复核工作台功能组件：PromptPanel | R:- | A:- | S:-
+ReviewWorkbench.css[AU8L]: F:智能复核工作台功能组件：ReviewWorkbench | R:- | A:- | S:-
+ReviewWorkbench.tsx[AU8M]: F:智能复核工作台功能组件：ReviewWorkbench | R:- | A:- | S:-
+StatusBar.tsx[AU8T]: F:智能复核工作台功能组件：StatusBar | R:- | A:- | S:-
+TiffInfoPanel.tsx[AU8S]: F:智能复核工作台功能组件：TiffInfoPanel | R:- | A:- | S:-
+ToolRail.tsx[AU8M]: F:智能复核工作台功能组件：ToolRail | R:- | A:- | S:-
+TopBar.tsx[AU8T]: F:智能复核工作台功能组件：TopBar | R:- | A:- | S:-
+index.ts[AU8T]: F:智能复核工作台功能组件：index | R:- | A:- | S:-
+store.ts[AU8M]: F:智能复核工作台功能组件：store | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/tasks/===
+JobStatusCell.tsx[AU7T]: F:任务处理中心与上传进度监控组件：JobStatusCell | R:- | A:- | S:-
+TasksCenter.css[AU7L]: F:任务处理中心与上传进度监控组件：TasksCenter | R:- | A:- | S:-
+TasksCenter.tsx[AU7L]: F:任务处理中心与上传进度监控组件：TasksCenter | R:- | A:- | S:-
+UploadForm.tsx[AU7L]: F:任务处理中心与上传进度监控组件：UploadForm | R:- | A:- | S:-
+index.ts[AU7T]: F:任务处理中心与上传进度监控组件：index | R:- | A:- | S:-
+jobsStore.ts[AU7T]: F:任务处理中心与上传进度监控组件：jobsStore | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/features/temporal-wipe/===
+PhaseSlider.tsx[AU7T]: F:多时相遥感影像卷帘对比功能组件：PhaseSlider | R:- | A:- | S:-
+PhaseTimeline.tsx[AU7M]: F:多时相遥感影像卷帘对比功能组件：PhaseTimeline | R:- | A:- | S:-
+TemporalCompare.tsx[AU7M]: F:多时相遥感影像卷帘对比功能组件：TemporalCompare | R:- | A:- | S:-
+index.ts[AU7T]: F:多时相遥感影像卷帘对比功能组件：index | R:- | A:- | S:-
+phaseTime.ts[AU7T]: F:多时相遥感影像卷帘对比功能组件：phaseTime | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/===
+main.tsx[EU9T]: F:前端React应用挂载与启动主入口 | R:- | A:- | S:-
+vite-env.d.ts[FV7T]: F:前端工程配置与依赖构建定义：vite-env.d.ts | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/pages/===
+AdminPage.tsx[EU7S]: F:前端主页面视图组件：AdminPage | R:- | A:- | S:-
+AlertsPage.tsx[EU7T]: F:前端主页面视图组件：AlertsPage | R:- | A:- | S:-
+AtlasPage.tsx[EU7S]: F:前端主页面视图组件：AtlasPage | R:- | A:- | S:-
+CarbonPage.tsx[EU7S]: F:前端主页面视图组件：CarbonPage | R:- | A:- | S:-
+ChangePage.tsx[EU7M]: F:前端主页面视图组件：ChangePage | R:- | A:- | S:-
+DashboardPage.tsx[EU7L]: F:前端主页面视图组件：DashboardPage | R:- | A:- | S:-
+ForbiddenPage.tsx[EU7T]: F:前端主页面视图组件：ForbiddenPage | R:- | A:- | S:-
+InvasionPage.tsx[EU7T]: F:前端主页面视图组件：InvasionPage | R:- | A:- | S:-
+LedgerPage.tsx[EU7T]: F:前端主页面视图组件：LedgerPage | R:- | A:- | S:-
+MapWorkspacePage.tsx[EU7L]: F:前端主页面视图组件：MapWorkspacePage | R:- | A:- | S:-
+NotFoundPage.tsx[EU7T]: F:前端主页面视图组件：NotFoundPage | R:- | A:- | S:-
+OverviewPage.tsx[EU7T]: F:前端主页面视图组件：OverviewPage | R:- | A:- | S:-
+ReportsPage.tsx[EU7T]: F:前端主页面视图组件：ReportsPage | R:- | A:- | S:-
+ReviewPage.css[EU7T]: F:前端主页面视图组件：ReviewPage | R:- | A:- | S:-
+ReviewPage.tsx[EU7M]: F:前端主页面视图组件：ReviewPage | R:- | A:- | S:-
+TasksPage.tsx[EU7T]: F:前端主页面视图组件：TasksPage | R:- | A:- | S:-
+TreeObservationsPage.tsx[EU7T]: F:前端主页面视图组件：TreeObservationsPage | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/shared/api/===
+client.ts[IN8S]: F:前端Axios/REST API请求客户端与接口定义：client | R:- | A:- | S:-
+endpoints.ts[IN8M]: F:前端Axios/REST API请求客户端与接口定义：endpoints | R:- | A:- | S:-
+index.ts[IN8T]: F:前端Axios/REST API请求客户端与接口定义：index | R:- | A:- | S:-
+queryKeys.ts[IN8T]: F:前端Axios/REST API请求客户端与接口定义：queryKeys | R:- | A:- | S:-
+types.ts[IN8L]: F:前端Axios/REST API请求客户端与接口定义：types | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/shared/auth/===
+RoleContext.tsx[CI7T]: F:前端用户权限鉴权与角色上下文管理：RoleContext | R:- | A:- | S:-
+RoleGate.tsx[CI7T]: F:前端用户权限鉴权与角色上下文管理：RoleGate | R:- | A:- | S:-
+index.ts[CI7T]: F:前端用户权限鉴权与角色上下文管理：index | R:- | A:- | S:-
+roles.ts[CI7T]: F:前端用户权限鉴权与角色上下文管理：roles | R:- | A:- | S:-
+session.ts[CI7T]: F:前端用户权限鉴权与角色上下文管理：session | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/shared/config/===
+appMeta.ts[CG6T]: F:前端通用工具与配置：appMeta | R:- | A:- | S:-
+env.ts[CG6S]: F:前端通用工具与配置：env | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/shared/icons/===
+index.tsx[CG6M]: F:前端通用工具与配置：index | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/shared/lib/===
+format.ts[CG6T]: F:前端通用工具与配置：format | R:- | A:- | S:-
+geodesy.ts[CG6T]: F:前端通用工具与配置：geodesy | R:- | A:- | S:-
+platform.ts[CG6T]: F:前端通用工具与配置：platform | R:- | A:- | S:-
+species.ts[CG6T]: F:前端通用工具与配置：species | R:- | A:- | S:-
+useConnectionStatus.ts[CG6M]: F:前端通用工具与配置：useConnectionStatus | R:- | A:- | S:-
+useReducedMotion.ts[CG6T]: F:前端通用工具与配置：useReducedMotion | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/shared/map-core/===
+MapController.ts[IU8T]: F:MapLibre/OpenLayers地图引擎底层集成与控制器：MapController | R:- | A:- | S:-
+MapLibreController.ts[IU8M]: F:MapLibre/OpenLayers地图引擎底层集成与控制器：MapLibreController | R:- | A:- | S:-
+basemap.ts[IU8T]: F:MapLibre/OpenLayers地图引擎底层集成与控制器：basemap | R:- | A:- | S:-
+geo.ts[IU8T]: F:MapLibre/OpenLayers地图引擎底层集成与控制器：geo | R:- | A:- | S:-
+index.ts[IU8T]: F:MapLibre/OpenLayers地图引擎底层集成与控制器：index | R:- | A:- | S:-
+provinceBoundary.ts[IU8S]: F:MapLibre/OpenLayers地图引擎底层集成与控制器：provinceBoundary | R:- | A:- | S:-
+types.ts[IU8T]: F:MapLibre/OpenLayers地图引擎底层集成与控制器：types | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/shared/map-core/province-boundaries/===
+guangdong.json[IU8T]: F:MapLibre/OpenLayers地图引擎底层集成与控制器：guangdong | R:- | A:- | S:-
+guangdong_buffered.json[IU8T]: F:MapLibre/OpenLayers地图引擎底层集成与控制器：guangdong_buffered | R:- | A:- | S:-
+
+===/home/ray/rays/repos/4estDS/web/src/shared/ui/===
+ConnectionStatus.css[CU6T]: F:全局通用UI组件与地图悬浮面板：ConnectionStatus | R:- | A:- | S:-
+ConnectionStatus.tsx[CU6S]: F:全局通用UI组件与地图悬浮面板：ConnectionStatus | R:- | A:- | S:-
+MapFloatingToolbar.tsx[CU6S]: F:全局通用UI组件与地图悬浮面板：MapFloatingToolbar | R:- | A:- | S:-
+MapGlassPanel.tsx[CU6T]: F:全局通用UI组件与地图悬浮面板：MapGlassPanel | R:- | A:- | S:-
+MapStage.tsx[CU6T]: F:全局通用UI组件与地图悬浮面板：MapStage | R:- | A:- | S:-
+PageContainer.tsx[CU6T]: F:全局通用UI组件与地图悬浮面板：PageContainer | R:- | A:- | S:-
+ServerFileBrowserModal.tsx[CU6M]: F:全局通用UI组件与地图悬浮面板：ServerFileBrowserModal | R:- | A:- | S:-
+TemporalWipe.tsx[CU6M]: F:全局通用UI组件与地图悬浮面板：TemporalWipe | R:- | A:- | S:-

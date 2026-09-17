@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "aoci": {
+      "command": "/home/ray/.local/bin/aoci",
+      "args": [
+        "mcp",
+        "--repo",
+        "/home/ray/rays/repos/4estDS"
+      ]
+    }
+  }
+}
