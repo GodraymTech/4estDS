@@ -93,6 +93,7 @@ def ensure_data_yaml(
     old_sample_rate: float | None = None,
     new_ratio_min: float | None = None,
     neg_ratio: float | None = None,
+    bg_sample_rate: float | None = None,
 ) -> Path:
     """数据集校验与自适应结构规整，并动态生成对应的 data.yaml。
     
@@ -109,6 +110,7 @@ def ensure_data_yaml(
     act_old_sr = old_sample_rate if old_sample_rate is not None else tp_cfg.get("old_sample_rate", 1.0)
     act_new_rm = new_ratio_min if new_ratio_min is not None else tp_cfg.get("new_ratio_min", 0.1)
     act_neg_r = neg_ratio if neg_ratio is not None else tp_cfg.get("neg_ratio", 0.1)
+    act_bg_sr = bg_sample_rate if bg_sample_rate is not None else tp_cfg.get("bg_sample_rate", 1.0)
 
     dest_dir = run_dir / "dataset"
     data_yaml_path = preprocess_train_dataset(
@@ -118,9 +120,33 @@ def ensure_data_yaml(
         old_sample_rate=act_old_sr,
         new_ratio_min=act_new_rm,
         neg_ratio=act_neg_r,
+        bg_sample_rate=act_bg_sr,
         dest_dir=dest_dir,
     )
     return data_yaml_path
+
+
+def assert_class_order_matches(model_names: Any, data_yaml_path: Path) -> None:
+    """守卫：基底权重与数据集的类别顺序必须一致。
+
+    ultralytics 在微调时只校验类别数 nc，不校验类别顺序。当两者的名称集合相同
+    但顺序不同，训练会照常进行却把类别静默互换，最终模型输出含义错位。
+    名称集合本身就不同时（如从 COCO 预训练起训）不拦截，交由 ultralytics 重建检测头。
+    """
+    cfg = yaml.safe_load(Path(data_yaml_path).read_text(encoding="utf-8")) or {}
+    data_names = cfg.get("names")
+    if data_names is None:
+        return
+    ds = list(data_names.values()) if isinstance(data_names, dict) else list(data_names)
+    ms = list(model_names.values()) if isinstance(model_names, dict) else list(model_names)
+    if set(ds) == set(ms) and ds != ms:
+        raise ValueError(
+            "类别顺序与基底权重不一致，继续训练会把类别静默互换。\n"
+            f"    数据集 {Path(data_yaml_path).parent.name}/data.yaml: {ds}\n"
+            f"    基底权重: {ms}\n"
+            "    请二选一：① 把数据集 data.yaml 与全部标签的类别 id 调整为与权重一致；"
+            "② 改用类别顺序一致的基底权重。"
+        )
 
 
 def run_train(
@@ -134,6 +160,7 @@ def run_train(
     old_sample_rate: float | None = None,
     new_ratio_min: float | None = None,
     neg_ratio: float | None = None,
+    bg_sample_rate: float | None = None,
 ) -> Dict[str, Any]:
     """4estDS 模型训练入口。
     
@@ -183,6 +210,7 @@ def run_train(
         old_sample_rate=old_sample_rate,
         new_ratio_min=new_ratio_min,
         neg_ratio=neg_ratio,
+        bg_sample_rate=bg_sample_rate,
     )
 
 
@@ -216,6 +244,9 @@ def run_train(
             url=db_url
         )
         
+        # 类别顺序守卫：拦住 ultralytics 只校验 nc、不校验顺序导致的静默类别互换
+        assert_class_order_matches(model.names, data_yaml_path)
+
         # 执行训练
         # 这里的 **train_kwargs 已经包含了 yaml 配置里的全部林业推荐参数
         results = model.train(**train_kwargs)

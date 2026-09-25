@@ -87,6 +87,7 @@ train_preprocess:
   old_sample_rate: 1.0        # 旧数据集采样率 (0.0~1.0)
   new_ratio_min: 0.1          # 混合后新数据集所占的最小比例 (0.0~1.0)
   neg_ratio: 0.1              # 负样本占总图像数的比例 (0.0~1.0)
+  bg_sample_rate: 1.0         # 每个纯背景目录(background_*)的采样率 (0.0~1.0)
 
 detect:
   arch: ultralytics       # 默认使用通用 ultralytics 后端 (自动支持 YOLO 和 RT-DETR 权重)

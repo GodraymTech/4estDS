@@ -247,6 +247,7 @@ def cmd_preprocess_train(
     old_sample_rate: Optional[float] = Option(None, "--old-sample-rate", help="旧数据集采样率 (默认:1.0)"),
     new_ratio_min: Optional[float] = Option(None, "--new-ratio-min", help="合并后'增量数据集'所占的最小比例 (默认:0.1)"),
     neg_ratio: Optional[float] = Option(None, "--neg-ratio", help="负样本占总图像数的比例 (默认:0.1)"),
+    bg_sample_rate: Optional[float] = Option(None, "--bg-sample-rate", help="每个纯背景目录(background_*)的采样率 (默认:1.0)"),
     out_dir: Optional[str] = Option(None, "--out-dir", "-o", help="输出规整数据集的目录（默认自动生成）"),
 ) -> int:
     """自适应解析 VOC/COCO/YOLO 数据集，支持多级目录、负样本与增量混合，并输出数据分布报告。"""
@@ -259,6 +260,7 @@ def cmd_preprocess_train(
     act_old_sr = old_sample_rate if old_sample_rate is not None else tp_cfg.get("old_sample_rate", 1.0)
     act_new_rm = new_ratio_min if new_ratio_min is not None else tp_cfg.get("new_ratio_min", 0.1)
     act_neg_r = neg_ratio if neg_ratio is not None else tp_cfg.get("neg_ratio", 0.1)
+    act_bg_sr = bg_sample_rate if bg_sample_rate is not None else tp_cfg.get("bg_sample_rate", 1.0)
 
     try:
         preprocess_train_dataset(
@@ -268,6 +270,7 @@ def cmd_preprocess_train(
             old_sample_rate=act_old_sr,
             new_ratio_min=act_new_rm,
             neg_ratio=act_neg_r,
+            bg_sample_rate=act_bg_sr,
             dest_dir=out_dir,
         )
         logger.info("[preprocess-train] 数据集自适应预处理与规整成功！")
@@ -288,6 +291,7 @@ def cmd_train(
     old_sample_rate: Optional[float] = Option(None, "--old-sample-rate", help="旧数据集采样率 (默认:1.0)"),
     new_ratio_min: Optional[float] = Option(None, "--new-ratio-min", help="合并后'增量数据集'所占的最小比例 (默认:0.1)"),
     neg_ratio: Optional[float] = Option(None, "--neg-ratio", help="负样本占总图像数的比例 (默认:0.1)"),
+    bg_sample_rate: Optional[float] = Option(None, "--bg-sample-rate", help="每个纯背景目录(background_*)的采样率 (默认:1.0)"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别"),
 ) -> int:
     """YOLO 模型训练命令，支持 VOC / COCO / YOLO 等多格式自适应转换与极简训练。"""
@@ -306,6 +310,7 @@ def cmd_train(
             old_sample_rate=old_sample_rate,
             new_ratio_min=new_ratio_min,
             neg_ratio=neg_ratio,
+            bg_sample_rate=bg_sample_rate,
         )
         logger.debug(f"[train] 训练已结束。成果保存目录: {results['run_dir']}")
         return 0

@@ -2,6 +2,9 @@
 
 支持 YOLO, VOC, COCO 格式以及基于叶子节点与背景目录的结构化配对、负样本采样、
 新旧数据集混合、过采样占比控制、8:2 随机划分，并调用报表生成模块进行大表画像输出。
+
+输入目录若已是自带 data.yaml 的规整 YOLO 数据集，则原样透传其 data.yaml，
+不做任何重采样与重划分（见 detect_preset_yolo_dataset）。
 """
 from __future__ import annotations
 
@@ -382,6 +385,22 @@ def scan_dataset(root_dir: Path) -> Tuple[List[Dict[str, Any]], List[Tuple[Path,
     return pos_samples, neg_images, global_id_to_class
 
 
+def detect_preset_yolo_dataset(root: Path) -> Path | None:
+    """识别"已经规整好的" YOLO 数据集：目录自带声明了 names 与 train 的 data.yaml。
+
+    命中时返回该 data.yaml 的绝对路径，未命中返回 None。此类数据集已完成划分，
+    必须原样透传给 ultralytics，不能再走重采样与重划分。
+    """
+    for name in ("data.yaml", "data.yml"):
+        cfg_path = root / name
+        if not cfg_path.is_file():
+            continue
+        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        if isinstance(cfg, dict) and "names" in cfg and "train" in cfg:
+            return cfg_path.resolve()
+    return None
+
+
 def preprocess_train_dataset(
     data_dir: str,
     old_data_dir: str | None = None,
@@ -389,9 +408,14 @@ def preprocess_train_dataset(
     old_sample_rate: float = 1.0,
     new_ratio_min: float = 0.1,
     neg_ratio: float = 0.1,
+    bg_sample_rate: float = 1.0,
     dest_dir: str | None = None,
 ) -> Path:
-    """自适应预处理并将数据集规整混合至 dest_dir，生成 data.yaml 与分布报告。"""
+    """自适应预处理并将数据集规整混合至 dest_dir，生成 data.yaml 与分布报告。
+
+    若 data_dir 已是自带 data.yaml 的规整 YOLO 数据集，则直接返回该 data.yaml，
+    不生成新数据集，所有预处理参数均不生效。
+    """
     logger.info("=" * 60)
     logger.info("训练集预处理启动...")
     logger.info(f"输入数据集(新/增量): {data_dir}")
@@ -399,7 +423,16 @@ def preprocess_train_dataset(
         logger.info(f"输入数据集(旧/主集): {old_data_dir}")
     logger.info(f"参数: new_sample_rate={new_sample_rate:.0%}, old_sample_rate={old_sample_rate:.0%}")
     logger.info(f"参数: new_ratio_min={new_ratio_min:.0%}, neg_ratio={neg_ratio:.0%}")
+    logger.info(f"参数: bg_sample_rate={bg_sample_rate:.0%} (每个纯背景目录的采样率)")
     logger.info("=" * 60)
+
+    # 0. 已是规整的 YOLO 数据集则原样透传，杜绝重采样与重划分导致的 split 破坏
+    preset_yaml = detect_preset_yolo_dataset(Path(data_dir).resolve())
+    if preset_yaml is not None:
+        logger.info("输入目录已是规整的 YOLO 数据集，直接复用其 data.yaml，跳过预处理。")
+        logger.info(f"复用的 data.yaml: {preset_yaml}")
+        logger.info("本次调用中的采样率 / 配比 / 旧数据集 / 背景采样率参数均不生效。")
+        return preset_yaml
 
     # 准备目标文件夹
     if dest_dir is None:
@@ -495,13 +528,19 @@ def preprocess_train_dataset(
         else:
             leaf_neg_pools.setdefault(belong, []).append((img_p, origin))
 
-    final_neg_sampled: List[Tuple[Path, str, str]] = [] # (img_path, origin, belong_name)
+    final_neg_sampled: List[Tuple[Path, str, str, int]] = [] # (img_path, origin, belong_name, dup_idx)
 
-    # a. 背景负样本底片全选全采
-    logger.info("👉 开始第一阶段：纯背景负样本目录底片无条件全量采纳...")
+    # a. 背景负样本底片按 bg_sample_rate 采样（=1.0 时逐项全采，与历史行为完全一致）
+    logger.info(f"👉 开始第一阶段：纯背景负样本目录底片按 {bg_sample_rate:.0%} 采样...")
     for bg_name, items in bg_neg_pools.items():
-        for img_p, origin in items:
-            final_neg_sampled.append((img_p, origin, bg_name))
+        if bg_sample_rate >= 1.0:
+            picked = items
+        else:
+            keep = int(len(items) * bg_sample_rate)
+            picked = random.sample(items, keep)
+            logger.info(f"背景目录 [{bg_name}]: {len(items)} 张 -> 采纳 {keep} 张")
+        for img_p, origin in picked:
+            final_neg_sampled.append((img_p, origin, bg_name, 0))
             
     total_bg_collected = len(final_neg_sampled)
     global_debt = target_neg_count - total_bg_collected
@@ -536,10 +575,10 @@ def preprocess_train_dataset(
                 sampled = pool[:assign_cnt]
                 leaf_remaining_candidates[leaf_name] = pool[assign_cnt:]
                 for img_p, origin in sampled:
-                    sampled_leaf_neg.append((img_p, origin, leaf_name))
+                    sampled_leaf_neg.append((img_p, origin, leaf_name, 0))
             else:
                 for img_p, origin in pool:
-                    sampled_leaf_neg.append((img_p, origin, leaf_name))
+                    sampled_leaf_neg.append((img_p, origin, leaf_name, 0))
                 deficit_i = assign_cnt - len(pool)
                 secondary_debt += deficit_i
                 leaf_remaining_candidates[leaf_name] = []
@@ -550,7 +589,7 @@ def preprocess_train_dataset(
             all_remains = []
             for leaf_name, items in leaf_remaining_candidates.items():
                 for img_p, origin in items:
-                    all_remains.append((img_p, origin, leaf_name))
+                    all_remains.append((img_p, origin, leaf_name, 0))
             random.shuffle(all_remains)
             take_cnt = min(secondary_debt, len(all_remains))
             sampled_leaf_neg.extend(all_remains[:take_cnt])
@@ -569,7 +608,10 @@ def preprocess_train_dataset(
                 f"已抽干全数据集内所有的背景与叶子负样本底片，仍存在 {deficit} 张负样本缺口。由于 neg_ratio={neg_ratio:.1%} "
                 f"配比要求，系统现启动终极有放回过采样，将复制生成负样本过采样副本 {deficit} 个。"
             )
-            extra_neg = [random.choice(final_neg_sampled) for _ in range(deficit)]
+            extra_neg = []
+            for dup_idx in range(1, deficit + 1):
+                img_p, origin, belong, _ = random.choice(final_neg_sampled)
+                extra_neg.append((img_p, origin, belong, dup_idx))
             final_neg_sampled.extend(extra_neg)
         else:
             logger.warning("数据集中完全未探测到任何可用的背景负样本图，负样本数量降为 0。")
@@ -578,8 +620,8 @@ def preprocess_train_dataset(
     all_packages = []
     for s, origin, dup_idx in final_pos_sampled:
         all_packages.append((s, origin, dup_idx))
-    for img_p, origin, belong in final_neg_sampled:
-        all_packages.append(((img_p, belong), origin, "neg"))
+    for img_p, origin, belong, dup_idx in final_neg_sampled:
+        all_packages.append(((img_p, belong, dup_idx), origin, "neg"))
 
     random.shuffle(all_packages)
     split_idx = int(len(all_packages) * 0.8)
@@ -654,8 +696,8 @@ def preprocess_train_dataset(
                     for item in bboxes_to_write:
                         f.write(f"{item[0]} {item[1]:.6f} {item[2]:.6f} {item[3]:.6f} {item[4]:.6f}\n")
             else:
-                # 负样本 ((img_path, belong), origin, "neg")
-                (img_path, belong) = pkg[0]
+                # 负样本 ((img_path, belong, dup_idx), origin, "neg")
+                (img_path, belong, dup_idx) = pkg[0]
                 post_split_stats[split_name]["neg"].append({
                     "img_path": img_path,
                     "belong_name": belong,
@@ -664,7 +706,7 @@ def preprocess_train_dataset(
 
                 rel_parts = img_path.parent.relative_to(Path(data_dir if origin == "new" else old_data_dir).resolve()).parts
                 dir_prefix = "_".join(rel_parts) + "_" if rel_parts else ""
-                unique_name = f"{origin}_{dir_prefix}{img_path.stem}"
+                unique_name = f"{origin}_{dir_prefix}{img_path.stem}{f'_dup{dup_idx}' if dup_idx > 0 else ''}"
 
                 dest_img_path = img_out_dir / f"{unique_name}{img_path.suffix}"
                 process_and_link_image(img_path, dest_img_path)
@@ -687,8 +729,8 @@ def preprocess_train_dataset(
     )
 
     # 8. 写入并输出 data.yaml 文件
+    # 不写 path 字段：ultralytics 会回退到 data.yaml 所在目录，数据集可整体搬迁
     data_yaml_content = {
-        "path": str(dest_path),
         "train": "images/train",
         "val": "images/val",
         "names": id_to_class
