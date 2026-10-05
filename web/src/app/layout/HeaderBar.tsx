@@ -1,18 +1,20 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import { Button, Dropdown, Space, Typography } from "antd";
-import { BulbOutlined, MoonOutlined, QuestionCircleOutlined, UserOutlined } from "@ant-design/icons";
+import { Button, Dropdown, Space, Tooltip, Typography } from "antd";
+import { BulbOutlined, FormOutlined, MoonOutlined, QuestionCircleOutlined, UserOutlined } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { AboutModal } from "./AboutModal";
 import { useAppTheme } from "../providers";
 import { ConnectionStatus } from "../../shared/ui/ConnectionStatus";
+import { BlackboardDrawer } from "../../features/blackboard";
 
 const { Text } = Typography;
 
-// 顶栏: 左侧预留页面上下文(面包屑/时相), 右侧帮助与用户菜单。
+// 顶栏: 左侧预留页面上下文(面包屑/时相), 右侧备忘录、帮助与用户菜单。
 // 商业外围(关于/隐私/联系)收进右上菜单, 不占主导航。
 export function HeaderBar() {
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [blackboardOpen, setBlackboardOpen] = useState(false);
   const { dark, toggleMode } = useAppTheme();
 
   const helpMenu: MenuProps["items"] = [
@@ -40,6 +42,15 @@ export function HeaderBar() {
     <div style={WRAP}>
       <Text style={CONTEXT}>红树林生态资产监管平台</Text>
       <Space size={4}>
+        <Tooltip title="公共备忘小黑板" placement="bottom">
+          <Button
+            type="text"
+            style={ACTION}
+            icon={<FormOutlined />}
+            aria-label="公共备忘录"
+            onClick={() => setBlackboardOpen(true)}
+          />
+        </Tooltip>
         <Dropdown menu={helpMenuProps} placement="bottomRight">
           <Button
             type="text"
@@ -66,6 +77,7 @@ export function HeaderBar() {
         </Dropdown>
       </Space>
       <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <BlackboardDrawer open={blackboardOpen} onClose={() => setBlackboardOpen(false)} />
     </div>
   );
 }

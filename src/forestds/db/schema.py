@@ -7,6 +7,7 @@ from pathlib import Path
 from .. import paths
 
 _CORE_TABLES = (
+    "blackboard_notes",
     "review_sessions",
     "tree_observations",
     "tree_individuals",
@@ -17,6 +18,17 @@ _CORE_TABLES = (
 )
 
 DDL: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS blackboard_notes (
+        note_id         TEXT PRIMARY KEY,
+        title           TEXT NOT NULL DEFAULT '公共备忘录',
+        content_json    TEXT NOT NULL DEFAULT '[]',
+        plain_text      TEXT NOT NULL DEFAULT '',
+        updated_by      TEXT NOT NULL DEFAULT '系统用户',
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS tracts (
         tract_pk        TEXT PRIMARY KEY,

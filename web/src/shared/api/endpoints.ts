@@ -322,4 +322,16 @@ export const endpoints = {
     const qs = sp.toString();
     return apiGet(qs ? `/observations?${qs}` : "/observations");
   },
+
+  getBlackboardNote: (noteId = "default"): Promise<import("./types").BlackboardNote> =>
+    apiGet(`/blackboard/${encodeURIComponent(noteId)}`),
+
+  updateBlackboardNote: (
+    noteId = "default",
+    data: import("./types").BlackboardNoteUpdate,
+  ): Promise<import("./types").BlackboardNote> =>
+    apiPutJson(`/blackboard/${encodeURIComponent(noteId)}`, data),
+
+  resetBlackboardNote: (noteId = "default"): Promise<{ ok: boolean; message: string }> =>
+    apiDelete(`/blackboard/${encodeURIComponent(noteId)}`),
 } as const;

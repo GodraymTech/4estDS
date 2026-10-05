@@ -744,3 +744,20 @@ export interface TreeObservationListResponse {
   available_species: string[];
 }
 
+export interface BlackboardNote {
+  note_id: string;
+  title: string;
+  content_json: string;
+  plain_text: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BlackboardNoteUpdate {
+  title?: string;
+  content_json: string;
+  plain_text?: string;
+  updated_by?: string;
+}
+

@@ -14,7 +14,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from .. import __codename__, __version__
 from ..db.schema import init_db
 from ..env import load_local_env
-from .routers import assets, geo, health, jobs, observations, reviews, tiles, tracts, uploads
+from .routers import assets, blackboard, geo, health, jobs, observations, reviews, tiles, tracts, uploads
 
 API_PREFIX = "/api/v1"
 
@@ -55,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(tiles.router, prefix=API_PREFIX)
     app.include_router(reviews.router, prefix=API_PREFIX)
     app.include_router(observations.router, prefix=API_PREFIX)
+    app.include_router(blackboard.router, prefix=API_PREFIX)
 
     # 静态前端 SPA 托管 (制品发布生产模式)
     static_dir = os.environ.get("FORESTDS_STATIC_DIR")

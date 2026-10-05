@@ -16,6 +16,9 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.1",
+    "@blocknote/core": "^0.55.0",
+    "@blocknote/mantine": "^0.55.0",
+    "@blocknote/react": "^0.55.0",
     "@fontsource/ibm-plex-mono": "^5.1.0",
     "@fontsource/ibm-plex-sans": "^5.1.0",
     "@fontsource/ibm-plex-serif": "^5.1.0",

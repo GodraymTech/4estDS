@@ -648,3 +648,20 @@ class TreeObservationListOut(BaseModel):
     page_size: int
     available_species: list[str] = Field(default_factory=list)
 
+
+class BlackboardNoteOut(BaseModel):
+    note_id: str
+    title: str
+    content_json: str
+    plain_text: str
+    updated_by: str
+    created_at: str
+    updated_at: str
+
+
+class BlackboardNoteUpdate(BaseModel):
+    title: Optional[str] = None
+    content_json: str
+    plain_text: Optional[str] = ""
+    updated_by: Optional[str] = "团队成员"
+
