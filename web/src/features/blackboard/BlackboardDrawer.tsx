@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import type { CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Drawer, Popconfirm, Skeleton, Space, Tag, Typography, message } from "antd";
@@ -12,7 +12,10 @@ import {
 } from "@ant-design/icons";
 import { endpoints } from "../../shared/api/endpoints";
 import { useAppTheme } from "../../app/providers";
-import { BlackboardEditor } from "./BlackboardEditor";
+
+const BlackboardEditor = lazy(() =>
+  import("./BlackboardEditor").then((m) => ({ default: m.BlackboardEditor }))
+);
 
 const { Text } = Typography;
 
@@ -39,7 +42,7 @@ export function BlackboardDrawer({ open, onClose }: BlackboardDrawerProps) {
     try {
       setSyncStatus("saving");
       await endpoints.resetBlackboardNote("default");
-      message.success("小黑板已重置为初始模板");
+      message.success("公示板已重置");
       await queryClient.invalidateQueries({ queryKey: ["blackboard", "default"] });
       setResetKey((prev) => prev + 1);
       setSyncStatus("saved");
@@ -80,10 +83,10 @@ export function BlackboardDrawer({ open, onClose }: BlackboardDrawerProps) {
           <div style={TITLE_GROUP}>
             <FormOutlined style={{ color: "#34d399", fontSize: 18 }} />
             <Text strong style={{ fontSize: 16, color: dark ? "#ecfdf5" : "#064e3b" }}>
-              公共备忘小黑板
+              公示板
             </Text>
             <Tag color="cyan" style={{ borderRadius: 12, marginInlineStart: 4, fontSize: 11 }}>
-              全员共享 · Notion 块级
+              用户共享
             </Tag>
           </div>
           <Space size={12}>
@@ -99,7 +102,7 @@ export function BlackboardDrawer({ open, onClose }: BlackboardDrawerProps) {
               <Space size={4}>
                 <CheckCircleFilled style={{ color: "#52c41a", fontSize: 13 }} />
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  已同步云端 {lastSaved ? `(${lastSaved})` : ""}
+                  已同步 {lastSaved ? `(${lastSaved})` : ""}
                 </Text>
               </Space>
             )}
@@ -113,10 +116,10 @@ export function BlackboardDrawer({ open, onClose }: BlackboardDrawerProps) {
             )}
 
             <Popconfirm
-              title="确定要重置公共小黑板吗？"
-              description="重置后当前黑板所有内容将被恢复为系统默认模板。"
+              title="确定要重置公示板吗？"
+              description=""
               onConfirm={handleReset}
-              okText="确认重置"
+              okText="确认"
               cancelText="取消"
               okButtonProps={{ danger: true }}
             >
@@ -125,13 +128,6 @@ export function BlackboardDrawer({ open, onClose }: BlackboardDrawerProps) {
               </Button>
             </Popconfirm>
           </Space>
-        </div>
-      }
-      footer={
-        <div style={FOOTER_WRAP}>
-          <Text type="secondary" style={{ fontSize: 12, color: dark ? "#7b948a" : "#6b7280" }}>
-            💡 快捷提示：在空白行输入 <code>/</code> 即可呼出全套排版与待办组件；任何团队成员皆可随时修改，改动自动秒级同步。
-          </Text>
         </div>
       }
     >
@@ -158,14 +154,22 @@ export function BlackboardDrawer({ open, onClose }: BlackboardDrawerProps) {
       )}
 
       {!isLoading && !isError && note && (
-        <BlackboardEditor
-          key={`${note.note_id}_${note.updated_at}_${resetKey}`}
-          note={note}
-          onSyncStatusChange={(status, lastTime) => {
-            setSyncStatus(status);
-            if (lastTime) setLastSaved(lastTime);
-          }}
-        />
+        <Suspense
+          fallback={
+            <div style={{ padding: "20px 8px" }}>
+              <Skeleton active paragraph={{ rows: 8 }} />
+            </div>
+          }
+        >
+          <BlackboardEditor
+            key={`${note.note_id}_${note.updated_at}_${resetKey}`}
+            note={note}
+            onSyncStatusChange={(status, lastTime) => {
+              setSyncStatus(status);
+              if (lastTime) setLastSaved(lastTime);
+            }}
+          />
+        </Suspense>
       )}
     </Drawer>
   );

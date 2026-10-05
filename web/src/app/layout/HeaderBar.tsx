@@ -42,7 +42,7 @@ export function HeaderBar() {
     <div style={WRAP}>
       <Text style={CONTEXT}>红树林生态资产监管平台</Text>
       <Space size={4}>
-        <Tooltip title="公共备忘小黑板" placement="bottom">
+        <Tooltip title="公示板" placement="bottom">
           <Button
             type="text"
             style={ACTION}

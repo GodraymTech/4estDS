@@ -23,7 +23,7 @@ _INITIAL_BLOCKS = [
     {
         "type": "heading",
         "props": {"level": 1},
-        "content": [{"type": "text", "text": "📝 4estDS 团队公共备忘录", "styles": {}}],
+        "content": [{"type": "text", "text": "📝 团队小黑板", "styles": {}}],
     },
     {
         "type": "paragraph",
