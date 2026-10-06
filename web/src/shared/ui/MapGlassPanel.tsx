@@ -26,8 +26,8 @@ export function MapGlassPanel({
       : {}),
     ...(blur != null
       ? {
-          backdropFilter: `blur(${typeof blur === "number" ? `${blur}px` : blur}) saturate(160%)`,
-          WebkitBackdropFilter: `blur(${typeof blur === "number" ? `${blur}px` : blur}) saturate(160%)`,
+          backdropFilter: `blur(${typeof blur === "number" ? `${blur}px` : blur}) saturate(185%) contrast(102%)`,
+          WebkitBackdropFilter: `blur(${typeof blur === "number" ? `${blur}px` : blur}) saturate(185%) contrast(102%)`,
         }
       : {}),
     ...style,
@@ -45,7 +45,8 @@ const PANEL: CSSProperties = {
   borderRadius: 8,
   background: "var(--glass-bg)",
   boxShadow: "var(--glass-shadow), var(--glass-inner)",
-  backdropFilter: "blur(16px) saturate(150%)",
+  backdropFilter: "blur(22px) saturate(185%) contrast(102%)",
+  WebkitBackdropFilter: "blur(22px) saturate(185%) contrast(102%)",
   color: "var(--glass-text)",
 };
 const TITLE: CSSProperties = {

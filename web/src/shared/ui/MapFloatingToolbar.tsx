@@ -44,7 +44,7 @@ export function MapFloatingToolbar({
         </div>
         <div style={RIGHT_TOOLS}>
           {pixelSizeLabel ? (
-            <Tooltip title="像素尺寸(米)" placement="bottom">
+            <Tooltip title="米/像素" placement="bottom">
               <div style={METRIC_BADGE}>{pixelSizeLabel}</div>
             </Tooltip>
           ) : null}
@@ -88,7 +88,8 @@ const GLASS: CSSProperties = {
   background: "var(--glass-bg)",
   border: "1px solid var(--glass-border)",
   boxShadow: "var(--glass-shadow), var(--glass-inner)",
-  backdropFilter: "blur(16px) saturate(150%)",
+  backdropFilter: "blur(22px) saturate(185%) contrast(102%)",
+  WebkitBackdropFilter: "blur(22px) saturate(185%) contrast(102%)",
 };
 const TOP_TOOLBAR: CSSProperties = {
   position: "absolute",

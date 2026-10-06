@@ -161,7 +161,7 @@ export function MapWorkspacePage() {
     } | null>(null);
     const [checkedTiffKeys, setCheckedTiffKeys] = useState<string[]>([]);
     const [treeWidth, setTreeWidth] = useState(240);
-    const [profileWidth, setProfileWidth] = useState(420);
+    const [profileWidth, setProfileWidth] = useState(355);
     const detectionLayerIds = useRef<string[]>([]);
     const imageryLayerIds = useRef<string[]>([]);
     const fittedTract = useRef<string | null>(null);
@@ -1033,9 +1033,11 @@ export function MapWorkspacePage() {
                     style={{
                         ...COMPARE_FLOAT_BUTTON,
                         left: searchOpen ? 234 : 60,
-                        opacity: selectedGroup.tracts.length < 2 ? 0.54 : 1,
+                        color: selectedGroup.tracts.length < 2 ? "var(--glass-muted)" : "var(--glass-text)",
+                        cursor: selectedGroup.tracts.length < 2 ? "not-allowed" : "pointer",
                     }}
                     disabled={selectedGroup.tracts.length < 2}
+                    title={selectedGroup.tracts.length < 2 ? "当前地块仅有单一时相，无法对比" : "时相对比"}
                     onClick={() => navigate(`/change?tract_id=${encodeURIComponent(selectedGroup.latest.tract_id)}`)}
                 >
                     <SwapOutlined />
@@ -2118,16 +2120,9 @@ function hasDistribution(dist: DistributionSummary | undefined): dist is Distrib
 function DistributionPills({ dist, unit }: { dist?: DistributionSummary; unit?: string }) {
     if (!hasDistribution(dist)) return <span>-</span>;
     const suffix = unit ? " " + unit : "";
-    const values = [
-        { label: "极小值", value: dist.min, isMedian: false },
-        { label: "p25", value: dist.p25 ?? dist.p10, isMedian: false },
-        { label: "中值", value: dist.median, isMedian: true },
-        { label: "p75", value: dist.p75 ?? dist.p90, isMedian: false },
-        { label: "极大值", value: dist.max, isMedian: false },
-    ];
     return (
         <div style={DIST_PILL_WRAP}>
-            <span style={DIST_BADGE_STATS}>统计</span>
+            <span style={DIST_BADGE_STATS}>均值</span>
             <Tooltip title="均值">
                 <span style={DIST_NUMBER}>{formatMetric(dist.mean)}{suffix}</span>
             </Tooltip>
@@ -2135,17 +2130,10 @@ function DistributionPills({ dist, unit }: { dist?: DistributionSummary; unit?: 
             <Tooltip title="标准差">
                 <span style={DIST_NUMBER}>{formatMetric(dist.std)}</span>
             </Tooltip>
-            <span style={DIST_BADGE_QUANTILE}>分位</span>
-            {values.map((item, index) => (
-                <span key={item.label} style={DIST_QUANTILE_ITEM}>
-                    {index > 0 ? <span style={DIST_SEPARATOR}>-</span> : null}
-                    <Tooltip title={item.label}>
-                        <span style={item.isMedian ? DIST_NUMBER_MEDIAN : DIST_NUMBER}>
-                            {formatMetric(item.value)}
-                        </span>
-                    </Tooltip>
-                </span>
-            ))}
+            <span style={DIST_BADGE_STATS}>中值</span>
+            <Tooltip title="中值">
+                <span style={DIST_NUMBER}>{formatMetric(dist.median)}</span>
+            </Tooltip>
         </div>
     );
 }
@@ -2203,8 +2191,8 @@ const GLASS: CSSProperties = {
     background: "var(--glass-bg)",
     border: "1px solid var(--glass-border)",
     boxShadow: "var(--glass-shadow), var(--glass-inner)",
-    backdropFilter: "saturate(1.85) blur(26px)",
-    WebkitBackdropFilter: "saturate(1.85) blur(26px)",
+    backdropFilter: "blur(22px) saturate(185%) contrast(102%)",
+    WebkitBackdropFilter: "blur(22px) saturate(185%) contrast(102%)",
 };
 const GLASS_ICON: CSSProperties = {
     ...GLASS,
@@ -2467,7 +2455,8 @@ const MINI_METRIC: CSSProperties = {
     minWidth: 0,
     padding: "6px 6px",
     borderRadius: 10,
-    background: "rgba(255, 255, 255, 0.16)",
+    background: "var(--glass-chip)",
+    border: "1px solid var(--glass-chip-border, rgba(255, 255, 255, 0.12))",
     color: "var(--glass-muted)",
     display: "flex",
     flexDirection: "column",
@@ -2497,7 +2486,8 @@ const PROFILE_DIST_ROW: CSSProperties = {
     padding: "5px 7px",
     borderRadius: 10,
     color: "var(--glass-muted)",
-    background: "rgba(255, 255, 255, 0.14)",
+    background: "var(--glass-chip)",
+    border: "1px solid var(--glass-chip-border, rgba(255, 255, 255, 0.12))",
     fontSize: 11,
     fontVariantNumeric: "tabular-nums",
 };
@@ -2520,35 +2510,15 @@ const DIST_BADGE_STATS: CSSProperties = {
     background: "rgba(142, 225, 190, 0.72)",
     fontWeight: 800,
 };
-const DIST_BADGE_QUANTILE: CSSProperties = {
-    ...DIST_BADGE_STATS,
-    color: "#42310b",
-    background: "rgba(242, 211, 130, 0.74)",
-    marginLeft: 8,
-};
 const DIST_NUMBER: CSSProperties = {
     color: "var(--glass-text)",
     fontWeight: 760,
-};
-const DIST_NUMBER_MEDIAN: CSSProperties = {
-    color: "#ffaa00",
-    fontWeight: 850,
-    background: "rgba(255, 170, 0, 0.16)",
-    padding: "0 4px",
-    borderRadius: 4,
-    border: "1px solid rgba(255, 170, 0, 0.35)",
+    fontVariantNumeric: "tabular-nums",
 };
 const DIST_PM: CSSProperties = {
     color: "var(--glass-muted)",
     fontWeight: 700,
-};
-const DIST_SEPARATOR: CSSProperties = {
-    margin: "0 0px",
-    color: "var(--glass-muted)",
-};
-const DIST_QUANTILE_ITEM: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
+    margin: "0 2px",
 };
 const PROFILE_TAGS: CSSProperties = {
     display: "flex",
@@ -2587,7 +2557,8 @@ const COMPACT_KPI: CSSProperties = {
     minWidth: 0,
     padding: "7px 8px",
     borderRadius: 12,
-    background: "rgba(255, 255, 255, 0.14)",
+    background: "var(--glass-chip)",
+    border: "1px solid var(--glass-chip-border, rgba(255, 255, 255, 0.12))",
     display: "flex",
     alignItems: "baseline",
     justifyContent: "space-between",
@@ -2637,7 +2608,7 @@ const RESIZE_HANDLE: CSSProperties = {
     width: 6,
     cursor: "ew-resize",
     borderRadius: 999,
-    background: "rgba(255, 255, 255, 0.16)",
+    background: "var(--glass-chip)",
 };
 const TREE_LEAF_TITLE: CSSProperties = { color: "var(--glass-text)" };
 const TIFF_LIST: CSSProperties = {
@@ -2654,7 +2625,8 @@ const TIFF_LIST_ROW: CSSProperties = {
     gap: 7,
     padding: "7px 8px",
     borderRadius: 10,
-    background: "rgba(255, 255, 255, 0.12)",
+    background: "var(--glass-chip)",
+    border: "1px solid var(--glass-chip-border, rgba(255, 255, 255, 0.12))",
     cursor: "pointer",
 };
 const SPECIES_GRID: CSSProperties = {
@@ -2696,6 +2668,7 @@ const READOUT_MAIN: CSSProperties = {
 const READOUT_SUB: CSSProperties = { fontSize: 12, color: "var(--glass-muted)" };
 const HOVER_CARD: CSSProperties = {
     ...GLASS,
+    background: "var(--glass-bg-strong)",
     position: "fixed",
     transform: "translate(-50%, calc(-100% - 16px))",
     zIndex: 1000,
@@ -2703,6 +2676,7 @@ const HOVER_CARD: CSSProperties = {
     width: 176,
     borderRadius: 16,
     padding: 10,
+    boxShadow: "var(--glass-shadow), var(--glass-inner)",
 };
 const HOVER_TITLE: CSSProperties = {
     fontWeight: 700,
@@ -2722,10 +2696,12 @@ const HOVER_ROW: CSSProperties = {
     gap: 10,
 };
 const HOVER_OK: CSSProperties = {
-    color: "#9ff0c4",
+    color: "var(--canopy, #237804)",
+    fontWeight: 700,
 };
 const HOVER_WARN: CSSProperties = {
-    color: "#ffd166",
+    color: "var(--laterite, #c9a24b)",
+    fontWeight: 700,
 };
 const LOADING: CSSProperties = {
     ...GLASS,
@@ -2828,8 +2804,7 @@ function DetectionTooltip({
 
     return (
         <MapGlassPanel
-            glassOpacity={0.6}
-            blur={6}
+            blur={22}
             style={{
                 position: "fixed",
                 left,
@@ -2837,44 +2812,48 @@ function DetectionTooltip({
                 pointerEvents: "none",
                 zIndex: 2000,
                 width: "max-content",
-                maxWidth: 165,
+                maxWidth: 175,
+                background: "var(--glass-bg-strong)",
+                boxShadow: "var(--glass-shadow), var(--glass-inner)",
+                border: "1px solid var(--glass-border)",
+                borderRadius: 14,
             }}
-            bodyStyle={{ padding: "6px 10px" }}
+            bodyStyle={{ padding: "8px 12px" }}
         >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, gap: 8 }}>
-                <span style={{ fontWeight: 600, color: tagColor, fontSize: 12, lineHeight: 1.2, whiteSpace: "nowrap" }}>{species}</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
+                <span style={{ fontWeight: 700, color: tagColor, fontSize: 13, lineHeight: 1.2, whiteSpace: "nowrap" }}>{species}</span>
                 {confidence ? (
-                    <span style={{ fontSize: 10, background: "var(--glass-chip)", color: "var(--glass-muted)", padding: "1px 5px", borderRadius: 4, lineHeight: 1.2, whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 10, background: "var(--glass-chip)", border: "1px solid var(--glass-chip-border, rgba(255, 255, 255, 0.12))", color: "var(--glass-text)", padding: "1px 6px", borderRadius: 4, lineHeight: 1.2, whiteSpace: "nowrap", fontWeight: 600 }}>
                         {confidence}
                     </span>
                 ) : null}
             </div>
 
-            <div style={{ display: "grid", gap: 2, fontSize: 11, color: "var(--glass-muted)", lineHeight: 1.35 }}>
+            <div style={{ display: "grid", gap: 3, fontSize: 11, color: "var(--glass-muted)", lineHeight: 1.35 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ color: "var(--glass-text)", fontWeight: 500, whiteSpace: "nowrap" }}>尺寸(px):</span>
-                    <span style={{ whiteSpace: "nowrap" }}>{sizePx}</span>
+                    <span style={{ color: "var(--glass-text)", fontWeight: 550, whiteSpace: "nowrap" }}>尺寸(px):</span>
+                    <span style={{ color: "var(--glass-text)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{sizePx}</span>
                 </div>
 
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ color: "var(--glass-text)", fontWeight: 500, whiteSpace: "nowrap" }}>尺寸(m):</span>
-                    <span style={{ whiteSpace: "nowrap" }}>{sizeM}</span>
+                    <span style={{ color: "var(--glass-text)", fontWeight: 550, whiteSpace: "nowrap" }}>尺寸(m):</span>
+                    <span style={{ color: "var(--glass-text)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{sizeM}</span>
                 </div>
 
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ color: "var(--glass-text)", fontWeight: 500, whiteSpace: "nowrap" }}>面积(m²):</span>
-                    <span style={{ whiteSpace: "nowrap" }}>{areaM2}</span>
+                    <span style={{ color: "var(--glass-text)", fontWeight: 550, whiteSpace: "nowrap" }}>面积(m²):</span>
+                    <span style={{ color: "var(--glass-text)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{areaM2}</span>
                 </div>
 
                 {heightVal ? (
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                        <span style={{ color: "var(--glass-text)", fontWeight: 500, whiteSpace: "nowrap" }}>树高(m):</span>
-                        <span style={{ whiteSpace: "nowrap" }}>{heightVal}</span>
+                        <span style={{ color: "var(--glass-text)", fontWeight: 550, whiteSpace: "nowrap" }}>树高(m):</span>
+                        <span style={{ color: "var(--glass-text)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{heightVal}</span>
                     </div>
                 ) : null}
 
                 {obsId ? (
-                    <div style={{ fontSize: 10, color: "var(--glass-muted)", opacity: 0.7, textAlign: "right", marginTop: 1, whiteSpace: "nowrap" }}>
+                    <div style={{ fontSize: 10, color: "var(--glass-muted)", opacity: 0.75, textAlign: "right", marginTop: 2, whiteSpace: "nowrap" }}>
                         #{obsId}
                     </div>
                 ) : null}

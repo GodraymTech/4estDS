@@ -162,6 +162,14 @@ body {
     border-color: var(--color-primary) !important;
 }
 
+.ant-btn-text {
+    color: var(--color-text);
+}
+
+.ant-btn-text:hover:not(:disabled) {
+    background: var(--color-fill-tertiary) !important;
+}
+
 .ant-tag:not([class*="ant-tag-"]) {
     background: color-mix(in srgb, var(--color-surface) 72%, var(--color-bg));
     border-color: var(--color-border);

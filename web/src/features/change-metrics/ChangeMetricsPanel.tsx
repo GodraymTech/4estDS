@@ -136,7 +136,7 @@ const METRIC: CSSProperties = {
 };
 const METRIC_LABEL: CSSProperties = {
   fontSize: 12,
-  color: "var(--color-text-muted, #5c6b66)",
+  color: "var(--glass-muted)",
 };
 const METRIC_ROW: CSSProperties = {
   display: "flex",
@@ -147,11 +147,12 @@ const MONO: CSSProperties = {
   fontVariantNumeric: "tabular-nums",
   fontSize: 16,
   fontWeight: 600,
+  color: "var(--glass-text)",
 };
-const ARROW: CSSProperties = { color: "var(--color-text-muted, #5c6b66)" };
+const ARROW: CSSProperties = { color: "var(--glass-muted)" };
 const UNIT: CSSProperties = {
   fontSize: 12,
-  color: "var(--color-text-muted, #5c6b66)",
+  color: "var(--glass-muted)",
 };
 const DELTA: CSSProperties = {
   fontSize: 12,
@@ -165,11 +166,11 @@ const FOOT: CSSProperties = {
 };
 const NOTE: CSSProperties = {
   fontSize: 11,
-  color: "var(--color-text-muted, #5c6b66)",
+  color: "var(--glass-muted)",
 };
 const HINT: CSSProperties = {
   fontSize: 12,
-  color: "var(--color-text-muted, #5c6b66)",
+  color: "var(--glass-muted)",
 };
 const CENTER: CSSProperties = {
   display: "flex",

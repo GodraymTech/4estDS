@@ -243,8 +243,9 @@ const ACTION_BTN: CSSProperties = { width: 40, height: 40, fontSize: 18 };
 
 const ACTIVE_BTN: CSSProperties = {
   ...ACTION_BTN,
-  backgroundColor: "#0e6e63",
-  borderColor: "#0e6e63",
+  backgroundColor: "var(--color-primary)",
+  borderColor: "var(--color-primary)",
+  color: "#ffffff",
 };
 
 const DIVIDER: CSSProperties = { margin: "12px 0", borderColor: "rgba(125,125,125,0.2)" };

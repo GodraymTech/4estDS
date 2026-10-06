@@ -55,21 +55,24 @@
     --space-8: 32px;
     --shadow-1: 0 1px 2px rgba(16, 48, 43, 0.06), 0 1px 3px rgba(16, 48, 43, 0.1);
     --shadow-2: 0 4px 12px rgba(16, 48, 43, 0.12);
-    --glass-bg: rgba(197, 225, 220, 0.168);
-    --glass-bg-strong: rgba(255, 255, 255, 0.82);
-    --glass-border: rgba(255, 255, 255, 0.72);
-    --glass-shadow: 0 18px 48px rgba(16, 48, 43, 0.18), 0 2px 8px rgba(16, 48, 43, 0.08);
-    --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.62);
-    --glass-text: #10221e;
-    --glass-muted: #5c6b66;
-    --glass-chip: rgba(248, 250, 249, 0.72);
-    --glass-scrollbar-thumb: rgba(16, 48, 43, 0.18);
-    --glass-scrollbar-thumb-hover: rgba(16, 48, 43, 0.32);
+
+    /* 液态玻璃 · 潮间带透光质感 (亮色模式: 基底透明度保持0.75黄金厚度，既有毛玻璃通透感，又阻绝全黑底图穿透) */
+    --glass-bg: rgba(248, 252, 250, 0.6);
+    --glass-bg-strong: rgba(255, 255, 255, 0.60);
+    --glass-border: rgba(255, 255, 255, 0.85);
+    --glass-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
+    --glass-inner: inset 0 1px 1px rgba(255, 255, 255, 0.96), inset 0 -1px 1px rgba(16, 48, 43, 0.06);
+    --glass-text: #071f1a;
+    --glass-muted: #38524a;
+    --glass-chip: rgba(16, 48, 43, 0.06);
+    --glass-chip-border: rgba(16, 48, 43, 0.12);
+    --glass-scrollbar-thumb: rgba(16, 48, 43, 0.22);
+    --glass-scrollbar-thumb-hover: rgba(16, 48, 43, 0.38);
 
     /* 反色高对比 Tooltip 浮层 (亮色主题 -> 深色气泡) */
-    --tooltip-bg: rgba(146, 161, 156, 0.88);
-    --tooltip-text: #0c1015;
-    --tooltip-border: rgba(255, 255, 255, 0.14);
+    --tooltip-bg: rgba(16, 32, 28, 0.92);
+    --tooltip-text: #f0f7f4;
+    --tooltip-border: rgba(255, 255, 255, 0.12);
     --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 
     /* 布局尺度 */
@@ -96,20 +99,23 @@
     --color-primary: var(--tide);
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.42);
     --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.42);
-    --glass-bg: rgba(50, 61, 59, 0.319);
-    --glass-bg-strong: rgba(20, 30, 28, 0.76);
+
+    /* 液态玻璃 · 深潮夜光质感 (暗色模式: 基底透明度保持0.76厚度，防全白底图泛白失真) */
+    --glass-bg: rgba(12, 24, 21, 0.76);
+    --glass-bg-strong: rgba(16, 33, 29, 0.88);
     --glass-border: rgba(255, 255, 255, 0.18);
-    --glass-shadow: 0 22px 58px rgba(0, 0, 0, 0.42), 0 2px 10px rgba(0, 0, 0, 0.28);
-    --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.16);
-    --glass-text: #e6f0ed;
-    --glass-muted: #9ab1aa;
-    --glass-chip: rgba(255, 255, 255, 0.10);
-    --glass-scrollbar-thumb: rgba(255, 255, 255, 0.18);
-    --glass-scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
+    --glass-shadow: 0 22px 58px rgba(0, 0, 0, 0.55), 0 3px 10px rgba(0, 0, 0, 0.35);
+    --glass-inner: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -1px 1px rgba(0, 0, 0, 0.50);
+    --glass-text: #f0f7f4;
+    --glass-muted: #9bb5ad;
+    --glass-chip: rgba(255, 255, 255, 0.08);
+    --glass-chip-border: rgba(255, 255, 255, 0.14);
+    --glass-scrollbar-thumb: rgba(255, 255, 255, 0.22);
+    --glass-scrollbar-thumb-hover: rgba(255, 255, 255, 0.36);
 
     /* 反色高对比 Tooltip 浮层 (暗色主题 -> 高亮浅色气泡) */
-    --tooltip-bg: rgba(85, 107, 99, 0.92);
-    --tooltip-text: #e4e6eb;
-    --tooltip-border: rgba(0, 0, 0, 0.15);
+    --tooltip-bg: rgba(26, 44, 40, 0.94);
+    --tooltip-text: #f3f8f6;
+    --tooltip-border: rgba(255, 255, 255, 0.16);
     --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }

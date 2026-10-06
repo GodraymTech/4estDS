@@ -428,7 +428,7 @@ function EditorWorkspace({
                           input.click();
                         }}
                       >
-                        <InboxOutlined style={{ fontSize: 24, color: "#52c99a" }} />
+                        <InboxOutlined style={{ fontSize: 24, color: "var(--color-primary)" }} />
                         <span className="effective-editor__dropzone-text">点击或将 Shapefile/GeoJSON/GPKG 拖拽至此处</span>
                       </div>
                       <Input
