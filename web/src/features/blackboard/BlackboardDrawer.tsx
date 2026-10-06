@@ -192,9 +192,3 @@ const RESET_BTN: CSSProperties = {
   fontSize: 12,
   color: "#94a3b8",
 };
-
-const FOOTER_WRAP: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-};
