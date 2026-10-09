@@ -1,8 +1,30 @@
 // map-core 对外的中立地理类型(不泄露 MapLibre 类型, 便于日后换引擎)。
 export type LngLat = [number, number];
 
+/** 严格校验是否为有效地理经纬度坐标 [-180, 180], [-90, 90]。 */
+export function isValidLngLat(coord: unknown): coord is LngLat {
+  if (!Array.isArray(coord) || coord.length < 2) return false;
+  const [lng, lat] = coord;
+  return (
+    typeof lng === "number" &&
+    typeof lat === "number" &&
+    Number.isFinite(lng) &&
+    Number.isFinite(lat) &&
+    lng >= -180 &&
+    lng <= 180 &&
+    lat >= -90 &&
+    lat <= 90
+  );
+}
+
 /** 包围盒: [[minX, minY], [maxX, maxY]]。 */
 export type BBox = [LngLat, LngLat];
+
+/** 校验是否为合法地理包围盒。 */
+export function isValidBBox(bbox: unknown): bbox is BBox {
+  if (!Array.isArray(bbox) || bbox.length < 2) return false;
+  return isValidLngLat(bbox[0]) && isValidLngLat(bbox[1]);
+}
 
 export interface FitPadding {
   top: number;

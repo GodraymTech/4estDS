@@ -144,9 +144,14 @@ def _get_detector(arch: str, settings):
     if item is None:
         from ..detect import get_detector
 
+        det_weights = (
+            settings.get(f"detect.models.{arch}.det_weights")
+            or settings.get(f"detect.models.{arch}.weights")
+            or settings.get("detect.weights")
+        )
         det = get_detector(
             arch,
-            weights=settings.get(f"detect.models.{arch}.weights", settings.get("detect.weights")),
+            weights=det_weights,
             conf=float(settings.get("detect.conf_threshold", 0.25)),
             iou=float(settings.get("detect.iou_threshold", 0.6)),
             imgsz=int(settings.get("detect.model_input", settings.get("model_input", 1024))),

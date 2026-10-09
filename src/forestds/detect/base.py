@@ -72,6 +72,9 @@ class Detections:
     def __iter__(self):
         return iter(self.items)
 
+    def __getitem__(self, idx: int | slice):
+        return self.items[idx]
+
     def offset(self, dx: float, dy: float) -> "Detections":
         """整体平移(将读窗内部坐标还原到全图坐标)。"""
         return Detections([d.offset(dx, dy) for d in self.items], dict(self.meta))

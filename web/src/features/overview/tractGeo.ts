@@ -1,10 +1,11 @@
 import type { Tract } from "../../shared/api";
-import type { BBox, LngLat } from "../../shared/map-core";
+import { type BBox, type LngLat, isValidLngLat } from "../../shared/map-core";
 
-// 地块代表点: 优先用后端回填的质心经纬度; 缺失则返回 null(不伪造坐标)。
+// 地块代表点: 优先用后端回填的质心经纬度; 缺失或超出合法地理经纬度范围则返回 null(不伪造坐标)。
 export function tractCenter(t: Tract): LngLat | null {
   if (typeof t.center_lng === "number" && typeof t.center_lat === "number") {
-    return [t.center_lng, t.center_lat];
+    const candidate: LngLat = [t.center_lng, t.center_lat];
+    if (isValidLngLat(candidate)) return candidate;
   }
   return null;
 }

@@ -59,6 +59,7 @@ class InferenceRequest(BaseModel):
 
     image_path: str = Field(..., description="输入影像本地路径 (TIFF/PNG/JPG)")
     arch: Optional[str] = Field(None, description="模型架构，默认读配置 detect.arch")
+    task_type: Optional[str] = Field("fast", description="任务类型: fast (红树速检) | fine (树种精检)")
     phase_id: Optional[str] = Field(None, description="地块时相 YYYYMMDD")
     tract_id: Optional[str] = Field(None, description="地块 ID")
     tile_size: Optional[int] = Field(None, ge=1, description="手动切片边长，缺省自适应")
@@ -79,6 +80,7 @@ class InferenceRequest(BaseModel):
     def to_pipeline_kwargs(self) -> dict[str, Any]:
         """转为 ``run_infer_pipeline`` 的关键字参数(不含 arch / detector / run_id / settings)。"""
         return {
+            "task_type": self.task_type,
             "phase_id": self.phase_id,
             "tract_id": self.tract_id,
             "tile_size": self.tile_size,

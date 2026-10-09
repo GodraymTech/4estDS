@@ -27,6 +27,7 @@ def run_infer_pipeline(
     run_id: str,
     settings,
     arch: str | None = None,
+    task_type: str | None = "fast",
     phase_id: str | None = None,
     tract_id: str | None = None,
     tile_size: int | None = None,
@@ -79,9 +80,14 @@ def run_infer_pipeline(
 
     # ── 1. 初始化检测器 ────────────────────────────────────────────────────────
     if detector is None:
+        det_weights = (
+            settings.get(f"detect.models.{arch_val}.det_weights")
+            or settings.get(f"detect.models.{arch_val}.weights")
+            or settings.get("detect.weights")
+        )
         detector = get_detector(
             arch_val,
-            weights=settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights")),
+            weights=det_weights,
             conf=float(settings.get("detect.conf_threshold", 0.25)),
             iou=float(settings.get("detect.iou_threshold", 0.6)),
             imgsz=int(settings.get("detect.model_input", settings.get("model_input", 1024))),
@@ -211,6 +217,19 @@ def run_infer_pipeline(
         except Exception:
             rel_tiles_dir = str(tiles_dir)
         result.meta["tiles_dir"] = rel_tiles_dir
+
+    # 2.5 树种精检分支：对 TREE 标签单木进行细粒度 7 分类（秋茄、红海榄、桐花树等）
+    species_distribution: dict[str, int] = {}
+    if (task_type or "fast").lower() in ("fine", "species_fine", "tree_fine"):
+        log.info("【精检分支激活】开始执行细粒度树种分类 (YOLO 7cls)...")
+        from ..detect.classifier import refine_species_with_classifier
+
+        species_distribution = refine_species_with_classifier(
+            result.detections,
+            image_path=image_path,
+            settings=settings,
+            arch=arch_val,
+        )
 
     # ── 3. GIS 投影 & 地块登记 ─────────────────────────────────────────────────
     from ..geo import compute_tract_geometry
@@ -342,7 +361,10 @@ def run_infer_pipeline(
         "tract_id": tract_id,
         "phase_id": final_phase_id,
         "export_fmt": resolved_export_fmt,
+        "task_type": task_type or "fast",
     }
+    if species_distribution:
+        metrics["species_distribution"] = species_distribution
     if window_filter is not None:
         metrics["effective_area_hm2"] = window_filter.effective_area_hm2
         metrics["effective_area_cache_key"] = list(window_filter.cache_key or ())

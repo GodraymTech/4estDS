@@ -222,6 +222,7 @@ def submit_batch(
             InferenceRequest(
                 image_path=_resolve_item_image(item, label, storage),
                 arch=item.arch,
+                task_type=item.task_type,
                 phase_id=item.phase_id,
                 tract_id=item.tract_id,
                 tile_size=item.tile_size,

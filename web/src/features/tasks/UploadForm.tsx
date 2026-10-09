@@ -38,6 +38,17 @@ const EXPORT_OPTIONS = [
     { value: "csv", label: "csv" },
 ];
 
+const TASK_TYPE_OPTIONS = [
+    { value: "fast", label: "红树速检" },
+    { value: "fine", label: "树种精检" },
+];
+
+const TASK_TYPE_TIP = (
+    <div style={{ whiteSpace: "pre-line" }}>
+        {`- 红树速检：快速检出所有红树林单木及其死亡植株\n- 树种精检：进一步识别出各植株所属种类，当前支持「秋茄、红海榄、桐花树、木榄、白骨壤、无瓣海桑」`}
+    </div>
+);
+
 const PATH_TIP =
     "仅支持单张 .tif 影像";
 const TRACT_TIP =
@@ -156,6 +167,7 @@ export function UploadForm({
         }
 
         const shared = {
+            task_type: draft.taskType || "fast",
             phase_id: cleanPhaseId || undefined,
             tile_size: typeof draft.tileSize === "number" ? draft.tileSize : undefined,
             overlap_rate:
@@ -238,6 +250,7 @@ export function UploadForm({
                     jobId: ref.job_id,
                     filename: displayName,
                     fullPath: item.input_path,
+                    taskType: item.task_type,
                     tractId: item.tract_id,
                     phaseId: item.phase_id,
                     tileSize: item.tile_size ?? null,
@@ -338,6 +351,26 @@ export function UploadForm({
 
             <div className="task-form__grid">
                 <div className="task-field-row">
+                    <FieldLabel title="任务类型" tooltip={TASK_TYPE_TIP} />
+                    <Select
+                        value={draft.taskType}
+                        onChange={(v) => patchDraft({ taskType: v })}
+                        options={TASK_TYPE_OPTIONS}
+                        disabled={busy}
+                        className="task-select"
+                    />
+                </div>
+                <div className="task-field-row">
+                    <FieldLabel title="导出格式" />
+                    <Select
+                        value={draft.exportFmt}
+                        onChange={(v) => patchDraft({ exportFmt: v })}
+                        options={EXPORT_OPTIONS}
+                        disabled={busy}
+                        className="task-select"
+                    />
+                </div>
+                <div className="task-field-row">
                     <FieldLabel title="时相 ID" />
                     <Input
                         value={draft.phaseId}
@@ -366,7 +399,7 @@ export function UploadForm({
                     <InputNumber
                         value={draft.tileSize}
                         onChange={(v) => patchDraft({ tileSize: typeof v === "number" ? v : null })}
-                        placeholder="默认自适应"
+                        placeholder="自适应"
                         min={1}
                         precision={0}
                         disabled={busy}
@@ -378,23 +411,13 @@ export function UploadForm({
                     <InputNumber
                         value={draft.overlapPercent}
                         onChange={(v) => patchDraft({ overlapPercent: typeof v === "number" ? v : null })}
-                        placeholder="默认自适应"
+                        placeholder="自适应"
                         min={0}
                         max={50}
                         precision={0}
                         addonAfter="%"
                         disabled={busy}
                         className="task-number"
-                    />
-                </div>
-                <div className="task-field-row">
-                    <FieldLabel title="导出格式" />
-                    <Select
-                        value={draft.exportFmt}
-                        onChange={(v) => patchDraft({ exportFmt: v })}
-                        options={EXPORT_OPTIONS}
-                        disabled={busy}
-                        className="task-select"
                     />
                 </div>
             </div>
@@ -480,7 +503,7 @@ export function UploadForm({
     );
 }
 
-function FieldLabel({ title, tooltip }: { title: string; tooltip?: string }) {
+function FieldLabel({ title, tooltip }: { title: string; tooltip?: React.ReactNode }) {
     return (
         <div className="task-label">
             <span>{title}</span>

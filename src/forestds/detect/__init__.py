@@ -13,6 +13,7 @@
   detect/ ← engine/（engine 是唯一合法调用方；tasks/ 间接通过 engine 使用）
 """
 from .base import BaseDetector, Detection, Detections, Window, calculate_max_batch_size
+from .classifier import SpeciesClassifier, refine_species_with_classifier
 from .registry import available_backends, get_detector, register
 
 __all__ = [
@@ -20,6 +21,8 @@ __all__ = [
     "Detection",
     "Detections",
     "Window",
+    "SpeciesClassifier",
+    "refine_species_with_classifier",
     "available_backends",
     "get_detector",
     "register",

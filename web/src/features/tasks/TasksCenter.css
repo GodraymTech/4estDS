@@ -349,8 +349,25 @@
 
 .task-form__grid {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
+}
+
+.task-form__grid .task-field-row {
+    grid-template-columns: 66px minmax(0, 1fr);
+    gap: 6px;
+}
+
+.task-form__grid .task-label {
+    gap: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.task-form__grid .task-number,
+.task-form__grid .task-select,
+.task-form__grid .ant-input-number-group-wrapper {
+    width: 100%;
 }
 
 .task-field-row {

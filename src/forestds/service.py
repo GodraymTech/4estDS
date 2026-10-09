@@ -64,6 +64,7 @@ def run_inference_job(
             settings=settings,
             arch=arch_val,
             detector=detector,
+            task_type=request.task_type,
             phase_id=request.phase_id,
             tract_id=request.tract_id,
             tile_size=request.tile_size,

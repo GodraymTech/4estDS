@@ -151,7 +151,11 @@ def run_silent_inference(image_path: str, settings) -> List[Tuple[int, float, fl
     from ..detect.base import Window
 
     arch = settings.get("detect.arch", "ultralytics")
-    weights = settings.get(f"detect.models.{arch}.weights", settings.get("detect.weights"))
+    weights = (
+        settings.get(f"detect.models.{arch}.det_weights")
+        or settings.get(f"detect.models.{arch}.weights")
+        or settings.get("detect.weights")
+    )
     conf = float(settings.get("conf_threshold", 0.25))
     iou = float(settings.get("detect.iou_threshold", 0.55))
     imgsz = int(settings.get("detect.model_input", settings.get("model_input", 1024)))

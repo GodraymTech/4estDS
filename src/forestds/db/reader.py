@@ -165,7 +165,7 @@ def _tract_row(row: dict) -> dict:
     out["status"] = out.get("coverage_status") or out.get("tract_coverage_status")
     out["source_path"] = _latest_path(out.get("path_versions"))
     center = _parse_wkt_point(out.get("center_geom")) or _parse_wkt_polygon_centroid(out.get("boundary_geom")) or _parse_wkt_point(out.get("boundary_geom_cent"))
-    if center:
+    if center and _looks_like_lnglat(center[0], center[1]):
         out["center_lng"], out["center_lat"] = center[0], center[1]
     else:
         out["center_lng"], out["center_lat"] = None, None
@@ -574,13 +574,21 @@ def list_tiffs(*, url: str | None = None) -> list[dict]:
         source_path = _latest_path(item.get("path_versions"))
         center = None
         if item.get("center_lng") is not None and item.get("center_lat") is not None:
-            center = (float(item["center_lng"]), float(item["center_lat"]))
+            c = (float(item["center_lng"]), float(item["center_lat"]))
+            if _looks_like_lnglat(c[0], c[1]):
+                center = c
         if center is None:
-            center = _parse_wkt_point(item.get("center_geom"))
+            c = _parse_wkt_point(item.get("center_geom"))
+            if c and _looks_like_lnglat(c[0], c[1]):
+                center = c
         if center is None:
-            center = _parse_wkt_polygon_centroid(item.get("footprint_geom"))
+            c = _parse_wkt_polygon_centroid(item.get("footprint_geom"))
+            if c and _looks_like_lnglat(c[0], c[1]):
+                center = c
         if center is None:
-            center = _parse_wkt_point(item.get("boundary_geom_cent"))
+            c = _parse_wkt_point(item.get("boundary_geom_cent"))
+            if c and _looks_like_lnglat(c[0], c[1]):
+                center = c
         count = int(item.get("observation_count") or 0)
         status_counts = {
             status_name: int(item.pop(f"{status_name}_count") or 0)
@@ -764,7 +772,7 @@ def query_tree_observations_paginated(
         if isinstance(tract_phase_pk, str) and tract_phase_pk:
             where_items.append(("o.tract_phase_pk = ?", [tract_phase_pk]))
         if isinstance(tract_id, str) and tract_id:
-            where_items.append(("tp.tract_id = ?", [tract_id]))
+            where_items.append(("(tp.tract_id = ? OR t.tract_id = ?)", [tract_id, tract_id]))
         if isinstance(species, str) and species:
             where_items.append(("o.species = ?", [species]))
         if isinstance(min_confidence, (int, float)):
@@ -794,6 +802,7 @@ def query_tree_observations_paginated(
         count_sql = (
             f"SELECT COUNT(*) AS total FROM tree_observations o "
             f"LEFT JOIN tract_phases tp ON o.tract_phase_pk = tp.tract_phase_pk "
+            f"LEFT JOIN tracts t ON tp.tract_pk = t.tract_pk "
             f"{where_sql}"
         )
         total_row = conn.execute(count_sql, params).fetchone()
@@ -812,6 +821,7 @@ def query_tree_observations_paginated(
         species_sql = (
             f"SELECT DISTINCT o.species FROM tree_observations o "
             f"LEFT JOIN tract_phases tp ON o.tract_phase_pk = tp.tract_phase_pk "
+            f"LEFT JOIN tracts t ON tp.tract_pk = t.tract_pk "
             f"{species_where_sql} "
             f"ORDER BY o.species"
         )
@@ -849,7 +859,7 @@ def query_tree_observations_paginated(
             limit_clause = f"LIMIT {page_size} OFFSET {offset}"
 
         query_sql = (
-            f"SELECT o.*, tp.tract_id, t.city, t.county, t.town "
+            f"SELECT o.*, COALESCE(t.tract_id, tp.tract_id) AS tract_id, t.city, t.county, t.town "
             f"FROM tree_observations o "
             f"LEFT JOIN tract_phases tp ON o.tract_phase_pk = tp.tract_phase_pk "
             f"LEFT JOIN tracts t ON tp.tract_pk = t.tract_pk "

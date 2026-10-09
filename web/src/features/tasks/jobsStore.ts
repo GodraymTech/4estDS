@@ -12,6 +12,7 @@ export interface SubmittedJob {
   jobId: string;
   filename: string;
   fullPath?: string;
+  taskType?: "fast" | "fine";
   tractId?: string;
   phaseId?: string;
   tileSize?: number | null;
@@ -22,6 +23,7 @@ export interface SubmittedJob {
 /** 左侧「推理参数」表单的草稿。 */
 export interface FormDraft {
   inputPath: string;
+  taskType: "fast" | "fine";
   tractId: string;
   phaseId: string;
   tileSize: number | null;
@@ -37,6 +39,7 @@ export interface FormDraft {
 
 export const EMPTY_DRAFT: FormDraft = {
   inputPath: "",
+  taskType: "fast",
   tractId: "",
   phaseId: "",
   tileSize: null,

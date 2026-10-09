@@ -14,6 +14,7 @@ export type {
   RasterBasemap,
   VectorLayerKind,
 } from "./types";
+export { isValidLngLat, isValidBBox } from "./types";
 export type { MapController } from "./MapController";
 export { MapLibreController } from "./MapLibreController";
 export {

@@ -165,6 +165,7 @@ export interface BatchInferItem {
   image_key?: string;
   input_path?: string;
   arch?: string;
+  task_type?: "fast" | "fine";
   phase_id?: string;
   tract_id?: string;
   tile_size?: number;

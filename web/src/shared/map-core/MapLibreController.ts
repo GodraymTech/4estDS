@@ -14,6 +14,7 @@ import type {
   RasterOverlaySpec,
   RasterBasemap,
 } from "./types";
+import { isValidBBox, isValidLngLat } from "./types";
 import type { MapController } from "./MapController";
 
 const DEFAULT_POINT_COLOR = "#0e6e63";
@@ -190,6 +191,7 @@ export class MapLibreController implements MapController {
     const map = this.requireMap();
     this.clearMarkers();
     for (const m of markers) {
+      if (!isValidLngLat(m.lngLat)) continue;
       const marker = new maplibregl.Marker({
         element: m.element,
         anchor: "bottom",
@@ -207,6 +209,7 @@ export class MapLibreController implements MapController {
   }
 
   fitBounds(bounds: BBox, options: number | FitBoundsOptions = 40): void {
+    if (!isValidBBox(bounds)) return;
     const opts = typeof options === "number" ? { padding: options } : options;
     this.map?.fitBounds(bounds, {
       padding: opts.padding ?? 40,
@@ -216,6 +219,7 @@ export class MapLibreController implements MapController {
   }
 
   flyTo(center: LngLat, zoom: number): void {
+    if (!isValidLngLat(center)) return;
     this.map?.flyTo({ center, zoom, duration: 800, essential: true });
   }
 

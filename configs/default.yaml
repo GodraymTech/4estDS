@@ -2,149 +2,170 @@
 # 分层顺序: 本文件 -> ~/.4estDS/config.yaml -> 环境变量(forestds_*) -> CLI 覆盖
 
 app:
-  name: 4estDS
-  codename: forestds
+    name: 4estDS
+    codename: forestds
 
 logging:
-  level: DEBUG             # DEBUG  INFO
-  rotation_mb: 20        # 单个日志文件滚动大小(MB)
-  backups: 5
-  to_db: true            # 是否把运行记录写入 runs 表
+    level: DEBUG # DEBUG  INFO
+    rotation_mb: 20 # 单个日志文件滚动大小(MB)
+    backups: 5
+    to_db: true # 是否把运行记录写入 runs 表
 
 db:
-  # 默认 SQLite(本地);设计上可平滑迁移到 PostgreSQL/PostGIS
-  url: null               # 为空则使用 <home>/db/4estds.sqlite
-  echo: false
+    # 默认 SQLite(本地);设计上可平滑迁移到 PostgreSQL/PostGIS
+    url: null # 为空则使用 <home>/db/4estds.sqlite
+    echo: false
 
 effective_area:
-  area_refresh_ms: 120       # 前端拖动时面积预览节流(毫秒，>=16)；仅影响交互，无需重启后端
-  simplify_tolerance_px: 0.5 # 前端显示建议容差(屏幕像素，>=0)；不改变保存几何，无需重启后端
-  boundary_epsilon_m: 0.05   # 保存边界浮点容差(米，>=0)；越大越宽松，修改后需重启 API
-  mask_cache_size: 32        # TIFF 像素几何 LRU 项数(>=1)；增大会占用内存，修改后需重启 Worker
+    area_refresh_ms: 120 # 前端拖动时面积预览节流(毫秒，>=16)；仅影响交互，无需重启后端
+    simplify_tolerance_px: 0.5 # 前端显示建议容差(屏幕像素，>=0)；不改变保存几何，无需重启后端
+    boundary_epsilon_m: 0.05 # 保存边界浮点容差(米，>=0)；越大越宽松，修改后需重启 API
+    mask_cache_size: 32 # TIFF 像素几何 LRU 项数(>=1)；增大会占用内存，修改后需重启 Worker
 
 review:
-  # 适配器与变体指定（支持显式分写或复合简写）：
-  # 方式 1: adapter: yoloe (搭配 variant: 26x-m07 / 26x / 26l) / adapter: yolo (搭配 variant: m07) / adapter: dinov (搭配 variant: swin_l / swin_t)
-  # 方式 2: adapter: "yoloe-26x-m07" | "yoloe-26x" | "yoloe-26l" | "yolo-m07" | "dinov-swin_l" | "dinov-swin_t" | "mock_review"
-  adapter: yoloe          # yoloe | yolo | dinov | mock_review；推荐 yoloe-26x-m07 (遥感强化) 或 dinov
-  variant: 26x-m07        # yoloe: 26x-m07 | 26x | 26l；yolo: m07；dinov: swin_l | swin_t
-  models:
-    dinov:
-      variants:
-        swin_l:
-          weights: ".4estDS/models/dinov/model_swinL.pth"
-          config: "configs/dinov/dinov_sam_coco_swinl_train.yaml"
-        swin_t:
-          weights: ".4estDS/models/dinov/model_swinT.pth"
-          config: "configs/dinov/dinov_sam_coco_train.yaml"
-    yoloe:
-      text_encoder: ".4estDS/models/multimodal/mobileclip2_b.ts"
-      variants:
-        26x-m07:
-          weights: ".4estDS/models/multimodal/yoloe-26x-m07.pt"
-        26x:
-          weights: ".4estDS/models/multimodal/yoloe-26x-seg.pt"
-        26l:
-          weights: ".4estDS/models/multimodal/yoloe-26l-seg.pt"
-    yolo:
-      variants:
-        m07:
-          weights: ".4estDS/models/m07-yolo26x-7d20f-det-2cls-e152_baseTrain15.pt"
-  device: null            # null 继承 detect.device；也可设置 cuda:0 / cpu
-  model_input: 640        # 视觉提示模型输入边长（像素）
-  conf_threshold: 0.15    # attempt 候选最低置信度 (DINOv 开集视觉提示单木得分通常在 0.15~0.35)
-  default_scope: region   # region | full；前端新 attempt 默认范围，无需重启前端
-  default_merge_mode: append # append | replace_all；前端默认合并方式
-  tile_size: 640         # 视口/整图 attempt 的动态读取窗口边长（像素）
-  batch_size: 4           # review_gpu 初始批大小；OOM 时仅减半重试一次
-  viewport_max_windows: 256 # 单个视口 attempt 最大窗口数(>=1)；限制交互任务时延
-  max_candidates_per_attempt: 50000 # 单 attempt 候选硬上限(>=1)；限制草稿内存与响应体
-  bbox_page_size: 5000    # 前端/接口建议的框分页大小(>=100)；当前万级基线无需 MVT
-  queue: review_gpu       # GPU 串行队列；viewport actor 优先级高于 full actor
+    # 适配器与变体指定（支持显式分写或复合简写）：
+    # 方式 1: adapter: yoloe (搭配 variant: 26x-m07 / 26x / 26l) / adapter: yolo (搭配 variant: m07) / adapter: dinov (搭配 variant: swin_l / swin_t)
+    # 方式 2: adapter: "yoloe-26x-m07" | "yoloe-26x" | "yoloe-26l" | "yolo-m07" | "dinov-swin_l" | "dinov-swin_t" | "mock_review"
+    adapter: yoloe # yoloe | yolo | dinov | mock_review；推荐 yoloe-26x-m07 (遥感强化) 或 dinov
+    variant: 26x-m07 # yoloe: 26x-m07 | 26x | 26l；yolo: m07；dinov: swin_l | swin_t
+    models:
+        dinov:
+            variants:
+                swin_l:
+                    weights: ".4estDS/models/dinov/model_swinL.pth"
+                    config: "configs/dinov/dinov_sam_coco_swinl_train.yaml"
+                swin_t:
+                    weights: ".4estDS/models/dinov/model_swinT.pth"
+                    config: "configs/dinov/dinov_sam_coco_train.yaml"
+        yoloe:
+            text_encoder: ".4estDS/models/multimodal/mobileclip2_b.ts"
+            variants:
+                26x-m07:
+                    weights: ".4estDS/models/multimodal/yoloe-26x-m07.pt"
+                26x:
+                    weights: ".4estDS/models/multimodal/yoloe-26x-seg.pt"
+                26l:
+                    weights: ".4estDS/models/multimodal/yoloe-26l-seg.pt"
+        yolo:
+            variants:
+                m07:
+                    weights: ".4estDS/models/m07-yolo26x-7d20f-det-2cls-e152_baseTrain15.pt"
+    device: null # null 继承 detect.device；也可设置 cuda:0 / cpu
+    model_input: 640 # 视觉提示模型输入边长（像素）
+    conf_threshold: 0.15 # attempt 候选最低置信度 (DINOv 开集视觉提示单木得分通常在 0.15~0.35)
+    default_scope: region # region | full；前端新 attempt 默认范围，无需重启前端
+    default_merge_mode: append # append | replace_all；前端默认合并方式
+    tile_size: 640 # 视口/整图 attempt 的动态读取窗口边长（像素）
+    batch_size: 4 # review_gpu 初始批大小；OOM 时仅减半重试一次
+    viewport_max_windows: 256 # 单个视口 attempt 最大窗口数(>=1)；限制交互任务时延
+    max_candidates_per_attempt: 50000 # 单 attempt 候选硬上限(>=1)；限制草稿内存与响应体
+    bbox_page_size: 5000 # 前端/接口建议的框分页大小(>=100)；当前万级基线无需 MVT
+    queue: review_gpu # GPU 串行队列；viewport actor 优先级高于 full actor
 
 preprocess:
-  # 预处理行为: dynamic (动态切片：不落盘，内存推理) | static (静态切片：先落盘后推理)
-  action: "dynamic"
-  # 默认降级/兜底参数（当不启用 SCOPE，或者非 TIFF/超大图像退级时）
-  default_tile_size: 1024
-  default_overlap_rate: 0.1
-  
-  # SCOPE 预推理自标定配置
-  scope:
-    enable: true              # 对大图是否启用自标定以自适应计算最优几何 (True/False)
-    seed_window_size: 2560     # 采样种子窗口边长，也是判断是否为大图的阈值
-    max_level: 2               # 四叉树探针分裂的最大次数
-    sample_delta: 2            # 每一轮采样追加的种子窗口数
-    sample_budget: 8           # 采样种子窗口上限数目
-    nodata_tolerance: 0.10     # 每个种子窗口允许的 nodata 占比上限
-    tile_grid: [512, 640, 768, 896, 1024, 1280, 1536, 2048] # 寻优边长候选集
-    overlap_grid: [0.1, 0.15, 0.2, 0.25, 0.3]              # 寻优重叠率候选集
-    draw_box: false             # 仅调试用：是否在采样图上绘制检测框并双图落盘
+    # 预处理行为: dynamic (动态切片：不落盘，内存推理) | static (静态切片：先落盘后推理)
+    action: "dynamic"
+    # 默认降级/兜底参数（当不启用 SCOPE，或者非 TIFF/超大图像退级时）
+    default_tile_size: 1024
+    default_overlap_rate: 0.1
+
+    # SCOPE 预推理自标定配置
+    scope:
+        enable: true # 对大图是否启用自标定以自适应计算最优几何 (True/False)
+        seed_window_size: 2560 # 采样种子窗口边长，也是判断是否为大图的阈值
+        max_level: 2 # 四叉树探针分裂的最大次数
+        sample_delta: 2 # 每一轮采样追加的种子窗口数
+        sample_budget: 8 # 采样种子窗口上限数目
+        nodata_tolerance: 0.10 # 每个种子窗口允许的 nodata 占比上限
+        tile_grid: [512, 640, 768, 896, 1024, 1280, 1536, 2048] # 寻优边长候选集
+        overlap_grid: [0.1, 0.15, 0.2, 0.25, 0.3] # 寻优重叠率候选集
+        draw_box: false # 仅调试用：是否在采样图上绘制检测框并双图落盘
 
 # 针对训练的预处理模块配置
 train_preprocess:
-  new_sample_rate: 1.0        # 新数据集采样率 (0.0~1.0)
-  old_sample_rate: 1.0        # 旧数据集采样率 (0.0~1.0)
-  new_ratio_min: 0.1          # 混合后新数据集所占的最小比例 (0.0~1.0)
-  neg_ratio: 0.1              # 负样本占总图像数的比例 (0.0~1.0)
-  bg_sample_rate: 1.0         # 每个纯背景目录(background_*)的采样率 (0.0~1.0)
+    new_sample_rate: 1.0 # 新数据集采样率 (0.0~1.0)
+    old_sample_rate: 1.0 # 旧数据集采样率 (0.0~1.0)
+    new_ratio_min: 0.1 # 混合后新数据集所占的最小比例 (0.0~1.0)
+    neg_ratio: 0.1 # 负样本占总图像数的比例 (0.0~1.0)
+    bg_sample_rate: 1.0 # 每个纯背景目录(background_*)的采样率 (0.0~1.0)
 
 detect:
-  arch: ultralytics       # 默认使用通用 ultralytics 后端 (自动支持 YOLO 和 RT-DETR 权重)
-  conf_threshold: 0.25
-  iou_threshold: 0.6
-  model_input: 640        # 模型输入边长(像素)
-  batch_size: 128          # 🔴 
-  verbose: true           # 推理时是否输出 ultralytics 自身的详细推理日志
-  models:
-    ultralytics:
-      weights: "m07"
-      # weights: "rtdetr-l.pt"
-      # weights: ".4estDS/outputs/20260629_1501_7d20f_train/weights/best.pt"
+    arch: ultralytics # 默认使用通用 ultralytics 后端 (自动支持 YOLO 和 RT-DETR 权重)
+    conf_threshold: 0.25
+    iou_threshold: 0.6
+    model_input: 640 # 模型输入边长(像素)
+    batch_size: 128 # 🔴
+    verbose: true # 推理时是否输出 ultralytics 自身的详细推理日志
+    models:
+        ultralytics:
+            # 目标检测权重 (TREE / GG 2分类)
+            # det_weights: "m09-yolo12x-from_patent-det-2cls-stage01_v4_dualhead_ggcal.torchscript"
+            det_weights: "m07" # 回滚用（原默认权重）
+            # det_weights: "rtdetr-l.pt"
+            # det_weights: ".4estDS/outputs/20260629_1501_7d20f_train/weights/best.pt"
+            # 树种精检分类权重 (7分类细化)
+            cls_weights: "m03-yolo11l-7cls-SOTA.pt"
+
+# 细粒度树种分类配置（树种精检模式）
+classify:
+    weights: "m03-yolo11l-7cls-SOTA.pt"
+    conf_threshold: 0.25 # 分类最低置信度阈值，低于此值使用 OTHER/兜底类
+    batch_size: 128 # 分类批量推理 batch_size
+    imgsz: 224 # 分类模型输入尺寸（边长像素，null 则使用模型预训练尺寸）
+    pad_ratio: 0.1 # 单木冠幅裁剪四周外扩上下文比例（0.1 表示四向各延展 10% 上下文，0.0 为紧贴检测框）
+    species_map:
+        QQ: "秋茄"
+        HHL: "红海榄"
+        THS: "桐花树"
+        ML: "木榄"
+        BGR: "白骨壤"
+        WBHS: "无瓣海桑"
+        TREE: "其他红树"
+        GG: "枯木"
 
 postprocess:
-  draw_box: true                 # 🔴 是否在原图(或原图中心5000*5000的子图）上绘制检测框, 并保存
-  trunc_penalty: 0.5             # 局部碰边（被切断）框的置信度折扣系数
-  conf_type: "max"               # 跨瓦片 WBF 融合时的置信度聚合方式
-  center_merge_frac: 0.15         # 跨缝断裂拼合的中心距离门控
-  keep_tiles: true               # 🔴 保留切片目录
+    draw_box: true # 🔴 是否在原图(或原图中心5000*5000的子图）上绘制检测框, 并保存
+    trunc_penalty: 0.5 # 局部碰边（被切断）框的置信度折扣系数
+    conf_type: "max" # 跨瓦片 WBF 融合时的置信度聚合方式
+    center_merge_frac: 0.15 # 跨缝断裂拼合的中心距离门控
+    keep_tiles: true # 🔴 保留切片目录
 
 report:
-  format: "pdf"                   # 自动生成的报告默认格式 (md / pdf / csv)
-  with_charts: true              # 自动生成报告时是否渲染学术分析图表 (True/False)
+    format: "pdf" # 自动生成的报告默认格式 (md / pdf / csv)
+    with_charts: true # 自动生成报告时是否渲染学术分析图表 (True/False)
 export:
-  default_format: shp           # 🔴 推理完成后导出 GIS 图层格式。可选值: geojson | shp | gpkg | csv | null（null 表示不自动导出，仅通过 `4estds export` 手动触发）
-  drop_pixel_columns: true
-  drop_source_column: true
+    default_format: shp # 🔴 推理完成后导出 GIS 图层格式。可选值: geojson | shp | gpkg | csv | null（null 表示不自动导出，仅通过 `4estds export` 手动触发）
+    drop_pixel_columns: true
+    drop_source_column: true
 
 # COG 转换
 cog:
-  compress: zstd                # COG 输出压缩方式。zstd 通常比 deflate 更快且体积可控；如需最高兼容性可改 deflate，如需更快但体积更大可试 lzw
+    compress: zstd # COG 输出压缩方式。zstd 通常比 deflate 更快且体积可控；如需最高兼容性可改 deflate，如需更快但体积更大可试 lzw
 
 # 多源融合指标提取参数
 fusion:
-  height_stat: "max"             # 树高采样统计量 (max / p95 / median / mean)
-  area_method: "bbox_product"     # 树冠面积估算方法: bbox_product / polygon_area / mask_area
-  las_grid_size: 0.05            # 激光点云网格化分辨率 (米)
-  dem_default: 0.0               # 单独 DSM 模式下默认常数背景 DEM 高程 (米)
-  volume_method: "cbh"           # 树冠体积估算方法: cbh (枝下高积分) / column (柱体积分) / 【支持像素过滤】
-                                    # paraboloid (抛物面拟合) / cone (圆锥体拟合) / ellipsoid (半椭球体拟合) / 【纯几何估计】
-                                    #convex_hull (点云凸包) / voxel (点云体素化) 【仅在LAS模式生效】
-  cbh_factor: 0.3                # 枝下高占树高比例 (0.0 - 1.0)
-  voxel_size: 0.2                # 体素化估算方法中的三维网格单元大小 (米)
-  chm_threshold: 0.1             # CHM 相对高度二值掩膜截断阈值，用于去噪与树冠勾勒 (米)
-  find_real_canopy: true         # 获取真实树冠, 即过滤检测框内`属于地面`的像素点
-  max_valid_height: 8.0          # 最大有效高度 (米)，高于该配置的高程或点云在预处理时均被截断为该值，过滤电塔/电线/建筑干扰
-
+    height_stat: "max" # 树高采样统计量 (max / p95 / median / mean)
+    area_method: "bbox_product" # 树冠面积估算方法: bbox_product / polygon_area / mask_area
+    las_grid_size: 0.05 # 激光点云网格化分辨率 (米)
+    dem_default: 0.0 # 单独 DSM 模式下默认常数背景 DEM 高程 (米)
+    volume_method:
+        "cbh" # 树冠体积估算方法: cbh (枝下高积分) / column (柱体积分) / 【支持像素过滤】
+        # paraboloid (抛物面拟合) / cone (圆锥体拟合) / ellipsoid (半椭球体拟合) / 【纯几何估计】
+        #convex_hull (点云凸包) / voxel (点云体素化) 【仅在LAS模式生效】
+    cbh_factor: 0.3 # 枝下高占树高比例 (0.0 - 1.0)
+    voxel_size: 0.2 # 体素化估算方法中的三维网格单元大小 (米)
+    chm_threshold: 0.1 # CHM 相对高度二值掩膜截断阈值，用于去噪与树冠勾勒 (米)
+    find_real_canopy: true # 获取真实树冠, 即过滤检测框内`属于地面`的像素点
+    max_valid_height: 8.0 # 最大有效高度 (米)，高于该配置的高程或点云在预处理时均被截断为该值，过滤电塔/电线/建筑干扰
 
 # 瓦片服务器
 tiles:
-  render_concurrency: 8   # 同时渲染 TIFF 瓦片的最大请求数；调高可提升当前视口首屏并发，但会线性增加 GDAL/warp 内存峰值
-  gdal_cache_mb: 640      # 每个渲染进程可用的 GDAL 读取缓存上限；调高可减少重复读取，过高会让多并发时内存快速上涨
-  warp_mem_mb: 320        # 单张瓦片重投影/重采样的工作内存上限；调高可能改善复杂投影速度，过高会放大并发内存峰值
-  cache_enabled: true     # 是否把已渲染的 PNG 瓦片写入本地磁盘缓存；开启后重复访问同一区域会直接命中缓存
-  cache_max_gb: 20        # 瓦片磁盘缓存目录的软上限(GB)；超过该值后后台按最近访问时间清理旧瓦片
-  cache_trim_to_gb: 18    # 触发清理后回收至该容量(GB)再停止；应低于 cache_max_gb，避免频繁反复清理
-  cache_trim_interval_s: 60 # 两次缓存容量检查的最小间隔(秒)；调低会更积极控盘，调高可减少目录扫描开销
-  preheat_max_tiles: 96   # 单次视口预热最多提交的瓦片数；控制预热范围，避免后台任务挤占实时浏览资源
-  preheat_concurrency: 2  # 后台预热瓦片的并发数；建议低于 render_concurrency，让当前屏幕的实时请求优先
+    render_concurrency: 8 # 同时渲染 TIFF 瓦片的最大请求数；调高可提升当前视口首屏并发，但会线性增加 GDAL/warp 内存峰值
+    gdal_cache_mb: 640 # 每个渲染进程可用的 GDAL 读取缓存上限；调高可减少重复读取，过高会让多并发时内存快速上涨
+    warp_mem_mb: 320 # 单张瓦片重投影/重采样的工作内存上限；调高可能改善复杂投影速度，过高会放大并发内存峰值
+    cache_enabled: true # 是否把已渲染的 PNG 瓦片写入本地磁盘缓存；开启后重复访问同一区域会直接命中缓存
+    cache_max_gb: 20 # 瓦片磁盘缓存目录的软上限(GB)；超过该值后后台按最近访问时间清理旧瓦片
+    cache_trim_to_gb: 18 # 触发清理后回收至该容量(GB)再停止；应低于 cache_max_gb，避免频繁反复清理
+    cache_trim_interval_s: 60 # 两次缓存容量检查的最小间隔(秒)；调低会更积极控盘，调高可减少目录扫描开销
+    preheat_max_tiles: 96 # 单次视口预热最多提交的瓦片数；控制预热范围，避免后台任务挤占实时浏览资源
+    preheat_concurrency: 2 # 后台预热瓦片的并发数；建议低于 render_concurrency，让当前屏幕的实时请求优先

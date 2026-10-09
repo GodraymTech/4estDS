@@ -36,6 +36,7 @@ import {
     provinceBounds,
     provinceMask,
     rasterBasemap,
+    isValidLngLat,
     type BBox,
     type GeoJson,
     type GeoJsonLayerSpec,
@@ -161,7 +162,7 @@ export function MapWorkspacePage() {
     } | null>(null);
     const [checkedTiffKeys, setCheckedTiffKeys] = useState<string[]>([]);
     const [treeWidth, setTreeWidth] = useState(240);
-    const [profileWidth, setProfileWidth] = useState(355);
+    const [profileWidth, setProfileWidth] = useState(365);
     const detectionLayerIds = useRef<string[]>([]);
     const imageryLayerIds = useRef<string[]>([]);
     const fittedTract = useRef<string | null>(null);
@@ -1558,7 +1559,11 @@ function buildOverviewStats(tracts: Tract[], groups: TractGroup[], tiffs: TiffAs
 }
 
 function hasTiffCenter(tiff: TiffAsset): tiff is TiffAsset & { center_lng: number; center_lat: number } {
-    return typeof tiff.center_lng === "number" && typeof tiff.center_lat === "number";
+    return (
+        typeof tiff.center_lng === "number" &&
+        typeof tiff.center_lat === "number" &&
+        isValidLngLat([tiff.center_lng, tiff.center_lat])
+    );
 }
 
 function tiffFootprintBounds(tiff: TiffAsset): BBox | null {
@@ -1570,6 +1575,7 @@ function tiffFootprintBounds(tiff: TiffAsset): BBox | null {
         const [west, south, east, north] = parsed.map(Number);
         if (![west, south, east, north].every(Number.isFinite)) return null;
         if (west >= east || south >= north) return null;
+        if (west < -180 || east > 180 || south < -90 || north > 90) return null;
         return [[west, south], [east, north]];
     } catch {
         return null;

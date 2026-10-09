@@ -24,7 +24,8 @@ export function boundsOf(fc: GeoJson): BBox | null {
   for (const f of features ?? []) {
     if (f.geometry?.coordinates) visit(f.geometry.coordinates);
   }
-  if (!isFinite(minX)) return null;
+  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return null;
+  if (minX < -180 || maxX > 180 || minY < -90 || maxY > 90) return null;
   return [
     [minX, minY],
     [maxX, maxY],

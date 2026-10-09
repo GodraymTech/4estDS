@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import faulthandler
 faulthandler.enable()
 from types import SimpleNamespace
@@ -58,6 +59,7 @@ def cmd_infer(
     dem_default: Optional[float] = Option(None, "--dem-default", help="单独 DSM 模式下默认常数 DEM 背景高程"),
     draw_box: Optional[bool] = Option(None, "--draw-box/--no-draw-box", help="是否绘制边界框 (默认:True)"),
     export_format: Optional[str] = Option(None, "--export-format", "-f", help="推理完成后自动导出 GIS 图层格式 (geojson / shp / gpkg / csv)，不指定则不导出"),
+    task_type: Optional[str] = Option("fast", "--task-type", help="任务类型: fast (红树速检) | fine (树种精检)"),
     log_level: Optional[str] = Option(None, "--log-level", help="日志级别(默认读配置)"),
 ) -> int:
     from pathlib import Path
@@ -89,6 +91,7 @@ def cmd_infer(
         logger.info("[infer] run_id={} arch={} image={}", run_id, arch_val, image)
         req = InferenceRequest(
             image_path=image, arch=arch_val,
+            task_type=task_type,
             phase_id=phase_id, tract_id=tract_id,
             tile_size=tile_size, overlap_rate=overlap_rate,
             chm=chm, dsm=dsm, dem=dem, las=las,
@@ -152,6 +155,7 @@ def cmd_infer(
                     str(img_path),
                     settings=settings,
                     arch=arch,
+                    task_type=task_type,
                     phase_id=phase_id,
                     tract_id=item_tract_id,
                     tile_size=tile_size,

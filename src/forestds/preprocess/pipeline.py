@@ -94,7 +94,11 @@ def prepare_inference_image(
             from ..detect import get_detector
 
             arch_val = settings.get("detect.arch", "ultralytics")
-            weights_val = settings.get(f"detect.models.{arch_val}.weights", settings.get("detect.weights"))
+            weights_val = (
+                settings.get(f"detect.models.{arch_val}.det_weights")
+                or settings.get(f"detect.models.{arch_val}.weights")
+                or settings.get("detect.weights")
+            )
             scope_detector = get_detector(
                 arch_val,
                 weights=weights_val,

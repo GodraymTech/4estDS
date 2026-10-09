@@ -29,6 +29,7 @@ class BatchInferItem(BaseModel):
     image_key: Optional[str] = Field(None, description="已上传影像的存储 key")
     input_path: Optional[str] = Field(None, description="本地影像文件路径")
     arch: Optional[str] = None
+    task_type: Optional[str] = Field("fast", description="任务类型: fast (红树速检) | fine (树种精检)")
     phase_id: Optional[str] = Field(None, description="地块时相 YYYYMMDD")
     tract_id: Optional[str] = None
     tile_size: Optional[int] = Field(None, ge=1)
