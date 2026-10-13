@@ -87,7 +87,7 @@ function ToolbarButton({
 const GLASS: CSSProperties = {
   background: "var(--glass-bg)",
   border: "1px solid var(--glass-border)",
-  boxShadow: "var(--glass-shadow), var(--glass-inner)",
+  boxShadow: "none",
   backdropFilter: "blur(22px) saturate(185%) contrast(102%)",
   WebkitBackdropFilter: "blur(22px) saturate(185%) contrast(102%)",
 };
@@ -103,6 +103,10 @@ const TOP_TOOLBAR: CSSProperties = {
   gap: 8,
   overflowX: "auto",
   scrollbarWidth: "none",
+  background: "transparent",
+  boxShadow: "none",
+  border: "none",
+  pointerEvents: "none",
 };
 const LAYER_PANEL: CSSProperties = {
   ...GLASS,
@@ -112,6 +116,7 @@ const LAYER_PANEL: CSSProperties = {
   alignItems: "center",
   gap: 8,
   flex: "0 0 auto",
+  pointerEvents: "auto",
 };
 const BASEMAP_SELECT: CSSProperties = { width: 76 };
 const RIGHT_TOOLS: CSSProperties = {
@@ -124,6 +129,7 @@ const RIGHT_TOOLS: CSSProperties = {
   alignItems: "center",
   gap: 2,
   flex: "0 0 auto",
+  pointerEvents: "auto",
 };
 const TOOL_BUTTON: CSSProperties = {
   width: 34,

@@ -106,7 +106,7 @@ detect:
 
 # 细粒度树种分类配置（树种精检模式）
 classify:
-    weights: "m03-yolo11l-7cls-SOTA.pt"
+    weights: "m10"
     conf_threshold: 0.25 # 分类最低置信度阈值，低于此值使用 OTHER/兜底类
     batch_size: 128 # 分类批量推理 batch_size
     imgsz: 224 # 分类模型输入尺寸（边长像素，null 则使用模型预训练尺寸）

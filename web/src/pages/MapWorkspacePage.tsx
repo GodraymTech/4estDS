@@ -15,6 +15,7 @@ import {
 import {
     BorderOutlined,
     CalendarOutlined,
+    CheckSquareOutlined,
     EditOutlined,
     EyeInvisibleOutlined,
     EyeOutlined,
@@ -26,6 +27,7 @@ import {
 } from "@ant-design/icons";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { geometryBbox } from "../features/effective-area-editor/geometryOperations";
+import { DockProvider, DraggableDockPanel } from "../shared/ui/DraggableDockPanel";
 import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
 import { MapGlassPanel } from "../shared/ui/MapGlassPanel";
 import { MapStage } from "../shared/ui/MapStage";
@@ -94,19 +96,40 @@ const OVERVIEW_FIT = {
 };
 
 const SPECIES_COLOR_OVERRIDES: Record<string, string> = {
-    TREE: "#ef476f",
-    "未知树种": "#118ab2",
-    unknown: "#118ab2",
+    // 英文大写代码 (各色相 360° 均匀离散，遥感影像高对比度)
+    QQ: "#00e676",      // 秋茄：高对比翠绿
+    THS: "#ff9100",     // 桐花树：鲜亮暖橙
+    HHL: "#d500f9",     // 红海榄：高显色品红紫
+    BGR: "#00b0ff",     // 白骨壤：清澈亮青蓝
+    ML: "#7c4dff",      // 木榄：深亮靛紫
+    WBHS: "#ffd600",    // 无瓣海桑：明亮金黄
+    TREE: "#ff1744",    // 红树/杂木：高辨识度鲜红
+    GG: "#78909c",      // 枯木：冷石灰褐
+    // 中文别名映射兼容
+    秋茄: "#00e676",
+    桐花树: "#ff9100",
+    红海榄: "#d500f9",
+    白骨壤: "#00b0ff",
+    木榄: "#7c4dff",
+    无瓣海桑: "#ffd600",
+    红树: "#ff1744",
+    其他红树: "#ff1744",
+    枯木: "#78909c",
+    未知树种: "#607d8b",
+    unknown: "#607d8b",
 };
 
 const OUTLINE_COLORS = [
-    "#3a86c8",
-    "#8338ec",
-    "#ff006e",
-    "#e05300",
-    "#0077b6",
-    "#5c677d",
-    "#a90011",
+    "#00e676",
+    "#ff9100",
+    "#d500f9",
+    "#00b0ff",
+    "#ff1744",
+    "#ffd600",
+    "#7c4dff",
+    "#00bfa5",
+    "#ff3d00",
+    "#651fff",
 ];
 
 interface TractGroup {
@@ -164,6 +187,7 @@ export function MapWorkspacePage() {
     const [checkedTiffKeys, setCheckedTiffKeys] = useState<string[]>([]);
     const [treeWidth, setTreeWidth] = useState(240);
     const [profileWidth, setProfileWidth] = useState(365);
+    const [profileHeight, setProfileHeight] = useState<number | undefined>(undefined);
     const detectionLayerIds = useRef<string[]>([]);
     const imageryLayerIds = useRef<string[]>([]);
     const fittedTract = useRef<string | null>(null);
@@ -961,12 +985,13 @@ export function MapWorkspacePage() {
     );
 
     return (
-        <div style={ROOT}>
-            <MapStage
-                center={centerOfBounds(overviewBounds)}
-                zoom={env.overviewZoom}
-                onReady={onReady}
-            />
+        <DockProvider>
+            <div style={ROOT}>
+                <MapStage
+                    center={centerOfBounds(overviewBounds)}
+                    zoom={env.overviewZoom}
+                    onReady={onReady}
+                />
 
             {chromeHidden ? (
                 <button
@@ -1089,71 +1114,109 @@ export function MapWorkspacePage() {
             ) : null}
 
             {!chromeHidden && measureMode !== "idle" ? (
-                <div style={MEASURE_READOUT}>
-                    <Text style={READOUT_MAIN}>
-                        {measureMode === "distance"
-                            ? formatLength(measure.length)
-                            : formatArea(measure.area)}
-                    </Text>
-                    <Text style={READOUT_SUB}>
-                        {measure.points} 点
-                        {measureMode === "area" ? " · 周长 " + formatLength(measure.length) : ""}
-                    </Text>
-                    <Button size="small" onClick={() => setMeasureCoords([])} disabled={measure.points === 0}>
-                        清除
-                    </Button>
-                </div>
+                <DraggableDockPanel id="measure">
+                    <div style={MEASURE_READOUT}>
+                        <Text style={READOUT_MAIN}>
+                            {measureMode === "distance"
+                                ? formatLength(measure.length)
+                                : formatArea(measure.area)}
+                        </Text>
+                        <Text style={READOUT_SUB}>
+                            {measure.points} 点
+                            {measureMode === "area" ? " · 周长 " + formatLength(measure.length) : ""}
+                        </Text>
+                        <Button size="small" onClick={() => setMeasureCoords([])} disabled={measure.points === 0}>
+                            清除
+                        </Button>
+                    </div>
+                </DraggableDockPanel>
             ) : null}
 
             {!chromeHidden && selectedGroup && activeTract ? (
-                <ProfilePanel
-                    tract={activeTract}
-                    group={selectedGroup}
-                    imagery={imagery.data}
-                    summary={visibleSummary ?? summary.data}
-                    phaseTiffs={phaseTiffs}
-                    speciesColors={speciesColors}
-                    onSelectPhase={selectPhaseTract}
-                    loading={summary.isLoading || (isSingleImageView ? imagery.isLoading : false)}
-                    tiffName={requestedTiffName}
-                    isSingleImageView={isSingleImageView}
-                    requestedTiff={requestedTiff}
-                    width={profileWidth}
-                    onWidthChange={setProfileWidth}
-                />
+                <DraggableDockPanel id="profile">
+                    <ProfilePanel
+                        tract={activeTract}
+                        group={selectedGroup}
+                        imagery={imagery.data}
+                        summary={visibleSummary ?? summary.data}
+                        phaseTiffs={phaseTiffs}
+                        speciesColors={speciesColors}
+                        onSelectPhase={selectPhaseTract}
+                        loading={summary.isLoading || (isSingleImageView ? imagery.isLoading : false)}
+                        tiffName={requestedTiffName}
+                        isSingleImageView={isSingleImageView}
+                        requestedTiff={requestedTiff}
+                        width={profileWidth}
+                        onWidthChange={setProfileWidth}
+                        height={profileHeight}
+                        onHeightChange={setProfileHeight}
+                    />
+                </DraggableDockPanel>
             ) : null}
 
             {!chromeHidden && selectedGroup && activeTract && !isSingleImageView ? (
-                <TiffTreePanel
-                    tiffs={phaseTiffs}
-                    activePhaseId={requestedPhaseId ?? activeTract.phase_id}
-                    checkedKeys={checkedTiffKeys}
-                    width={treeWidth}
-                    onWidthChange={setTreeWidth}
-                    onCheckedKeysChange={setCheckedTiffKeys}
-                />
+                <DraggableDockPanel id="tiffTree">
+                    <TiffTreePanel
+                        tiffs={phaseTiffs}
+                        activePhaseId={requestedPhaseId ?? activeTract.phase_id}
+                        checkedKeys={checkedTiffKeys}
+                        width={treeWidth}
+                        onWidthChange={setTreeWidth}
+                        onCheckedKeysChange={setCheckedTiffKeys}
+                    />
+                </DraggableDockPanel>
             ) : null}
 
-            {!chromeHidden && !selectedGroup ? <OverviewProfileCard stats={overviewStats} /> : null}
+            {!chromeHidden && !selectedGroup ? (
+                <DraggableDockPanel id="overview">
+                    <OverviewProfileCard stats={overviewStats} />
+                </DraggableDockPanel>
+            ) : null}
 
             {!chromeHidden && selectedGroup && activeTract ? (
-                <div style={TRACT_TOOLS}>
-                    <Space direction="vertical" size={10} style={FULL}>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                            <Button
-                                size="small"
-                                type={showEffectiveArea ? "primary" : "default"}
-                                icon={showEffectiveArea ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-                                onClick={() => setShowEffectiveArea((v) => !v)}
-                            >
-                                显示有效区
-                            </Button>
+                <DraggableDockPanel id="tractTools">
+                    <div style={TRACT_TOOLS}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%" }}>
+                            {/* 第一行：有效区：[眼睛] [编辑] */}
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 28 }}>
+                                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--glass-text)" }}>
+                                    有效区:
+                                </span>
+                                <Space size={4}>
+                                    <Tooltip title={showEffectiveArea ? "隐藏有效区" : "显示有效区"}>
+                                        <Button
+                                            size="small"
+                                            type={showEffectiveArea ? "primary" : "text"}
+                                            icon={showEffectiveArea ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                                            onClick={() => setShowEffectiveArea((v) => !v)}
+                                            style={{ width: 26, height: 26, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                                        />
+                                    </Tooltip>
+                                    <Tooltip title="编辑有效区">
+                                        <Button
+                                            size="small"
+                                            type="text"
+                                            icon={<EditOutlined />}
+                                            onClick={() => {
+                                                if (!activeTract.tract_pk) return;
+                                                const next = new URLSearchParams(searchParams);
+                                                next.set("effective-area", activeTract.tract_pk);
+                                                setSearchParams(next);
+                                            }}
+                                            style={{ width: 26, height: 26, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                                        />
+                                    </Tooltip>
+                                </Space>
+                            </div>
+
+                            {/* 第二行：框线 / 遮罩（默认隐藏，相对于第一行缩进） */}
                             {showEffectiveArea ? (
-                                <Space size={4} style={{ display: "inline-flex" }}>
+                                <div style={{ paddingLeft: 16, display: "flex", gap: 6, alignItems: "center", margin: "2px 0 4px" }}>
                                     <Button
                                         size="small"
                                         type={effectiveMode === "outline" ? "primary" : "default"}
                                         onClick={() => setEffectiveMode("outline")}
+                                        style={{ fontSize: 12, height: 24, padding: "0 8px", borderRadius: 6 }}
                                     >
                                         框线
                                     </Button>
@@ -1161,56 +1224,84 @@ export function MapWorkspacePage() {
                                         size="small"
                                         type={effectiveMode === "mask" ? "primary" : "default"}
                                         onClick={() => setEffectiveMode("mask")}
+                                        style={{ fontSize: 12, height: 24, padding: "0 8px", borderRadius: 6 }}
                                     >
                                         遮罩
                                     </Button>
-                                </Space>
+                                </div>
                             ) : null}
-                            <Button
-                                size="small"
-                                type="default"
-                                icon={<EditOutlined />}
-                                onClick={() => {
-                                    if (!activeTract.tract_pk) return;
-                                    const next = new URLSearchParams(searchParams);
-                                    next.set("effective-area", activeTract.tract_pk);
-                                    setSearchParams(next);
-                                }}
-                            >
-                                编辑有效区
-                            </Button>
-                        </div>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                            <Button
-                                size="small"
-                                type={showDetections ? "primary" : "default"}
-                                icon={showDetections ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-                                onClick={() => setShowDetections((v) => !v)}
-                            >
-                                显示检测框
-                            </Button>
-                        </div>
-                        {showDetections && speciesList.length > 0 ? (
-                            <Checkbox.Group
-                                value={selectedSpecies}
-                                onChange={(values) => setSelectedSpecies(values.map(String))}
-                                style={SPECIES_GRID}
-                            >
-                                {speciesList.map((species, idx) => (
-                                    <Checkbox key={species} value={species} style={SPECIES_CHECK}>
-                                        <span
-                                            style={{
-                                                ...SPECIES_DOT,
-                                                background: speciesColors.get(species) ?? speciesColor(species, idx),
-                                            }}
+
+                            {/* 第三行：检测框：[眼睛] [全选] */}
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 28 }}>
+                                <span style={{ fontSize: 13, fontWeight: 500, color: "var(--glass-text)" }}>
+                                    检测框:
+                                </span>
+                                <Space size={4}>
+                                    <Tooltip title={showDetections ? "隐藏检测框" : "显示检测框"}>
+                                        <Button
+                                            size="small"
+                                            type={showDetections ? "primary" : "text"}
+                                            icon={showDetections ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                                            onClick={() => setShowDetections((v) => !v)}
+                                            style={{ width: 26, height: 26, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                                         />
-                                        {formatSpeciesName(species)}
-                                    </Checkbox>
-                                ))}
-                            </Checkbox.Group>
-                        ) : null}
-                    </Space>
-                </div>
+                                    </Tooltip>
+                                    <Tooltip
+                                        title={
+                                            speciesList.length > 0 && selectedSpecies.length === speciesList.length
+                                                ? "取消全选"
+                                                : "全选"
+                                        }
+                                    >
+                                        <Button
+                                            size="small"
+                                            type={
+                                                speciesList.length > 0 && selectedSpecies.length === speciesList.length
+                                                    ? "primary"
+                                                    : "text"
+                                            }
+                                            icon={<CheckSquareOutlined />}
+                                            onClick={() => {
+                                                if (
+                                                    speciesList.length > 0 &&
+                                                    selectedSpecies.length === speciesList.length
+                                                ) {
+                                                    setSelectedSpecies([]);
+                                                } else {
+                                                    setSelectedSpecies([...speciesList]);
+                                                }
+                                            }}
+                                            style={{ width: 26, height: 26, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                                        />
+                                    </Tooltip>
+                                </Space>
+                            </div>
+
+                            {/* 第四行：树种区域 */}
+                            {showDetections && speciesList.length > 0 ? (
+                                <div style={{ paddingLeft: 6, paddingTop: 2 }}>
+                                    <Checkbox.Group
+                                        value={selectedSpecies}
+                                        onChange={(values) => setSelectedSpecies(values.map(String))}
+                                        style={SPECIES_GRID}
+                                    >
+                                        {speciesList.map((species, idx) => (
+                                            <Checkbox key={species} value={species} style={SPECIES_CHECK}>
+                                                <span
+                                                    style={{
+                                                        ...SPECIES_DOT,
+                                                        background: speciesColors.get(species) ?? speciesColor(species, idx),
+                                                    }}
+                                                />
+                                                {formatSpeciesName(species)}
+                                            </Checkbox>
+                                        ))}
+                                    </Checkbox.Group>
+                                </div>
+                            ) : null}
+                        </div>
+                    </div>
+                </DraggableDockPanel>
             ) : null}
 
             {!chromeHidden && hovered ? <TractHoverCard hovered={hovered} /> : null}
@@ -1256,7 +1347,8 @@ export function MapWorkspacePage() {
                     />
                 </Suspense>
             ) : null}
-        </div>
+            </div>
+        </DockProvider>
     );
 }
 
@@ -1758,6 +1850,16 @@ function CompactKpi({ label, value, wide }: { label: string; value: ReactNode; w
     );
 }
 
+const PROFILE_RESIZE_HANDLE_TOP: CSSProperties = {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    right: 0,
+    height: 8,
+    cursor: "ns-resize",
+    zIndex: 10,
+};
+
 function TiffTreePanel({
     tiffs,
     activePhaseId,
@@ -1775,6 +1877,7 @@ function TiffTreePanel({
 }) {
     function startResize(e: ReactMouseEvent<HTMLDivElement>) {
         e.preventDefault();
+        e.stopPropagation();
         const startX = e.clientX;
         const startWidth = width;
         const move = (event: MouseEvent) => {
@@ -1790,7 +1893,7 @@ function TiffTreePanel({
 
     return (
         <div style={{ ...TIFF_TREE_PANEL, width }} className="custom-glass-scroll">
-            <div style={RESIZE_HANDLE} onMouseDown={startResize} />
+            <div style={RESIZE_HANDLE} data-resize-handle="true" onMouseDown={startResize} title="拖动调整面板宽度" />
             <div style={PANEL_HEAD}>
                 <span style={PANEL_TITLE}>影像文件</span>
                 <span style={PANEL_SUBTITLE}>{activePhaseId || "未知时相"} · {tiffs.length} 图</span>
@@ -1826,6 +1929,8 @@ function ProfilePanel({
     requestedTiff,
     width,
     onWidthChange,
+    height,
+    onHeightChange,
 }: {
     tract: Tract;
     group: TractGroup;
@@ -1840,7 +1945,11 @@ function ProfilePanel({
     requestedTiff?: TiffAsset;
     width: number;
     onWidthChange: (width: number) => void;
+    height?: number;
+    onHeightChange?: (height: number) => void;
 }) {
+    const panelContainerRef = useRef<HTMLDivElement>(null);
+
     const activeAreaHm2 = isSingleImageView && requestedTiff
         ? (requestedTiff.effective_area_hm2 ?? requestedTiff.area_hm2 ?? (requestedTiff.geo_area ? (requestedTiff.geo_area > 1000 ? requestedTiff.geo_area / 10000 : requestedTiff.geo_area) : undefined))
         : (tract.effective_area_hm2 ?? tract.tract_phase_area_hm2 ?? tract.tract_area_hm2 ?? (tract.geo_area ? (tract.geo_area > 1000 ? tract.geo_area / 10000 : tract.geo_area) : undefined));
@@ -1852,10 +1961,28 @@ function ProfilePanel({
 
     function startResize(e: ReactMouseEvent<HTMLDivElement>) {
         e.preventDefault();
+        e.stopPropagation();
         const startX = e.clientX;
         const startWidth = width;
         const move = (event: MouseEvent) => {
             onWidthChange(clamp(startWidth + event.clientX - startX, 320, 640));
+        };
+        const up = () => {
+            window.removeEventListener("mousemove", move);
+            window.removeEventListener("mouseup", up);
+        };
+        window.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", up);
+    }
+
+    function startResizeHeight(e: ReactMouseEvent<HTMLDivElement>) {
+        e.preventDefault();
+        e.stopPropagation();
+        const startY = e.clientY;
+        const startHeight = height ?? panelContainerRef.current?.offsetHeight ?? 460;
+        const move = (event: MouseEvent) => {
+            const delta = startY - event.clientY;
+            onHeightChange?.(clamp(startHeight + delta, 220, window.innerHeight - 100));
         };
         const up = () => {
             window.removeEventListener("mousemove", move);
@@ -1871,8 +1998,27 @@ function ProfilePanel({
     const displayAreaText = formatHm2(typeof activeAreaHm2 === "number" ? activeAreaHm2 : (activeAreaHm2 !== undefined && activeAreaHm2 !== null ? Number(activeAreaHm2) : null));
 
     return (
-        <div style={{ ...PROFILE_PANEL, width }} className="custom-glass-scroll">
-            <div style={PROFILE_RESIZE_HANDLE} onMouseDown={startResize} />
+        <div
+            ref={panelContainerRef}
+            style={{
+                ...PROFILE_PANEL,
+                width,
+                ...(height ? { height, maxHeight: height } : {}),
+            }}
+            className="custom-glass-scroll"
+        >
+            <div
+                style={PROFILE_RESIZE_HANDLE_TOP}
+                data-resize-handle="true"
+                onMouseDown={startResizeHeight}
+                title="拖动调整面板高度"
+            />
+            <div
+                style={PROFILE_RESIZE_HANDLE}
+                data-resize-handle="true"
+                onMouseDown={startResize}
+                title="拖动调整面板宽度"
+            />
             <div style={PANEL_HEAD}>
                 <div style={PROFILE_TITLE_GROUP}>
                     <span style={PANEL_TITLE}>{tiffName ? `${tract.tract_id} - ${stripTiffSuffix(tiffName)}` : tract.tract_id}</span>
@@ -2194,7 +2340,6 @@ function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
 }
 
-const FULL: CSSProperties = { width: "100%" };
 const ROOT: CSSProperties = { position: "relative", flex: 1, minHeight: 0 };
 const GLASS: CSSProperties = {
     background: "var(--glass-bg)",
@@ -2303,9 +2448,7 @@ const RESTORE_TRIGGER: CSSProperties = {
 };
 const PROFILE_PANEL: CSSProperties = {
     ...GLASS,
-    position: "absolute",
-    left: 16,
-    bottom: 16,
+    position: "relative",
     zIndex: 8,
     width: "min(460px, calc(100vw - 32px))",
     maxHeight: "min(72vh, 680px)",
@@ -2324,9 +2467,7 @@ const PROFILE_RESIZE_HANDLE: CSSProperties = {
 };
 const OVERVIEW_PROFILE: CSSProperties = {
     ...GLASS,
-    position: "absolute",
-    right: 16,
-    bottom: 16,
+    position: "relative",
     zIndex: 8,
     width: 312,
     borderRadius: 18,
@@ -2589,19 +2730,15 @@ const COMPACT_VALUE: CSSProperties = {
 };
 const TRACT_TOOLS: CSSProperties = {
     ...GLASS,
-    position: "absolute",
-    left: 16,
-    top: 64,
+    position: "relative",
     zIndex: 8,
     width: 140,
     borderRadius: 16,
-    padding: 8,
+    padding: "8px 10px",
 };
 const TIFF_TREE_PANEL: CSSProperties = {
     ...GLASS,
-    position: "absolute",
-    right: 16,
-    bottom: 16,
+    position: "relative",
     zIndex: 8,
     maxHeight: "min(62vh, 620px)",
     overflowY: "auto",
@@ -2657,9 +2794,7 @@ const SPECIES_DOT: CSSProperties = {
 };
 const MEASURE_READOUT: CSSProperties = {
     ...GLASS,
-    position: "absolute",
-    right: 64,
-    top: 108,
+    position: "relative",
     zIndex: 8,
     borderRadius: 16,
     padding: 10,

@@ -118,9 +118,7 @@ function Metric({
 }
 
 const PANEL: CSSProperties = {
-  position: "absolute",
-  left: 16,
-  bottom: 16,
+  position: "relative",
   width: 200,
   zIndex: 6,
 };

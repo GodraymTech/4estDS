@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Checkbox, Empty, Select, Space, Spin } from "antd";
+import { Button, Checkbox, Empty, Select, Space, Spin, Tooltip } from "antd";
+import { CheckSquareOutlined, EyeInvisibleOutlined, EyeOutlined } from "@ant-design/icons";
 import { useSearchParams } from "react-router-dom";
 import { useTracts, type Tract } from "../entities/tract";
 import { useObservations } from "../entities/observation";
@@ -13,6 +14,7 @@ import {
   basemapById,
   type LngLat,
 } from "../shared/map-core";
+import { DockProvider, DraggableDockPanel } from "../shared/ui/DraggableDockPanel";
 import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
 import { MapGlassPanel } from "../shared/ui/MapGlassPanel";
 import { formatSpeciesName } from "../shared/lib/species";
@@ -78,80 +80,132 @@ export function ChangePage() {
   }
 
   return (
-    <div style={STAGE_WRAP}>
-      {isLoading ? (
-        <div style={CENTER}>
-          <Spin />
-        </div>
-      ) : active ? (
-        <TemporalCompare
-          key={active.tract_id}
-          phases={active.phases}
-          range={range}
-          onRangeChange={setRange}
-          center={active.center}
-          zoom={15}
-          basemap={basemapById(basemapId)}
-          roadOverlay={null}
-          onWipeApi={setWipeApi}
-          showDetections={showDetections}
-          selectedSpecies={selectedSpecies}
-        />
-      ) : (
-        <div style={CENTER}>
-          <Empty description="暂无可对比地块" />
-        </div>
-      )}
-
-      <MapGlassPanel style={PANEL} title="时相对比">
-        <Space direction="vertical" size={8} style={FULL}>
-          <Select
-            style={FULL}
-            placeholder="选择地块"
-            value={active?.tract_id}
-            options={options}
-            onChange={selectTract}
-            disabled={groups.length === 0}
-          />
-          <div style={DETECTION_MODULE}>
-            <Checkbox checked={showDetections} onChange={(event) => setShowDetections(event.target.checked)}>
-              显示检测框
-            </Checkbox>
-            {showDetections && comparedSpecies.length > 0 ? (
-              <Checkbox.Group
-                value={selectedSpecies}
-                onChange={(values) => setSelectedSpecies(values.map(String))}
-                style={SPECIES_GRID}
-              >
-                {comparedSpecies.map((species, index) => (
-                  <Checkbox key={species} value={species} style={SPECIES_CHECK}>
-                    <span style={SPECIES_LABEL}>
-                      <i style={{ ...SPECIES_DOT, background: BEFORE_SPECIES_COLORS[index % BEFORE_SPECIES_COLORS.length] }} />
-                      <i style={{ ...SPECIES_DOT, background: AFTER_SPECIES_COLORS[index % AFTER_SPECIES_COLORS.length] }} />
-                      {formatSpeciesName(species)}
-                    </span>
-                  </Checkbox>
-                ))}
-              </Checkbox.Group>
-            ) : null}
+    <DockProvider>
+      <div style={STAGE_WRAP}>
+        {isLoading ? (
+          <div style={CENTER}>
+            <Spin />
           </div>
-        </Space>
-      </MapGlassPanel>
+        ) : active ? (
+          <TemporalCompare
+            key={active.tract_id}
+            phases={active.phases}
+            range={range}
+            onRangeChange={setRange}
+            center={active.center}
+            zoom={15}
+            basemap={basemapById(basemapId)}
+            roadOverlay={null}
+            onWipeApi={setWipeApi}
+            showDetections={showDetections}
+            selectedSpecies={selectedSpecies}
+          />
+        ) : (
+          <div style={CENTER}>
+            <Empty description="暂无可对比地块" />
+          </div>
+        )}
 
-      <MapFloatingToolbar
-        basemapId={basemapId}
-        onBasemapChange={setBasemapId}
-        homeTitle="回到地块视野"
-        onZoomIn={() => wipeApi?.zoomIn()}
-        onZoomOut={() => wipeApi?.zoomOut()}
-        onHome={() => wipeApi?.fitToData()}
-        onResetNorth={() => wipeApi?.resetNorth()}
-      />
+        <DraggableDockPanel id="changePanel">
+          <MapGlassPanel style={PANEL} title="时相对比">
+            <Space direction="vertical" size={8} style={FULL}>
+              <Select
+                style={FULL}
+                placeholder="选择地块"
+                value={active?.tract_id}
+                options={options}
+                onChange={selectTract}
+                disabled={groups.length === 0}
+              />
+              <div style={DETECTION_MODULE}>
+                {/* 借鉴右下角浮块第3行：检测框: [眼睛] [全选] */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 28 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: "var(--glass-text)" }}>
+                    检测框:
+                  </span>
+                  <Space size={4}>
+                    <Tooltip title={showDetections ? "隐藏检测框" : "显示检测框"}>
+                      <Button
+                        size="small"
+                        type={showDetections ? "primary" : "text"}
+                        icon={showDetections ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                        onClick={() => setShowDetections((v) => !v)}
+                        style={{ width: 26, height: 26, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                      />
+                    </Tooltip>
+                    <Tooltip
+                      title={
+                        comparedSpecies.length > 0 && selectedSpecies.length === comparedSpecies.length
+                          ? "取消全选"
+                          : "全选"
+                      }
+                    >
+                      <Button
+                        size="small"
+                        type={
+                          comparedSpecies.length > 0 && selectedSpecies.length === comparedSpecies.length
+                            ? "primary"
+                            : "text"
+                        }
+                        icon={<CheckSquareOutlined />}
+                        onClick={() => {
+                          if (
+                            comparedSpecies.length > 0 &&
+                            selectedSpecies.length === comparedSpecies.length
+                          ) {
+                            setSelectedSpecies([]);
+                          } else {
+                            setSelectedSpecies([...comparedSpecies]);
+                          }
+                        }}
+                        style={{ width: 26, height: 26, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                      />
+                    </Tooltip>
+                  </Space>
+                </div>
 
-      {active && active.phases.length > 1 ? (
-        <ChangeMetricsPanel phases={active.phases} range={range} />
-      ) : null}
-    </div>
+                {/* 借鉴右下角浮块第4行：树种区域 */}
+                {showDetections && comparedSpecies.length > 0 ? (
+                  <div style={{ paddingLeft: 6, paddingTop: 2 }}>
+                    <Checkbox.Group
+                      value={selectedSpecies}
+                      onChange={(values) => setSelectedSpecies(values.map(String))}
+                      style={SPECIES_GRID}
+                    >
+                      {comparedSpecies.map((species, index) => (
+                        <Checkbox key={species} value={species} style={SPECIES_CHECK}>
+                          <span style={SPECIES_LABEL}>
+                            <i style={{ ...SPECIES_DOT, background: BEFORE_SPECIES_COLORS[index % BEFORE_SPECIES_COLORS.length] }} />
+                            <i style={{ ...SPECIES_DOT, background: AFTER_SPECIES_COLORS[index % AFTER_SPECIES_COLORS.length] }} />
+                            {formatSpeciesName(species)}
+                          </span>
+                        </Checkbox>
+                      ))}
+                    </Checkbox.Group>
+                  </div>
+                ) : null}
+              </div>
+            </Space>
+          </MapGlassPanel>
+        </DraggableDockPanel>
+
+        <MapFloatingToolbar
+          basemapId={basemapId}
+          onBasemapChange={setBasemapId}
+          homeTitle="回到地块视野"
+          onZoomIn={() => wipeApi?.zoomIn()}
+          onZoomOut={() => wipeApi?.zoomOut()}
+          onHome={() => wipeApi?.fitToData()}
+          onResetNorth={() => wipeApi?.resetNorth()}
+        />
+
+        {active && active.phases.length > 1 ? (
+          <DraggableDockPanel id="changeMetrics">
+            <ChangeMetricsPanel phases={active.phases} range={range} />
+          </DraggableDockPanel>
+        ) : null}
+      </div>
+    </DockProvider>
   );
 }
 
@@ -223,10 +277,8 @@ const CENTER: CSSProperties = {
   alignItems: "center",
 };
 const PANEL: CSSProperties = {
-  position: "absolute",
-  top: 16,
-  left: 16,
-  width: 200,
+  position: "relative",
+  width: 190,
   zIndex: 6,
 };
 const FULL: CSSProperties = { width: "100%" };
