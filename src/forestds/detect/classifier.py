@@ -1,9 +1,9 @@
 """细粒度树种分类适配器（树种精检）。
 
 职责：
-  - 承接 2cls 目标检测（TREE/GG）的产出，对 TREE 标签单木做进一步的细粒度 7 分类；
-  - 支持 YOLO 分类头模型（如 m03-yolo11l-7cls-SOTA.pt）；
-  - 将英文缩写（QQ, HHL, THS, ML, BGR, WBHS, TREE）映射为规范中文树种名称及 OTHER 兜底；
+  - 承接 2cls 目标检测（TREE/GG）的产出，对 TREE 标签单木做进一步的细粒度分类；
+  - 支持 YOLO 分类头模型（权重由 classify.weights 指定）；
+  - 类别到树种名称的映射与低置信度兜底项均来自配置 classify.species_map（唯一来源）；
   - 替换 Detection 的 label 字段，保持下游 DB、GIS 导出、报告与交互复核一致性。
 """
 from __future__ import annotations
@@ -15,48 +15,40 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from loguru import logger as log
 
+from .backends.ultralytics_common import ensure_bgr
 from .base import Detection
 from .registry import resolve_weights_path
 
 if TYPE_CHECKING:
     from ..engine.sources import ImageSource
 
-# 默认树种代码映射表
-DEFAULT_SPECIES_MAP: dict[str, str] = {
-    "QQ": "秋茄",
-    "HHL": "红海榄",
-    "THS": "桐花树",
-    "ML": "木榄",
-    "BGR": "白骨壤",
-    "WBHS": "无瓣海桑",
-    "TREE": "OTHER",
-    "GG": "GG",
-}
-
 
 class SpeciesClassifier:
-    """通用细粒度树种分类器。"""
+    """通用细粒度树种分类器。
+
+    所有参数由调用方显式提供（生产路径来自 classify.* 配置），代码内不保留默认权重或映射。
+    """
 
     def __init__(
         self,
-        weights: str | None = None,
+        weights: str,
         *,
-        conf_threshold: float = 0.25,
-        batch_size: int = 128,
+        species_map: dict[str, str],
+        conf_threshold: float,
+        batch_size: int,
         imgsz: int | None = None,
         device: str | None = None,
         half: bool | None = None,
-        species_map: dict[str, str] | None = None,
     ):
+        if "TREE" not in species_map:
+            raise ValueError("classify.species_map 必须包含 TREE 兜底项")
         self.weights = weights
         self.conf_threshold = conf_threshold
         self.batch_size = batch_size
         self.imgsz = imgsz
         self.device = device
         self.half = half
-        self.species_map = dict(DEFAULT_SPECIES_MAP)
-        if species_map:
-            self.species_map.update(species_map)
+        self.species_map = dict(species_map)
         self._model = None
 
     def load(self) -> None:
@@ -75,12 +67,11 @@ class SpeciesClassifier:
         ultra_log.propagate = True
         ultra_log.handlers = []
 
-        weights_str = self.weights or "m03-yolo11l-7cls-SOTA.pt"
-        resolved_path = resolve_weights_path(weights_str)
+        resolved_path = resolve_weights_path(self.weights)
         if not os.path.exists(resolved_path):
             raise FileNotFoundError(
                 f"找不到树种分类模型权重: {resolved_path}\n"
-                f"请确保权重已放置在 .4estDS/models/ 目录或配置中指定了正确路径。"
+                f"请确保权重已放置在 .4estDS/models/ 目录，并在 classify.weights 中指定正确文件名。"
             )
 
         self._model = YOLO(resolved_path)
@@ -92,12 +83,16 @@ class SpeciesClassifier:
     ) -> list[tuple[str, float]]:
         """批量对裁剪的单木图像块进行树种分类预测。
 
+        裁剪块与检测分支共用 ensure_bgr 预处理（RGB -> BGR、dtype 归一为 uint8）：
+        ultralytics 对 numpy 输入不做通道转换，直接送入 RGB 会导致 R/B 通道反转。
+
         Returns:
             list of (mapped_species_label, confidence)
         """
         if not crops:
             return []
         self.load()
+        crops = [ensure_bgr(c) for c in crops]
 
         device = self.device
         if device is None:
@@ -141,23 +136,44 @@ class SpeciesClassifier:
                     raw_name = "OTHER"
                     top1_conf = 0.0
 
-                # 若分类置信度低于阈值，则使用 OTHER 兜底
+                # 若分类置信度低于阈值，则使用 TREE 兜底项
                 if top1_conf < self.conf_threshold:
-                    mapped_name = self.species_map.get("TREE", "OTHER")
+                    mapped_name = "TREE"
                 else:
-                    mapped_name = self.species_map.get(raw_name.upper(), raw_name)
+                    from ..species import normalize_species_code
+                    mapped_name = normalize_species_code(raw_name)
 
                 results.append((mapped_name, top1_conf))
 
         return results
 
 
+def _require(settings: Any, key: str) -> Any:
+    """读取必需配置项；缺失时给出明确错误，而非静默回退到代码默认值。"""
+    value = settings.get(key)
+    if value is None or value == "":
+        raise ValueError(f"树种精检缺少必需配置项: {key}")
+    return value
+
+
+def _build_classifier(settings: Any) -> SpeciesClassifier:
+    """依据 classify.* 配置构建分类器。"""
+    imgsz = settings.get("classify.imgsz")
+    return SpeciesClassifier(
+        _require(settings, "classify.weights"),
+        species_map=dict(_require(settings, "classify.species_map")),
+        conf_threshold=float(_require(settings, "classify.conf_threshold")),
+        batch_size=int(_require(settings, "classify.batch_size")),
+        imgsz=int(imgsz) if imgsz else None,
+        device=settings.get("detect.device"),
+    )
+
+
 def refine_species_with_classifier(
     detections: list[Detection] | Any,
     image_path: str,
     *,
-    settings: Any = None,
-    arch: str = "ultralytics",
+    settings: Any,
     classifier: SpeciesClassifier | None = None,
     chunk_size: int = 256,
 ) -> dict[str, int]:
@@ -168,13 +184,12 @@ def refine_species_with_classifier(
     Args:
         detections: run_inference 产出的检测框列表或 Detections 容器 (像素坐标)。
         image_path: 原始影像路径 (TIFF/JPG/PNG)。
-        settings: 全局配置对象。
-        arch: 当前使用的检测器架构名。
-        classifier: 可选复用的分类器实例。
+        settings: 全局配置对象，需包含 classify.* 必需项（weights、species_map、conf_threshold、batch_size、pad_ratio）。
+        classifier: 可选复用的分类器实例；为空时依据配置构建。
         chunk_size: 裁剪与推理批次大小，防止显存与内存暴涨。
 
     Returns:
-        物种统计字典，例如 {"秋茄": 42, "红海榄": 15, "OTHER": 3, "GG": 2}
+        物种统计字典，例如 {"秋茄": 42, "其他红树": 3, "GG": 2}
     """
     det_list = detections.items if hasattr(detections, "items") and isinstance(detections.items, list) else detections
     if not det_list:
@@ -195,40 +210,9 @@ def refine_species_with_classifier(
         return counts
 
     # 2. 初始化分类器
-    pad_ratio = 0.1
-    if settings is not None:
-        pad_ratio = float(settings.get("classify.pad_ratio", 0.1))
-
+    pad_ratio = float(_require(settings, "classify.pad_ratio"))
     if classifier is None:
-        cls_weights = "m03-yolo11l-7cls-SOTA.pt"
-        conf_thr = 0.25
-        b_size = 128
-        imgsz = None
-        dev = None
-        s_map = None
-
-        if settings is not None:
-            cls_weights = (
-                settings.get(f"detect.models.{arch}.cls_weights")
-                or settings.get("classify.weights")
-                or cls_weights
-            )
-            conf_thr = float(
-                settings.get("classify.conf_threshold", settings.get("detect.conf_threshold", 0.25))
-            )
-            b_size = int(settings.get("classify.batch_size", 128))
-            imgsz = settings.get("classify.imgsz", None)
-            dev = settings.get("detect.device", None)
-            s_map = settings.get("classify.species_map", None)
-
-        classifier = SpeciesClassifier(
-            weights=cls_weights,
-            conf_threshold=conf_thr,
-            batch_size=b_size,
-            imgsz=imgsz,
-            device=dev,
-            species_map=s_map,
-        )
+        classifier = _build_classifier(settings)
 
     # 3. 按 chunk 读取窗口裁剪并批量预测
     from ..engine.sources import RasterImageSource
@@ -260,20 +244,20 @@ def refine_species_with_classifier(
                     crops.append(crop)
                     valid_batch_indices.append(det_idx)
                 else:
-                    # 无法读取有效像素，回退为 OTHER 兜底
-                    d.label = classifier.species_map.get("TREE", "OTHER")
+                    d.label = "TREE"
 
             if crops:
+                from ..species import normalize_species_code
                 predictions = classifier.predict_crops(crops)
                 for det_idx, (sp_name, conf) in zip(valid_batch_indices, predictions):
                     d = det_list[det_idx]
-                    d.label = sp_name
+                    d.label = normalize_species_code(sp_name)
                     if d.extra is None:
                         d.extra = {}
                     d.extra["cls_score"] = conf
 
     # 4. 统计结果
-    counts: dict[str, int] = {}
+    counts = {}
     for d in det_list:
         counts[d.label] = counts.get(d.label, 0) + 1
 

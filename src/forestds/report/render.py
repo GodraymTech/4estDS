@@ -16,6 +16,7 @@ from pathlib import Path
 
 from loguru import logger as log
 from .metrics import ReportData
+from ..species import get_species_display_name
 
 
 def _fmt_dist(d: dict, unit: str = "") -> str:
@@ -349,7 +350,7 @@ def render_charts(data: ReportData, out_dir: Path) -> list[Path]:
     # 1. 树种群落构成饼图
     if data.species:
         fig, ax = plt.subplots(figsize=(6, 5))
-        labels = list(data.species.keys())
+        labels = [get_species_display_name(k) for k in data.species.keys()]
         sizes = list(data.species.values())
         explode = [0.05 if (v / sum(sizes)) < 0.05 else 0 for v in sizes]
         
@@ -375,7 +376,7 @@ def render_charts(data: ReportData, out_dir: Path) -> list[Path]:
         sp_analysis = m.get("species_analysis", {})
         for sp in data.species.keys():
             if sp in sp_analysis:
-                sp_names.append(sp)
+                sp_names.append(get_species_display_name(sp))
                 sp_rcs.append(sp_analysis[sp]["rc"])
         
         if sum(sp_rcs) > 0:

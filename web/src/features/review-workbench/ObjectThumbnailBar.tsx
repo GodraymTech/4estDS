@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import { Tag, Typography } from "antd";
 import type { ReviewCategory, ReviewItem } from "../../entities/review";
+import { formatSpeciesName } from "../../shared/lib/species";
 import { useReviewWorkbenchStore } from "./store";
 
 const { Text } = Typography;
@@ -69,7 +70,7 @@ export function ObjectThumbnailBar({
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: color }} />
                 <Text style={{ fontSize: 11 }} ellipsis>
-                  #{index + 1} {item.species || "未设置"}
+                  #{index + 1} {formatSpeciesName(item.species) || "未设置"}
                 </Text>
               </div>
               {item.conflict && (

@@ -22,6 +22,7 @@ from .domain import (
     workspace_summary,
 )
 from .drafts import DraftStore
+from ..species import get_species_display_name, normalize_species_code
 
 
 _MODE_LABELS = {"inherit": "继承", "fresh": "从 0 开始"}
@@ -285,16 +286,24 @@ class ReviewSessionService:
                 ).fetchall()
             geo_reference = _tiff_geo_reference(conn, phase_id, tiff_id)
             items = [_with_geography(_item_from_observation(row), geo_reference) for row in rows]
-            species = sorted({item["species"] for item in items if item["species"]})
+            for it in items:
+                if it.get("species"):
+                    it["species"] = normalize_species_code(it["species"])
+            species_codes = sorted({it["species"] for it in items if it.get("species")})
             catalog = [
-                {"id": name, "display_name": name, "model_prompt": name, "color": _category_color(index)}
-                for index, name in enumerate(species)
+                {
+                    "id": code,
+                    "display_name": get_species_display_name(code),
+                    "model_prompt": get_species_display_name(code),
+                    "color": _category_color(index),
+                }
+                for index, code in enumerate(species_codes)
             ]
             workspace = ReviewWorkspace(
                 items=items,
                 category_catalog=catalog,
-                visible_categories=species,
-                active_category=species[0] if species else None,
+                visible_categories=species_codes,
+                active_category=species_codes[0] if species_codes else None,
                 visual_exemplars=[],
             )
             session_id = f"review_{uuid.uuid4().hex[:16]}"
@@ -573,7 +582,8 @@ class ReviewSessionService:
         if kind == "add":
             item = dict(operation.get("item") or {})
             item.setdefault("id", f"item_{uuid.uuid4().hex[:12]}")
-            item.setdefault("species", workspace.active_category or "")
+            raw_sp = item.get("species") if "species" in item else (workspace.active_category or "")
+            item["species"] = normalize_species_code(raw_sp, default="")
             item.setdefault("confidence", 1.0)
             item.setdefault("source", "human")
             item.setdefault("confirmed", True)
@@ -599,11 +609,13 @@ class ReviewSessionService:
                 return
             patch = dict(operation.get("patch") or {})
             if kind == "set_category":
-                patch = {"species": operation.get("species") or ""}
+                patch = {"species": normalize_species_code(operation.get("species") or "")}
             elif kind == "set_note":
                 patch = {"note": str(operation.get("note") or "")}
             elif kind == "set_status":
                 patch = {"status": operation.get("status")}
+            if "species" in patch:
+                patch["species"] = normalize_species_code(patch["species"])
             if frozen:
                 blocked = sorted(set(patch) - FROZEN_EDITABLE_FIELDS)
                 if blocked:
@@ -624,10 +636,20 @@ class ReviewSessionService:
             workspace.items = [{**item, "status": status} if str(item.get("id")) in ids else item for item in workspace.items]
             return
         if kind == "set_catalog":
-            workspace.category_catalog = list(operation.get("categories") or [])
+            cats = list(operation.get("categories") or [])
+            for cat in cats:
+                if cat.get("id"):
+                    code = normalize_species_code(cat["id"])
+                    cat["id"] = code
+                    if not cat.get("display_name") or str(cat["display_name"]).strip().upper() == code:
+                        cat["display_name"] = get_species_display_name(code)
+                    if not cat.get("model_prompt"):
+                        cat["model_prompt"] = cat["display_name"]
+            workspace.category_catalog = cats
             known = [str(item.get("id")) for item in workspace.category_catalog if item.get("id")]
             workspace.visible_categories = known
-            workspace.active_category = str(operation.get("active_category") or (known[0] if known else "")) or None
+            act = operation.get("active_category")
+            workspace.active_category = normalize_species_code(act) if act else (known[0] if known else None)
             return
         if kind == "upsert_attempt":
             attempt = dict(operation.get("attempt") or {})

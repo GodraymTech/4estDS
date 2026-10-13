@@ -46,7 +46,7 @@ def review_db(tmp_path: Path) -> tuple[str, Path]:
         box = [10 + index * 20, 10, 20 + index * 20, 20]
         conn.execute(
             "INSERT INTO tree_observations (observation_id, run_id, tract_phase_pk, tiff_id, phase_id, species, confidence, box_px, created_at) "
-            "VALUES (?,?, 'tp-1',?,?, '红树',0.8,?,?)",
+            "VALUES (?,?, 'tp-1',?,?, 'TREE',0.8,?,?)",
             (f"parent-{index}", BASE_RUN, TIFF, PHASE, json.dumps(box), now),
         )
     conn.commit()
@@ -63,6 +63,7 @@ def test_based_on_active_loads_parent_without_visual_prompts(review_db: tuple[st
     assert session.base_run_id == BASE_RUN
     assert len(workspace.items) == 2
     assert workspace.visual_exemplars == []
+    assert workspace.category_catalog[0]["id"] == "TREE"
     assert workspace.category_catalog[0]["display_name"] == "红树"
 
 
@@ -77,6 +78,7 @@ def test_from_scratch_and_duplicate_operation_are_recoverable(review_db: tuple[s
     restarted = ReviewSessionService(url, draft_root=drafts)
     assert first.revision == duplicate.revision == 1
     assert len(restarted.workspace(session.session_id).items) == 1
+    assert restarted.workspace(session.session_id).items[0]["species"] == "QQ"
     assert restarted.get(session.session_id).revision == 1
 
 
@@ -96,9 +98,9 @@ def test_revision_conflict_and_undo_redo(review_db: tuple[str, Path]) -> None:
     assert conflict.value.code == "revision_conflict"
 
     undone = service.undo(session.session_id, changed.revision, "undo-1")
-    assert undone.items[0]["species"] == "红树"
+    assert undone.items[0]["species"] == "TREE"
     redone = service.redo(session.session_id, undone.revision, "redo-1")
-    assert redone.items[0]["species"] == "木榄"
+    assert redone.items[0]["species"] == "ML"
 
 
 def test_delta_history_restores_added_and_deleted_items(review_db: tuple[str, Path]) -> None:
@@ -109,7 +111,7 @@ def test_delta_history_restores_added_and_deleted_items(review_db: tuple[str, Pa
         session.session_id,
         0,
         "add-delta",
-        [{"type": "add", "item": {"id": "manual-1", "box_px": [1, 1, 3, 3], "species": "红树"}}],
+        [{"type": "add", "item": {"id": "manual-1", "box_px": [1, 1, 3, 3], "species": "TREE"}}],
     )
     assert [item["id"] for item in added.changed_items] == ["manual-1"]
     assert service.undo(session.session_id, added.revision, "undo-add").items == ()
@@ -145,4 +147,34 @@ def test_delete_review_session(review_db: tuple[str, Path]) -> None:
     with pytest.raises(ReviewNotFound):
         service.get(session.session_id)
     assert not service.drafts.path_for(session.session_id).exists()
+
+
+def test_custom_species_preserves_code_and_display(review_db: tuple[str, Path]) -> None:
+    """验证复核人工添加新树种多样性：新增 DD 不会被强制替换为 TREE，无映射保持原样展示。"""
+    url, drafts = review_db
+    service = ReviewSessionService(url, draft_root=drafts)
+    session = service.create(PHASE, TIFF, "fresh")
+    
+    # 模拟前端新增 DD 类别的操作
+    set_cat = {
+        "type": "set_catalog",
+        "categories": [
+            {"id": "DD", "display_name": "DD", "model_prompt": "DD", "color": "#3b82f6"},
+            {"id": "TREE", "display_name": "TREE", "model_prompt": "TREE", "color": "#f97316"},
+        ],
+        "active_category": "dd",
+    }
+    add_box = {"type": "add", "item": {"box_px": [10, 20, 30, 40], "species": "dd"}}
+    res = service.apply_operations(session.session_id, 0, "op-add-dd", [set_cat, add_box])
+    
+    workspace = service.workspace(session.session_id)
+    # 检查类别库中的 ID 与 display_name
+    cat_map = {c["id"]: c["display_name"] for c in workspace.category_catalog}
+    assert "DD" in cat_map
+    assert cat_map["DD"] == "DD"  # 无映射保持大写原样展示
+    assert cat_map["TREE"] == "红树"  # TREE 唯一映射并展示为红树
+    
+    # 检查新增框的物种代码
+    added = workspace.items[0]
+    assert added["species"] == "DD"  # 保持纯英文大写 DD，绝不被修改为 TREE
 

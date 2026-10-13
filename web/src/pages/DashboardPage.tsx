@@ -10,6 +10,7 @@ import {
 import { Link } from "react-router-dom";
 import { PageContainer } from "../shared/ui/PageContainer";
 import { formatAreaValue } from "../shared/lib/format";
+import { formatSpeciesName } from "../shared/lib/species";
 import { useTiffs, useTractSummaries, useTracts, type TiffAsset, type Tract, type TractSummary } from "../entities/tract";
 import { tractCenter } from "../features/overview/tractGeo";
 
@@ -214,7 +215,8 @@ function buildSpeciesRows(summaries: TractSummary[]): BarRow[] {
   const counts = new Map<string, number>();
   for (const summary of summaries) {
     for (const [species, count] of Object.entries(summary.species ?? {})) {
-      counts.set(species, (counts.get(species) ?? 0) + count);
+      const name = formatSpeciesName(species);
+      counts.set(name, (counts.get(name) ?? 0) + count);
     }
   }
   return [...counts.entries()]

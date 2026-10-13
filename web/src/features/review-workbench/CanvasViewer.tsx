@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import maplibregl, { type MapMouseEvent } from "maplibre-gl";
 import type { EffectiveAreaGeometry, ReviewCategory, ReviewItem, ReviewMapContext } from "../../shared/api";
 import { basemapById, ROAD_OVERLAY } from "../../shared/map-core";
+import { formatSpeciesName } from "../../shared/lib/species";
 import { useReviewWorkbenchStore } from "./store";
 
 const ITEM_SOURCE = "review-items";
@@ -829,7 +830,7 @@ export const CanvasViewer = forwardRef<ReviewMapHandle, CanvasViewerProps>(funct
                             // 当缩放级别太低（视野太大/框太小）时直接不显示文字
                             if (currentZoom < 13.8 || transformOverlay.width < 22 || transformOverlay.height < 22) return null;
                             const catObj = categories.find((c) => c.id === transformOverlay.item.species || c.display_name === transformOverlay.item.species);
-                            const catName = catObj?.display_name || transformOverlay.item.species || "未命名";
+                            const catName = catObj?.display_name || formatSpeciesName(transformOverlay.item.species) || "未命名";
                             const catColor = catObj?.color || "#52c99a";
                             const confVal = transformOverlay.item.confidence != null ? Number(transformOverlay.item.confidence).toFixed(2) : "";
                             const dynamicFontSize = Math.max(11, Math.min(18, Math.round(13 * (currentZoom / 15))));
@@ -882,7 +883,7 @@ export const CanvasViewer = forwardRef<ReviewMapHandle, CanvasViewerProps>(funct
                         const currentZoom = mapRef.current?.getZoom() ?? 15;
                         if (currentZoom < 13.8 || hoverOverlay.width < 20 || hoverOverlay.height < 20) return null;
                         const catObj = categories.find((c) => c.id === hoverOverlay.item.species || c.display_name === hoverOverlay.item.species);
-                        const catName = catObj?.display_name || hoverOverlay.item.species || "未命名";
+                        const catName = catObj?.display_name || formatSpeciesName(hoverOverlay.item.species) || "未命名";
                         const catColor = catObj?.color || "#52c99a";
                         const confVal = hoverOverlay.item.confidence != null ? Number(hoverOverlay.item.confidence).toFixed(2) : "";
                         const dynamicFontSize = Math.max(11, Math.min(18, Math.round(13 * (currentZoom / 15))));

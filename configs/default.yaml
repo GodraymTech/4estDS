@@ -103,8 +103,6 @@ detect:
             det_weights: "m07" # 回滚用（原默认权重）
             # det_weights: "rtdetr-l.pt"
             # det_weights: ".4estDS/outputs/20260629_1501_7d20f_train/weights/best.pt"
-            # 树种精检分类权重 (7分类细化)
-            cls_weights: "m03-yolo11l-7cls-SOTA.pt"
 
 # 细粒度树种分类配置（树种精检模式）
 classify:
@@ -120,7 +118,7 @@ classify:
         ML: "木榄"
         BGR: "白骨壤"
         WBHS: "无瓣海桑"
-        TREE: "其他红树"
+        TREE: "红树"
         GG: "枯木"
 
 postprocess:

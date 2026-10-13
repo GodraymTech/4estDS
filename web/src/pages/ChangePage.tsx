@@ -15,6 +15,7 @@ import {
 } from "../shared/map-core";
 import { MapFloatingToolbar } from "../shared/ui/MapFloatingToolbar";
 import { MapGlassPanel } from "../shared/ui/MapGlassPanel";
+import { formatSpeciesName } from "../shared/lib/species";
 import type { TemporalWipeApi } from "../shared/ui/TemporalWipe";
 
 interface CompareGroup {
@@ -127,7 +128,7 @@ export function ChangePage() {
                     <span style={SPECIES_LABEL}>
                       <i style={{ ...SPECIES_DOT, background: BEFORE_SPECIES_COLORS[index % BEFORE_SPECIES_COLORS.length] }} />
                       <i style={{ ...SPECIES_DOT, background: AFTER_SPECIES_COLORS[index % AFTER_SPECIES_COLORS.length] }} />
-                      {species}
+                      {formatSpeciesName(species)}
                     </span>
                   </Checkbox>
                 ))}
@@ -204,9 +205,9 @@ function collectSpecies(
   const species = new Set<string>();
   for (const feature of [...(before?.features ?? []), ...(after?.features ?? [])]) {
     const value = feature.properties.species;
-    species.add(typeof value === "string" && value.trim() ? value : "未知树种");
+    species.add(typeof value === "string" && value.trim() ? value.trim().toUpperCase() : "TREE");
   }
-  return [...species].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  return [...species].sort((a, b) => formatSpeciesName(a).localeCompare(formatSpeciesName(b), "zh-Hans-CN"));
 }
 
 const STAGE_WRAP: CSSProperties = {

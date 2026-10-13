@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Badge, Collapse, Empty, Space, Tag, Tooltip, Typography } from "antd";
 import { DeleteOutlined, EyeInvisibleOutlined, EyeOutlined, LockOutlined, WarningOutlined } from "@ant-design/icons";
 import type { ReviewCategory, ReviewItem } from "../../entities/review";
+import { formatSpeciesName } from "../../shared/lib/species";
 import { useReviewWorkbenchStore } from "./store";
 
 const { Text } = Typography;
@@ -68,7 +69,7 @@ export function ObjectList({
                             label: (
                                 <Space>
                                     <span className="review-color-dot" style={{ background: categoryMap.get(species)?.color ?? "#3b82f6" }} />
-                                    <Text strong>{categoryMap.get(species)?.display_name ?? species}</Text>
+                                    <Text strong>{categoryMap.get(species)?.display_name ?? formatSpeciesName(species)}</Text>
                                     <Badge count={group.length} showZero overflowCount={999999} color="#606b68" />
                                 </Space>
                             ),

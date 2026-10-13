@@ -15,6 +15,7 @@ from shapely.wkt import loads as load_wkt
 from ..db.schema import init_db, resolve_db_path
 from .domain import ReviewConflict, ReviewValidationError, workspace_summary
 from .session_service import ReviewSessionService
+from ..species import normalize_species_code
 
 
 def _now() -> str:
@@ -171,7 +172,7 @@ class ReviewPublishService:
             "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 observation_id, item.get("individual_id"), run_id, session["tract_phase_pk"],
-                session["tiff_id"], session["phase_id"], str(item["species"]).strip(),
+                session["tiff_id"], session["phase_id"], normalize_species_code(item["species"]),
                 float(item.get("confidence") or 1.0),
                 source,
                 item.get("center_geom") or f"POINT({(x1 + x2) / 2} {(y1 + y2) / 2})",

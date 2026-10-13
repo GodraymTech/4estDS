@@ -10,7 +10,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ...db import writer
 from ...db.schema import init_db, resolve_db_path
-from ...geo.admin import UNKNOWN_COUNTY, UNKNOWN_TOWN, inspect_image_center, region_id as make_region_id, split_region_id
+from ...geo.admin import (
+    UNKNOWN_CITY,
+    UNKNOWN_COUNTY,
+    UNKNOWN_TOWN,
+    default_tract_id,
+    inspect_image_center,
+    normalize_city,
+    normalize_county,
+    region_id as make_region_id,
+    split_region_id,
+)
 from ...utils.input_inspect import inspect_input_path
 from ...utils.input_inspect import normalize_user_path
 from ..deps import get_db_url
@@ -233,7 +243,9 @@ def inspect_asset_image(body: AssetInspectRequest) -> AssetInspectOut:
         exists=exists,
         inspect_error=inspect_error,
         image_name=fallback_stem,
-        suggested_tract_id=image.stem if image else fallback_stem,
+        suggested_tract_id=(
+            default_tract_id(image.path) if image else (default_tract_id(normalized_path) if normalized_path else None)
+        ),
         suggested_phase_id=image.phase_id if image else None,
         city=city,
         county=county,
@@ -391,7 +403,7 @@ def create_tiff_asset(body: AssetTiffCreate, db_url: str | None = Depends(get_db
     inspected = inspect_asset_image(AssetInspectRequest(input_path=body.input_path))
     if inspected.inspect_error:
         raise HTTPException(status_code=400, detail=inspected.inspect_error)
-    tract_id = body.tract_id or inspected.suggested_tract_id or Path(body.input_path).stem
+    tract_id = body.tract_id or inspected.suggested_tract_id or default_tract_id(body.input_path)
     phase_id = body.phase_id or inspected.suggested_phase_id or "00000000"
     city = body.city or inspected.city
     county = body.county or inspected.county
@@ -442,9 +454,48 @@ def patch_tract(tract_pk: str, body: AssetPatch, db_url: str | None = Depends(ge
             (region_id, tract_id, tract_pk),
         )
         conn.commit()
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        if "UNIQUE constraint failed" in str(e):
+            raise HTTPException(status_code=409, detail="该行政区下已存在同名地块")
+        raise HTTPException(status_code=500, detail=f"数据库更新失败: {e}")
     finally:
         conn.close()
     return list_assets(db_url)
+
+
+def _resolve_tract_target(conn: sqlite3.Connection, phase_id: str, tiff_id: str, body: AssetPatch) -> tuple[str, str]:
+    """返回 (当前地块 tract_pk, 目标地块 tract_pk)。
+
+    若请求体提供了市/县/地块名/乡镇，则按目标身份查找或创建地块并返回其 tract_pk；
+    若未提供任何地块字段，则目标地块即为当前地块。
+    """
+    current = conn.execute(
+        "SELECT tr.tract_pk, tr.city, tr.county, tr.town, tr.tract_id FROM tiffs tf "
+        "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
+        "JOIN tracts tr ON tr.tract_pk=tp.tract_pk "
+        "WHERE tf.phase_id=? AND tf.tiff_id=?",
+        (phase_id, tiff_id),
+    ).fetchone()
+    if current is None:
+        raise HTTPException(status_code=404, detail="TIFF 不存在")
+    current_pk = current["tract_pk"]
+    if not any((body.city, body.county, body.town, body.tract_id)):
+        return current_pk, current_pk
+
+    city = normalize_city(body.city or current["city"])
+    county = normalize_county(body.county or current["county"])
+    town = body.town or current["town"]
+    tract_name = (body.tract_id or current["tract_id"]).strip()
+    target_pk = writer.ensure_tract_identity(
+        conn,
+        region_id=make_region_id(city, county),
+        tract_id=tract_name,
+        city=city,
+        county=county,
+        town=town,
+    )
+    return current_pk, target_pk
 
 
 @router.patch("/tiffs/{phase_id}/{tiff_id}", response_model=list[AssetRow], summary="修改 TIFF")
@@ -456,7 +507,9 @@ def patch_tiff(
 ) -> list[AssetRow]:
     import re
 
+    # 迁移影像时需改写 runs/tree_observations 上的复合外键 (tiff_id, phase_id)；须在任何写入前关闭外键检查。
     conn = _connect(db_url)
+    conn.execute("PRAGMA foreign_keys = OFF")
     try:
         row = conn.execute("SELECT * FROM tiffs WHERE phase_id=? AND tiff_id=?", (phase_id, tiff_id)).fetchone()
         if not row:
@@ -479,59 +532,32 @@ def patch_tiff(
             if not re.match(r"^\d{8}$", new_phase_id):
                 raise HTTPException(status_code=400, detail="时相格式无效，须为 8 位数字（如 20260711）")
 
-        if new_phase_id != phase_id:
-            old_tract_phase_pk = row["tract_phase_pk"]
-            tp = conn.execute("SELECT * FROM tract_phases WHERE tract_phase_pk=?", (old_tract_phase_pk,)).fetchone()
-            if not tp:
-                raise HTTPException(status_code=404, detail="关联的地块时相信息不存在")
-
-            new_tract_phase_pk = writer._safe_pk("phase", tp["tract_pk"], new_phase_id)
-
-            conn.execute("PRAGMA foreign_keys = OFF")
-            try:
-                conn.execute(
-                    "INSERT OR IGNORE INTO tract_phases (tract_phase_pk, tract_pk, region_id, tract_id, phase_id, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, datetime('now'))",
-                    (new_tract_phase_pk, tp["tract_pk"], tp["region_id"], tp["tract_id"], new_phase_id),
-                )
-                conn.execute(
-                    "UPDATE runs SET phase_id=?, tract_phase_pk=? WHERE phase_id=? AND tiff_id=?",
-                    (new_phase_id, new_tract_phase_pk, phase_id, tiff_id),
-                )
-                conn.execute(
-                    "UPDATE tree_observations SET phase_id=?, tract_phase_pk=? WHERE phase_id=? AND tiff_id=?",
-                    (new_phase_id, new_tract_phase_pk, phase_id, tiff_id),
-                )
-                conn.execute(
-                    "UPDATE tiffs SET phase_id=?, tract_phase_pk=?, file_name=COALESCE(?, file_name), "
-                    "path_versions=?, tiff_type=COALESCE(?, tiff_type), updated_at=datetime('now') "
-                    "WHERE phase_id=? AND tiff_id=?",
-                    (new_phase_id, new_tract_phase_pk, image_name, path_versions, tiff_type, phase_id, tiff_id),
-                )
-                # Cleanup empty tract_phases
-                c = conn.execute(
-                    "SELECT COUNT(*) AS c FROM tiffs WHERE tract_phase_pk=?",
-                    (old_tract_phase_pk,),
-                ).fetchone()["c"]
-                if c == 0:
-                    conn.execute("DELETE FROM tract_phases WHERE tract_phase_pk=?", (old_tract_phase_pk,))
-                conn.commit()
-            except sqlite3.IntegrityError as e:
-                conn.rollback()
-                if "UNIQUE constraint failed" in str(e):
-                    raise HTTPException(status_code=409, detail="修改后的时相下已存在该 TIFF 资产")
-                raise HTTPException(status_code=500, detail=f"数据库更新失败: {e}")
-            finally:
-                conn.execute("PRAGMA foreign_keys = ON")
-        else:
-            conn.execute(
-                "UPDATE tiffs SET file_name=COALESCE(?, file_name), path_versions=?, "
-                "tiff_type=COALESCE(?, tiff_type), updated_at=datetime('now') "
-                "WHERE phase_id=? AND tiff_id=?",
-                (image_name, path_versions, tiff_type, phase_id, tiff_id),
+        current_tract_pk, target_tract_pk = _resolve_tract_target(conn, phase_id, tiff_id, body)
+        conn.execute(
+            "UPDATE tiffs SET file_name=COALESCE(?, file_name), path_versions=?, "
+            "tiff_type=COALESCE(?, tiff_type), updated_at=datetime('now') "
+            "WHERE phase_id=? AND tiff_id=?",
+            (image_name, path_versions, tiff_type, phase_id, tiff_id),
+        )
+        if target_tract_pk != current_tract_pk or new_phase_id != phase_id:
+            writer.relocate_tiff(
+                conn,
+                phase_id=phase_id,
+                tiff_id=tiff_id,
+                target_tract_pk=target_tract_pk,
+                target_phase_id=new_phase_id,
             )
-            conn.commit()
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        if "UNIQUE constraint failed" in str(e):
+            raise HTTPException(status_code=409, detail="修改后的时相下已存在该 TIFF 资产")
+        raise HTTPException(status_code=500, detail=f"数据库更新失败: {e}")
+    except ValueError as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.close()
     return list_assets(db_url)
 

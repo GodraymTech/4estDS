@@ -48,6 +48,7 @@ import { endpoints, type DistributionSummary, type GeoPlace } from "../shared/ap
 import { env } from "../shared/config/env";
 import { formatAreaValue } from "../shared/lib/format";
 import type { GeoFeature } from "../shared/api";
+import { formatSpeciesName } from "../shared/lib/species";
 import { useObservations, type FeatureCollection } from "../entities/observation";
 import { buildInvalidAreaMask, formatHm2, useEffectiveArea } from "../entities/effective-area";
 import {
@@ -1203,7 +1204,7 @@ export function MapWorkspacePage() {
                                                 background: speciesColors.get(species) ?? speciesColor(species, idx),
                                             }}
                                         />
-                                        {species}
+                                        {formatSpeciesName(species)}
                                     </Checkbox>
                                 ))}
                             </Checkbox.Group>
@@ -1388,7 +1389,7 @@ function summaryFromObservations(data: FeatureCollection, area?: number | null):
         heights: number[];
     }>();
     for (const feature of data.features) {
-        const label = String(feature.properties?.species || "未知");
+        const label = formatSpeciesName(feature.properties?.species);
         species[label] = (species[label] ?? 0) + 1;
         const crownArea = numericProp(feature, "crown_area_geo_real") ?? numericProp(feature, "crown_area_geo_est");
         const crownWidth = numericProp(feature, "crown_width_geo");
@@ -1590,13 +1591,15 @@ function extractSpecies(fc?: FeatureCollection): string[] {
     const set = new Set<string>();
     for (const feature of fc?.features ?? []) {
         const raw = feature.properties?.species;
-        set.add(typeof raw === "string" && raw.trim() ? raw : "未知树种");
+        set.add(typeof raw === "string" && raw.trim() ? raw.trim().toUpperCase() : "TREE");
     }
-    return [...set].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+    return [...set].sort((a, b) => formatSpeciesName(a).localeCompare(formatSpeciesName(b), "zh-Hans-CN"));
 }
 
 function speciesColor(species: string, indexHint = 0): string {
-    const override = SPECIES_COLOR_OVERRIDES[species] ?? SPECIES_COLOR_OVERRIDES[species.toUpperCase()];
+    const cn = formatSpeciesName(species);
+    const upper = species.toUpperCase();
+    const override = SPECIES_COLOR_OVERRIDES[species] ?? SPECIES_COLOR_OVERRIDES[upper] ?? SPECIES_COLOR_OVERRIDES[cn];
     if (override) return override;
     return OUTLINE_COLORS[Math.abs(indexHint) % OUTLINE_COLORS.length];
 }
@@ -2019,7 +2022,7 @@ function buildProfileMetricSections(
             const count = item.count ?? 0;
             return {
                 key: label,
-                label,
+                label: formatSpeciesName(label),
                 color: speciesColors.get(label) ?? speciesColor(label, idx),
                 count,
                 ratio: item.ratio ?? (totalCount > 0 ? count / totalCount : null),
@@ -2788,8 +2791,8 @@ function DetectionTooltip({
 }) {
     const props = (hover.feature.properties || {}) as Record<string, any>;
     const rawSpecies = props.species;
-    const species = typeof rawSpecies === "string" && rawSpecies.trim() ? rawSpecies : "未知树种";
-    const tagColor = colors.get(species) ?? speciesColor(species, 0);
+    const species = formatSpeciesName(rawSpecies);
+    const tagColor = colors.get(rawSpecies) ?? colors.get(species) ?? speciesColor(rawSpecies || species, 0);
 
     const confidence = props.confidence != null ? Number(props.confidence).toFixed(2) : null;
     const heightVal = props.height != null ? Number(props.height).toFixed(2) : null;

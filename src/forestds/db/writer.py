@@ -16,12 +16,14 @@ from ..geo.admin import (
     UNKNOWN_CITY,
     UNKNOWN_COUNTY,
     UNKNOWN_TOWN,
+    default_tract_id,
     normalize_city,
     normalize_county,
     region_id as format_region_id,
     split_region_id,
 )
 from .schema import init_db, resolve_db_path
+from ..species import normalize_species_code
 
 _REGION_RE = re.compile(r"([\u4e00-\u9fffA-Za-z0-9]+)_([\u4e00-\u9fffA-Za-z0-9]+)")
 
@@ -436,7 +438,7 @@ def ensure_tract(
 ) -> str:
     """幂等获取/创建地块、地块时相和可选 TIFF，返回用户可见 tract_id。"""
     phase_id = _normalize_phase_id(phase_id)
-    resolved_tract_id = (tract_id or (Path(image_path).stem if image_path else "")).strip()
+    resolved_tract_id = (tract_id or (default_tract_id(image_path) if image_path else "")).strip()
     if not resolved_tract_id:
         tract_id = f"tract_{uuid.uuid4().hex[:5]}"
     else:
@@ -595,6 +597,96 @@ def ensure_tract(
     finally:
         conn.close()
     return tract_id
+
+
+def ensure_tract_identity(
+    conn: sqlite3.Connection,
+    *,
+    region_id: str,
+    tract_id: str,
+    city: str,
+    county: str,
+    town: str | None,
+) -> str:
+    """按地块身份 (region_id, tract_id) 获取或创建地块，返回 tract_pk。调用方负责提交事务。"""
+    row = conn.execute(
+        "SELECT tract_pk FROM tracts WHERE region_id=? AND tract_id=?",
+        (region_id, tract_id),
+    ).fetchone()
+    if row:
+        return row["tract_pk"]
+    tract_pk = _safe_pk("tract", region_id, tract_id)
+    now = _now()
+    conn.execute(
+        "INSERT INTO tracts (tract_pk, region_id, city, county, town, tract_id, "
+        "effective_source, coverage_status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'default', 'none', ?, ?)",
+        (tract_pk, region_id, city, county, town, tract_id, now, now),
+    )
+    return tract_pk
+
+
+def relocate_tiff(
+    conn: sqlite3.Connection,
+    *,
+    phase_id: str,
+    tiff_id: str,
+    target_tract_pk: str,
+    target_phase_id: str,
+) -> None:
+    """把单张 TIFF 连同其推理运行与观测挪到目标地块的目标时相下，不影响同地块的其他影像。
+
+    调用方需先关闭外键检查（runs/tree_observations 对 (tiff_id, phase_id) 有复合外键），并负责提交事务。
+    """
+    current = conn.execute(
+        "SELECT tf.tract_phase_pk, tp.tract_pk FROM tiffs tf "
+        "JOIN tract_phases tp ON tp.tract_phase_pk=tf.tract_phase_pk "
+        "WHERE tf.phase_id=? AND tf.tiff_id=?",
+        (phase_id, tiff_id),
+    ).fetchone()
+    if current is None:
+        raise ValueError(f"TIFF 不存在: {phase_id}/{tiff_id}")
+    target = conn.execute(
+        "SELECT region_id, tract_id FROM tracts WHERE tract_pk=?", (target_tract_pk,)
+    ).fetchone()
+    if target is None:
+        raise ValueError(f"目标地块不存在: {target_tract_pk}")
+
+    now = _now()
+    old_tract_phase_pk, old_tract_pk = current["tract_phase_pk"], current["tract_pk"]
+    new_tract_phase_pk = _safe_pk("phase", target_tract_pk, target_phase_id)
+    conn.execute(
+        "INSERT OR IGNORE INTO tract_phases (tract_phase_pk, tract_pk, region_id, tract_id, phase_id, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (new_tract_phase_pk, target_tract_pk, target["region_id"], target["tract_id"], target_phase_id, now),
+    )
+    conn.execute(
+        "UPDATE runs SET phase_id=?, tract_phase_pk=? WHERE phase_id=? AND tiff_id=?",
+        (target_phase_id, new_tract_phase_pk, phase_id, tiff_id),
+    )
+    conn.execute(
+        "UPDATE tree_observations SET phase_id=?, tract_phase_pk=? WHERE phase_id=? AND tiff_id=?",
+        (target_phase_id, new_tract_phase_pk, phase_id, tiff_id),
+    )
+    conn.execute(
+        "UPDATE tiffs SET phase_id=?, tract_phase_pk=?, updated_at=? WHERE phase_id=? AND tiff_id=?",
+        (target_phase_id, new_tract_phase_pk, now, phase_id, tiff_id),
+    )
+
+    remaining = conn.execute(
+        "SELECT COUNT(*) FROM tiffs WHERE tract_phase_pk=?", (old_tract_phase_pk,)
+    ).fetchone()[0]
+    if remaining == 0 and old_tract_phase_pk != new_tract_phase_pk:
+        conn.execute("DELETE FROM tract_phases WHERE tract_phase_pk=?", (old_tract_phase_pk,))
+    if old_tract_pk != target_tract_pk:
+        tract_children = conn.execute(
+            "SELECT COUNT(*) FROM tract_phases WHERE tract_pk=?", (old_tract_pk,)
+        ).fetchone()[0]
+        if tract_children == 0:
+            conn.execute("DELETE FROM tracts WHERE tract_pk=?", (old_tract_pk,))
+        else:
+            update_tract_geom_from_tiffs(conn, old_tract_pk)
+    update_tract_geom_from_tiffs(conn, target_tract_pk)
 
 
 def _resolve_context(
@@ -757,7 +849,7 @@ def write_observations(
                     tract_phase_pk,
                     tiff_id,
                     resolved_phase_id,
-                    d.label,
+                    normalize_species_code(d.label),
                     d.score,
                     center_geom,
                     crown_geom,

@@ -147,7 +147,9 @@ def inspect_input(body: InputInspectRequest) -> InputInspectOut:
     suggested_tract_id = None
     suggested_phase_id = None
     if kind == "file" and first is not None:
-        suggested_tract_id = first.stem
+        from ...geo.admin import default_tract_id
+
+        suggested_tract_id = default_tract_id(first.path)
         suggested_phase_id = first.phase_id
 
     return InputInspectOut(

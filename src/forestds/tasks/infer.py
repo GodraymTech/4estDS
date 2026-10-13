@@ -126,10 +126,11 @@ def run_infer_pipeline(
     image_path = prep["image_path"]
 
     from ..utils.input_inspect import extract_image_phase_id
+    from ..geo.admin import default_tract_id
 
     default_phase_id, _ = extract_image_phase_id(image_path)
     final_phase_id = phase_id or default_phase_id or "00000000"
-    final_tract_id = tract_id or Path(image_path).stem
+    final_tract_id = tract_id or default_tract_id(image_path)
 
     # 2.2 构造显式 InferenceConfig 超参数配置，注入自标定（SCOPE）的最优参数
     config = InferenceConfig.from_settings(
@@ -228,7 +229,6 @@ def run_infer_pipeline(
             result.detections,
             image_path=image_path,
             settings=settings,
-            arch=arch_val,
         )
 
     # ── 3. GIS 投影 & 地块登记 ─────────────────────────────────────────────────

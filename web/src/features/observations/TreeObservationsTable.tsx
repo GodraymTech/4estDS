@@ -23,6 +23,7 @@ import { useQuery } from "@tanstack/react-query";
 import { endpoints, queryKeys, type TreeObservationItem } from "../../shared/api";
 import { ExportColumnsModal } from "./ExportColumnsModal";
 import { ObservationDetailDrawer } from "./ObservationDetailDrawer";
+import { formatSpeciesName } from "../../shared/lib/species";
 
 const { Text } = Typography;
 
@@ -175,7 +176,7 @@ export function TreeObservationsTable({
             width: 100,
             sorter: true,
             render: (v?: string | null) =>
-                v ? <Tag color="green">{v}</Tag> : <Text type="secondary">未分类</Text>,
+                v ? <Tag color="green">{formatSpeciesName(v)}</Tag> : <Text type="secondary">未分类</Text>,
         },
         {
             title: "置信度",
@@ -321,7 +322,7 @@ export function TreeObservationsTable({
                         style={{ width: 150 }}
                         options={[
                             ...(data?.available_species || []).map((sp) => ({
-                                label: sp,
+                                label: `${formatSpeciesName(sp)} (${sp})`,
                                 value: sp,
                             })),
                         ]}

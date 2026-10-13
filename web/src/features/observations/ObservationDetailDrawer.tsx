@@ -8,6 +8,7 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import type { TreeObservationItem } from "../../shared/api";
+import { formatSpeciesName } from "../../shared/lib/species";
 
 const { Text, Paragraph } = Typography;
 
@@ -139,7 +140,7 @@ export function ObservationDetailDrawer({ open, onClose, item }: ObservationDeta
                 </Divider>
                 <Descriptions column={2} size="small" bordered>
                     <Descriptions.Item label="树种">
-                        {item.species ? <Tag color="green">{item.species}</Tag> : <Text type="secondary">未分类</Text>}
+                        {item.species ? <Tag color="green">{formatSpeciesName(item.species)}</Tag> : <Text type="secondary">未分类</Text>}
                     </Descriptions.Item>
                     <Descriptions.Item label="置信度">
                         {item.confidence != null ? item.confidence.toFixed(2) : "-"}

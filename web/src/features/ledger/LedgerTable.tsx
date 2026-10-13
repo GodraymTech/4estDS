@@ -5,6 +5,7 @@ import {
     Alert,
     AutoComplete,
     Button,
+    Checkbox,
     Empty,
     Form,
     Input,
@@ -790,6 +791,7 @@ export function LedgerTable() {
             phase_id: row.phase_id,
             image_name: row.image_name,
             new_path: row.source_path,
+            apply_to_tract: false,
         });
     }
 
@@ -800,11 +802,26 @@ export function LedgerTable() {
             return;
         }
         if (!editing) return;
-        if (editing.tract_pk) {
-            patchTract.mutate({ tractPk: editing.tract_pk, values });
-        }
-        if (editing.tiff_id && editing.phase_id) {
-            patchTiff.mutate({ row: editing, values });
+        const formValues: Record<string, unknown> = { ...values };
+        const applyToTract = Boolean(formValues.apply_to_tract);
+        delete formValues.apply_to_tract;
+
+        if (applyToTract) {
+            // 勾选：允许同步地块内所有影像（修改地块本身属性，同地块全部影像一并更新）
+            if (editing.tract_pk) {
+                patchTract.mutate({ tractPk: editing.tract_pk, values: formValues });
+            }
+            if (editing.tiff_id && editing.phase_id) {
+                const tiffValues = Object.fromEntries(
+                    Object.entries(formValues).filter(([key]) => !TRACT_FIELD_KEYS.includes(key))
+                );
+                patchTiff.mutate({ row: editing, values: tiffValues });
+            }
+        } else {
+            // 默认不勾选：仅修改当前影像（若修改了省市县/地块名/时相，则由后端单独迁移当前影像，不连带同地块其他影像）
+            if (editing.tiff_id && editing.phase_id) {
+                patchTiff.mutate({ row: editing, values: formValues });
+            }
         }
     }
 
@@ -1103,6 +1120,11 @@ export function LedgerTable() {
                                 </div>
                             ) : null}
                         </>
+                    ) : null}
+                    {modalMode === "edit" && editing ? (
+                        <Form.Item name="apply_to_tract" valuePropName="checked" style={{ marginBottom: 12 }}>
+                            <Checkbox>允许同步地块内所有影像</Checkbox>
+                        </Form.Item>
                     ) : null}
                     <div style={FORM_GRID}>
                         <Form.Item name="city" label="市">
@@ -1410,6 +1432,8 @@ function TreeLeaf({
         </Space>
     );
 }
+
+const TRACT_FIELD_KEYS = ["city", "county", "town", "tract_id"];
 
 function empty(value?: string | null) {
     return value || "";

@@ -17,6 +17,7 @@ import { TiffInfoPanel } from "./TiffInfoPanel";
 import { StatusBar } from "./StatusBar";
 import { PromptPanel } from "./PromptPanel";
 import { AttemptPanel } from "./AttemptPanel";
+import { formatSpeciesName, toSpeciesCode } from "../../shared/lib/species";
 import "./ReviewWorkbench.css";
 
 const CATEGORY_COLORS = ["#3b82f6", "#f97316", "#eab308", "#a855f7", "#06b6d4", "#ec4899", "#ef4444", "#f59e0b"];
@@ -273,8 +274,10 @@ export function ReviewWorkbench({ sessionId }: { sessionId: string }) {
                                         items={items}
                                         freshMode={session.data.mode === "fresh"}
                                         onAddCategory={(name) => {
-                                            const next = [...categories, { id: name, display_name: name, model_prompt: name, color: CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length] }];
-                                            void setCatalog(next, name);
+                                            const code = toSpeciesCode(name);
+                                            const displayName = formatSpeciesName(code);
+                                            const next = [...categories, { id: code, display_name: displayName, model_prompt: displayName, color: CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length] }];
+                                            void setCatalog(next, code);
                                         }}
                                         onRenameCategory={(id, newName) => {
                                             const next = categories.map((cat) => (cat.id === id ? { ...cat, display_name: newName, model_prompt: newName } : cat));
